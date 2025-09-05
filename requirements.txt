@@ -1,0 +1,11 @@
+# Core Dependencies for Quantized GPT-2 Project
+torch>=2.0.0
+transformers>=4.30.0
+datasets>=2.14.0
+numpy>=1.24.0
+tqdm>=4.65.0
+
+# Optional for enhanced performance
+accelerate>=0.20.0
+sentencepiece>=0.1.99
+protobuf>=3.20.0
