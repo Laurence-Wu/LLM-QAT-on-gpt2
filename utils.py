@@ -36,18 +36,38 @@ def load_checkpoint(model, optimizer, filename):
 
 def generate_report(results: Dict[str, Any], output_file='results_report.json'):
     report = {
-        'quantization_evaluation': results['quantization_configs'],
-        'adversarial_robustness': results['robustness'],
-        'training_metrics': results['training'],
-        'insights': {
-            'best_config': max(results['quantization_configs'].items(), 
-                             key=lambda x: x[1]['efficiency_score'])[0],
-            'robustness_improvement': (results['robustness']['dynamic']['robustness_ratio'] / 
-                                     results['robustness']['static']['robustness_ratio'] - 1
-                                     if results['robustness']['static']['robustness_ratio'] > 0 
-                                     else 0)
-        }
+        'quantization_evaluation': results.get('quantization_configs', {}),
+        'adversarial_robustness': results.get('robustness', {}),
+        'training_metrics': results.get('training', {}),
+        'insights': {}
     }
+    
+    # Add insights if quantization configs exist
+    if results.get('quantization_configs') and len(results['quantization_configs']) > 0:
+        try:
+            best_config = max(results['quantization_configs'].items(), 
+                            key=lambda x: x[1].get('efficiency_score', 0))[0]
+            report['insights']['best_config'] = best_config
+        except (ValueError, KeyError):
+            report['insights']['best_config'] = 'Unknown'
+    else:
+        report['insights']['best_config'] = 'No configs evaluated'
+    
+    # Add robustness improvement if data exists
+    if (results.get('robustness', {}).get('dynamic', {}).get('robustness_ratio') and
+        results.get('robustness', {}).get('static', {}).get('robustness_ratio')):
+        try:
+            dynamic_ratio = results['robustness']['dynamic']['robustness_ratio']
+            static_ratio = results['robustness']['static']['robustness_ratio']
+            if static_ratio > 0:
+                improvement = (dynamic_ratio / static_ratio - 1)
+                report['insights']['robustness_improvement'] = improvement
+            else:
+                report['insights']['robustness_improvement'] = 0
+        except (KeyError, ZeroDivisionError):
+            report['insights']['robustness_improvement'] = 0
+    else:
+        report['insights']['robustness_improvement'] = 0
     
     with open(output_file, 'w') as f:
         json.dump(report, f, indent=2)
@@ -78,5 +98,8 @@ def print_results_summary(report: Dict[str, Any]):
     
     if 'insights' in report:
         print("\nKey Insights:")
-        print(f"  - Best Configuration: {report['insights']['best_config']}")
-        print(f"  - Robustness Improvement with Dynamic Precision: {report['insights']['robustness_improvement']*100:.1f}%")
+        print(f"  - Best Configuration: {report['insights'].get('best_config', 'Unknown')}")
+        if 'robustness_improvement' in report['insights']:
+            print(f"  - Robustness Improvement with Dynamic Precision: {report['insights']['robustness_improvement']*100:.1f}%")
+        else:
+            print(f"  - Robustness Improvement: Not available")
