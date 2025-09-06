@@ -38,9 +38,21 @@ def train_switchable_quantization(model, train_loader, val_loader, config: Train
     # Set model to use minimal memory
     model.use_gradient_checkpointing = True
     
-    # Use memory-efficient optimizer settings with reduced precision
+    # Use memory-efficient optimizer settings with weight decay from config
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, 
-                                  eps=1e-6, weight_decay=0.01, amsgrad=False)
+                                  eps=1e-6, weight_decay=config.weight_decay, amsgrad=False)
+    
+    # Setup learning rate scheduler if enabled
+    scheduler = None
+    if config.use_scheduler:
+        if config.scheduler_type == 'cosine':
+            from torch.optim.lr_scheduler import CosineAnnealingLR
+            scheduler = CosineAnnealingLR(optimizer, T_max=config.num_iterations, 
+                                         eta_min=config.min_learning_rate)
+        elif config.scheduler_type == 'linear':
+            from torch.optim.lr_scheduler import LinearLR
+            scheduler = LinearLR(optimizer, start_factor=1.0, end_factor=0.1, 
+                               total_iters=config.num_iterations)
     
     # Enable mixed precision training for memory efficiency
     scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
@@ -55,19 +67,36 @@ def train_switchable_quantization(model, train_loader, val_loader, config: Train
     except:
         teacher_model = None
     
-    # Use config bit widths instead of hard-coded values
-    model_bit_widths = getattr(model.config, 'bit_widths', [4, 8, 16])
+    # Use config bit widths with improved mixed precision strategy
+    model_bit_widths = getattr(model.config, 'bit_widths', [8, 16])
+    
+    # Better mixed precision strategies
     bit_configs = [
-        [{'attn_bits': model_bit_widths[0], 'mlp_bits': model_bit_widths[0]} for _ in range(n_layers)],
-        [{'attn_bits': model_bit_widths[1], 'mlp_bits': model_bit_widths[1]} for _ in range(n_layers)],
-        [{'attn_bits': model_bit_widths[2], 'mlp_bits': model_bit_widths[2]} for _ in range(n_layers)],
-        [{'attn_bits': model_bit_widths[0] if i > n_layers//2 else model_bit_widths[1], 
-          'mlp_bits': model_bit_widths[0] if i > n_layers//3 else model_bit_widths[1]} for i in range(n_layers)]
+        # Uniform 16-bit (baseline)
+        [{'attn_bits': 16, 'mlp_bits': 16} for _ in range(n_layers)],
+        
+        # Uniform 8-bit
+        [{'attn_bits': 8, 'mlp_bits': 8} for _ in range(n_layers)],
+        
+        # Progressive: Higher precision for early/late layers
+        [{'attn_bits': 16 if i < 3 or i >= n_layers-3 else 8, 
+          'mlp_bits': 16 if i < 3 or i >= n_layers-3 else 8} for i in range(n_layers)],
+        
+        # Attention-focused: Higher precision for attention
+        [{'attn_bits': 16, 'mlp_bits': 8} for _ in range(n_layers)],
+        
+        # MLP-focused: Higher precision for MLP
+        [{'attn_bits': 8, 'mlp_bits': 16} for _ in range(n_layers)]
     ]
     
     best_val_loss = float('inf')
+    patience_counter = 0
+    early_stop = False
     
     for iteration in tqdm(range(config.num_iterations), desc="Training"):
+        if early_stop:
+            print(f"Early stopping triggered at iteration {iteration}")
+            break
         model.train()
         config_idx = iteration % len(bit_configs)
         current_config = bit_configs[config_idx]
@@ -139,16 +168,45 @@ def train_switchable_quantization(model, train_loader, val_loader, config: Train
         
         optimizer.zero_grad()
         
-        # Memory cleanup every 10 iterations for H100 efficiency
-        if iteration % 10 == 0:
-            torch.cuda.empty_cache()
-            gc.collect()
+        # Step the scheduler if enabled
+        if scheduler is not None:
+            scheduler.step()
+        
+        # Evaluation and early stopping check
+        if iteration % config.eval_steps == 0 and iteration > 0:
             val_loss = evaluate_model(model, val_loader)
-            print(f"Iter {iteration}: Loss={total_loss:.4f}, Val Loss={val_loss:.4f}")
+            current_lr = optimizer.param_groups[0]['lr']
+            print(f"Iter {iteration}: Train Loss={total_loss:.4f}, Val Loss={val_loss:.4f}, LR={current_lr:.2e}")
             
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
-                print(f"New best validation loss: {val_loss:.4f} (checkpoint saving disabled due to disk quota)")
+                patience_counter = 0
+                print(f"New best validation loss: {val_loss:.4f}")
+                
+                # Save checkpoint if configured
+                if iteration % config.save_steps == 0:
+                    try:
+                        checkpoint_path = f"checkpoint_iter_{iteration}.pt"
+                        torch.save({
+                            'iteration': iteration,
+                            'model_state_dict': model.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict(),
+                            'val_loss': val_loss,
+                            'config': current_config
+                        }, checkpoint_path)
+                        print(f"Checkpoint saved: {checkpoint_path}")
+                    except Exception as e:
+                        print(f"Could not save checkpoint: {e}")
+            else:
+                patience_counter += 1
+                if patience_counter >= config.early_stopping_patience:
+                    early_stop = True
+                    print(f"No improvement for {config.early_stopping_patience} evaluations.")
+        
+        # Reduced memory cleanup frequency
+        if iteration % 100 == 0:
+            torch.cuda.empty_cache()
+            gc.collect()
     
     return model
 

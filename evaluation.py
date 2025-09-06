@@ -27,21 +27,19 @@ def evaluate_model(model, eval_loader):
 
 def evaluate_quantization_configs(model, eval_loader, n_layers: int = 12):
     # Use model's bit widths from config
-    model_bit_widths = getattr(model.config, 'bit_widths', [8, 16, 32])
+    model_bit_widths = getattr(model.config, 'bit_widths', [8, 16])
     low_bits = min(model_bit_widths)
-    mid_bits = model_bit_widths[len(model_bit_widths)//2] if len(model_bit_widths) > 1 else low_bits
     high_bits = max(model_bit_widths)
     
     configs = {
         'FP32': [{'attn_bits': 32, 'mlp_bits': 32} for _ in range(n_layers)],
         f'{high_bits}-bit': [{'attn_bits': high_bits, 'mlp_bits': high_bits} for _ in range(n_layers)],
         f'{low_bits}-bit': [{'attn_bits': low_bits, 'mlp_bits': low_bits} for _ in range(n_layers)],
-        'Mixed': [{'attn_bits': mid_bits if i % 2 == 0 else low_bits, 
-                   'mlp_bits': mid_bits if i % 2 == 0 else high_bits} 
-                  for i in range(n_layers)],
-        'Progressive': [{'attn_bits': high_bits if i < n_layers//3 else low_bits, 
-                        'mlp_bits': high_bits if i < n_layers//2 else low_bits} 
-                       for i in range(n_layers)]
+        'Progressive': [{'attn_bits': high_bits if i < 3 or i >= n_layers-3 else low_bits, 
+                        'mlp_bits': high_bits if i < 3 or i >= n_layers-3 else low_bits} 
+                       for i in range(n_layers)],
+        'Attention-focused': [{'attn_bits': high_bits, 'mlp_bits': low_bits} for _ in range(n_layers)],
+        'MLP-focused': [{'attn_bits': low_bits, 'mlp_bits': high_bits} for _ in range(n_layers)]
     }
     
     results = {}

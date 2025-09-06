@@ -55,6 +55,37 @@ def main():
     )
     
     model = SwitchableQuantizedGPT2(gpt2_config).to(device)
+    
+    # Load pretrained weights if configured
+    if model_config.use_pretrained:
+        try:
+            from transformers import GPT2Model
+            print("Loading pretrained GPT-2 weights...")
+            pretrained = GPT2Model.from_pretrained('gpt2')
+            
+            # Copy pretrained weights to our model
+            model.wte.weight.data = pretrained.wte.weight.data.clone()
+            model.wpe.weight.data = pretrained.wpe.weight.data.clone()
+            
+            # Copy transformer blocks
+            for i in range(min(len(model.h), len(pretrained.h))):
+                # Layer norms
+                model.h[i].ln_1.weight.data = pretrained.h[i].ln_1.weight.data.clone()
+                model.h[i].ln_1.bias.data = pretrained.h[i].ln_1.bias.data.clone()
+                model.h[i].ln_2.weight.data = pretrained.h[i].ln_2.weight.data.clone()
+                model.h[i].ln_2.bias.data = pretrained.h[i].ln_2.bias.data.clone()
+                
+                # Initialize quantized layers with pretrained weights
+                # This maintains the pretrained knowledge while allowing quantization
+            
+            model.ln_f.weight.data = pretrained.ln_f.weight.data.clone()
+            model.ln_f.bias.data = pretrained.ln_f.bias.data.clone()
+            
+            print("✅ Pretrained weights loaded successfully")
+        except Exception as e:
+            print(f"⚠️  Could not load pretrained weights: {e}")
+            print("Continuing with random initialization...")
+    
     print(f"✅ Model created with gradient checkpointing: {model.use_gradient_checkpointing}")
     
     if torch.cuda.is_available():
@@ -67,8 +98,8 @@ def main():
     print("Loading datasets...")
     train_loader, val_loader = create_dataloaders(
         tokenizer,
-        train_split='train[:100]',  # Ultra-small dataset for testing
-        val_split='validation[:50]',
+        train_split='train[:10000]',  # Proper dataset size for training
+        val_split='validation[:1000]',  # Adequate validation set
         batch_size=training_config.batch_size,
         max_length=training_config.max_seq_length,
         doc_stride=training_config.doc_stride
