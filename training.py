@@ -55,12 +55,15 @@ def train_switchable_quantization(model, train_loader, val_loader, config: Train
                                total_iters=config.num_iterations)
     
     # Enable mixed precision training for memory efficiency
-    scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
+    scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() else None
     
     teacher_model = None
     try:
         from transformers import GPT2LMHeadModel
         teacher_model = GPT2LMHeadModel.from_pretrained('gpt2')
+        # Move teacher model to same device as student model
+        device = next(model.parameters()).device
+        teacher_model = teacher_model.to(device)
         teacher_model.eval()
         for param in teacher_model.parameters():
             param.requires_grad = False
@@ -118,7 +121,7 @@ def train_switchable_quantization(model, train_loader, val_loader, config: Train
             
             # Use mixed precision for memory efficiency
             if scaler is not None:
-                with torch.cuda.amp.autocast():
+                with torch.amp.autocast('cuda'):
                     outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
                     ce_loss = outputs['loss']
                     
