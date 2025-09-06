@@ -87,5 +87,16 @@ class QuantizedLinearWithLoRA(nn.Module):
         self.current_activation_bits = activation_bits
         self.lora.set_bits(weight_bits)
         
-        self.quantized_linear.weight_quantizer.num_bits = weight_bits
-        self.quantized_linear.activation_quantizer.num_bits = activation_bits
+        # Properly handle FP32 by disabling quantization
+        if weight_bits >= 32:
+            # For FP32, set quantizer to passthrough mode
+            self.quantized_linear.weight_quantizer.num_bits = 32
+            self.quantized_linear.weight_quantizer.calibrated = False
+        else:
+            self.quantized_linear.weight_quantizer.num_bits = max(1, min(weight_bits, 32))
+            
+        if activation_bits >= 32:
+            self.quantized_linear.activation_quantizer.num_bits = 32
+            self.quantized_linear.activation_quantizer.calibrated = False
+        else:
+            self.quantized_linear.activation_quantizer.num_bits = max(1, min(activation_bits, 32))

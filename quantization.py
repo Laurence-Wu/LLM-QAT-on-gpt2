@@ -51,6 +51,10 @@ class LearnableFakeQuantize(nn.Module):
         self.calibrated = False
     
     def forward(self, x):
+        # Pass through for FP32 mode
+        if self.num_bits >= 32:
+            return x
+            
         if self.training:
             min_val = x.min()
             max_val = x.max()
