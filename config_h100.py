@@ -12,7 +12,7 @@ class QuantizationConfig:
 @dataclass
 class TrainingConfig:
     learning_rate: float = 5e-5  # Lower learning rate for more stable training
-    batch_size: int = 1  # Ultra-conservative batch size for H100 memory
+    batch_size: int = 4  # Ultra-conservative batch size for H100 memory
     num_iterations: int = 1000  # Reduced iterations for memory testing
     warmup_steps: int = 20  # Minimal warmup
     gradient_accumulation_steps: int = 8  # Lower accumulation to reduce memory
