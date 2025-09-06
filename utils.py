@@ -34,84 +34,49 @@ def load_checkpoint(model, optimizer, filename):
     iteration = checkpoint['iteration']
     return iteration
 
-def generate_report(results: Dict[str, Any], output_file='h100_results_report.json'):
-    try:
-        report = {
-            'quantization_evaluation': results.get('quantization_configs', {}),
-            'adversarial_robustness': results.get('robustness', {}),
-            'training_metrics': results.get('training', {}),
-            'insights': {}
+def generate_report(results: Dict[str, Any], output_file='results_report.json'):
+    report = {
+        'quantization_evaluation': results['quantization_configs'],
+        'adversarial_robustness': results['robustness'],
+        'training_metrics': results['training'],
+        'insights': {
+            'best_config': max(results['quantization_configs'].items(), 
+                             key=lambda x: x[1]['efficiency_score'])[0],
+            'robustness_improvement': (results['robustness']['dynamic']['robustness_ratio'] / 
+                                     results['robustness']['static']['robustness_ratio'] - 1
+                                     if results['robustness']['static']['robustness_ratio'] > 0 
+                                     else 0)
         }
-        
-        # Add insights if quantization configs exist
-        if results.get('quantization_configs'):
-            try:
-                best_config = max(results['quantization_configs'].items(), 
-                                key=lambda x: x[1].get('efficiency_score', 0))[0]
-                report['insights']['best_config'] = best_config
-            except (ValueError, KeyError):
-                report['insights']['best_config'] = 'Unknown'
-        
-        # Add robustness improvement if data exists
-        if (results.get('robustness', {}).get('dynamic', {}).get('robustness_ratio') and
-            results.get('robustness', {}).get('static', {}).get('robustness_ratio')):
-            try:
-                dynamic_ratio = results['robustness']['dynamic']['robustness_ratio']
-                static_ratio = results['robustness']['static']['robustness_ratio']
-                if static_ratio > 0:
-                    improvement = (dynamic_ratio / static_ratio - 1)
-                    report['insights']['robustness_improvement'] = improvement
-                else:
-                    report['insights']['robustness_improvement'] = 0
-            except (KeyError, ZeroDivisionError):
-                report['insights']['robustness_improvement'] = 0
-        
-        # Try to save report, but don't fail if disk quota exceeded
-        try:
-            with open(output_file, 'w') as f:
-                json.dump(report, f, indent=2)
-            print(f"Report saved to {output_file}")
-        except Exception as e:
-            if 'disk quota exceeded' in str(e).lower():
-                print(f"Warning: Could not save report due to disk quota: {e}")
-            else:
-                print(f"Warning: Could not save report: {e}")
-        
-        return report
-    except Exception as e:
-        print(f"Error generating report: {e}")
-        return {'error': str(e)}
+    }
+    
+    with open(output_file, 'w') as f:
+        json.dump(report, f, indent=2)
+    
+    return report
 
 def print_results_summary(report: Dict[str, Any]):
     print("\n" + "="*60)
-    print("H100 Evaluation Results Summary")
+    print("Evaluation Results Summary")
     print("="*60)
     
-    if report.get('quantization_evaluation'):
+    if 'quantization_evaluation' in report:
         print("\nQuantization Configurations:")
         for config_name, metrics in report['quantization_evaluation'].items():
             print(f"  {config_name}:")
-            if isinstance(metrics, dict):
-                print(f"    - Perplexity: {metrics.get('perplexity', 'N/A')}")
-                print(f"    - Model Size: {metrics.get('model_size_mb', 0):.2f} MB")
-                print(f"    - Throughput: {metrics.get('throughput_tokens_per_sec', 0):.2f} tokens/sec")
-                print(f"    - Efficiency Score: {metrics.get('efficiency_score', 'N/A')}")
+            print(f"    - Perplexity: {metrics['perplexity']}")
+            print(f"    - Model Size: {metrics['model_size_mb']:.2f} MB")
+            print(f"    - Throughput: {metrics['throughput_tokens_per_sec']:.2f} tokens/sec")
+            print(f"    - Efficiency Score: {metrics['efficiency_score']}")
     
-    if report.get('adversarial_robustness'):
+    if 'adversarial_robustness' in report:
         print("\nAdversarial Robustness:")
         for precision_type, metrics in report['adversarial_robustness'].items():
-            if isinstance(metrics, dict):
-                print(f"  {precision_type.title()} Precision:")
-                print(f"    - Clean Accuracy: {metrics.get('clean_accuracy', 0):.4f}")
-                print(f"    - Robust Accuracy: {metrics.get('robust_accuracy', 0):.4f}")
-                print(f"    - Robustness Gap: {metrics.get('robustness_gap', 0):.4f}")
+            print(f"  {precision_type.title()} Precision:")
+            print(f"    - Clean Accuracy: {metrics['clean_accuracy']:.4f}")
+            print(f"    - Robust Accuracy: {metrics['robust_accuracy']:.4f}")
+            print(f"    - Robustness Gap: {metrics['robustness_gap']:.4f}")
     
-    if report.get('insights'):
+    if 'insights' in report:
         print("\nKey Insights:")
-        if 'best_config' in report['insights']:
-            print(f"  - Best Configuration: {report['insights']['best_config']}")
-        if 'robustness_improvement' in report['insights']:
-            improvement = report['insights']['robustness_improvement']
-            print(f"  - Robustness Improvement with Dynamic Precision: {improvement*100:.1f}%")
-    
-    print(f"\n✅ H100-optimized training summary completed!")
+        print(f"  - Best Configuration: {report['insights']['best_config']}")
+        print(f"  - Robustness Improvement with Dynamic Precision: {report['insights']['robustness_improvement']*100:.1f}%")
