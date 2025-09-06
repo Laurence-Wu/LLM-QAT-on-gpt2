@@ -34,11 +34,11 @@ class MultiPrecisionLoRA(nn.Module):
         self.lora_modules = nn.ModuleDict()
         for bits in bit_widths:
             if bits <= 4:
-                rank = max(1, min(8, in_features // 64))
+                rank = max(1, min(4, in_features // 128))
             elif bits <= 8:
-                rank = max(2, min(16, in_features // 32))
-            else:
-                rank = max(4, min(32, in_features // 16))
+                rank = max(2, min(8, in_features // 64))
+            else:  # 16-bit
+                rank = max(4, min(16, in_features // 32))
             
             alpha = rank * bits // 2
             

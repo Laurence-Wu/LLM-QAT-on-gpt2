@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import math
 from typing import Optional, Dict, List
 from transformers import GPT2Config
+from torch.utils.checkpoint import checkpoint
 
 from quantization import LearnableFakeQuantize
 from lora import QuantizedLinearWithLoRA
@@ -106,6 +107,7 @@ class SwitchableQuantizedGPT2(nn.Module):
     def __init__(self, config: GPT2Config):
         super().__init__()
         self.config = config
+        self.use_gradient_checkpointing = True  # Enable by default for H100 efficiency
         
         self.wte = nn.Embedding(config.vocab_size, config.n_embd)
         self.wpe = nn.Embedding(config.n_positions, config.n_embd)
@@ -145,7 +147,10 @@ class SwitchableQuantizedGPT2(nn.Module):
         hidden_states = self.drop(inputs_embeds + position_embeds)
         
         for block in self.h:
-            hidden_states = block(hidden_states, attention_mask)
+            if self.use_gradient_checkpointing and self.training:
+                hidden_states = checkpoint(block, hidden_states, attention_mask)
+            else:
+                hidden_states = block(hidden_states, attention_mask)
         
         hidden_states = self.ln_f(hidden_states)
         
@@ -168,7 +173,10 @@ class SwitchableQuantizedGPT2(nn.Module):
         hidden_states = self.drop(inputs_embeds + position_embeds)
         
         for block in self.h:
-            hidden_states = block(hidden_states, attention_mask)
+            if self.use_gradient_checkpointing and self.training:
+                hidden_states = checkpoint(block, hidden_states, attention_mask)
+            else:
+                hidden_states = block(hidden_states, attention_mask)
         
         hidden_states = self.ln_f(hidden_states)
         

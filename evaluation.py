@@ -4,6 +4,7 @@ import math
 import time
 import random
 from typing import Dict, List, Any
+from config_h100 import AdversarialConfig
 
 def evaluate_model(model, eval_loader):
     model.eval()
@@ -25,12 +26,19 @@ def evaluate_model(model, eval_loader):
     return avg_loss
 
 def evaluate_quantization_configs(model, eval_loader, n_layers: int = 12):
+    # Use model's bit widths from config
+    model_bit_widths = getattr(model.config, 'bit_widths', [8, 16, 32])
+    low_bits = min(model_bit_widths)
+    mid_bits = model_bit_widths[len(model_bit_widths)//2] if len(model_bit_widths) > 1 else low_bits
+    high_bits = max(model_bit_widths)
+    
     configs = {
         'FP32': [{'attn_bits': 32, 'mlp_bits': 32} for _ in range(n_layers)],
-        '8-bit': [{'attn_bits': 8, 'mlp_bits': 8} for _ in range(n_layers)],
-        '4-bit': [{'attn_bits': 4, 'mlp_bits': 4} for _ in range(n_layers)],
-        'Mixed': [{'attn_bits': 8, 'mlp_bits': 4} for _ in range(n_layers)],
-        'Progressive': [{'attn_bits': 8 if i < 4 else 4, 'mlp_bits': 8 if i < 8 else 4} 
+        f'{high_bits}-bit': [{'attn_bits': high_bits, 'mlp_bits': high_bits} for _ in range(n_layers)],
+        f'{low_bits}-bit': [{'attn_bits': low_bits, 'mlp_bits': low_bits} for _ in range(n_layers)],
+        'Mixed': [{'attn_bits': high_bits, 'mlp_bits': low_bits} for _ in range(n_layers)],
+        'Progressive': [{'attn_bits': high_bits if i < n_layers//3 else low_bits, 
+                        'mlp_bits': high_bits if i < n_layers//2 else low_bits} 
                        for i in range(n_layers)]
     }
     
@@ -39,7 +47,7 @@ def evaluate_quantization_configs(model, eval_loader, n_layers: int = 12):
         model.set_layer_precision(config)
         
         perplexity = calculate_perplexity(model, eval_loader)
-        model_size = calculate_model_size(config)
+        model_size = calculate_model_size(config, n_embd=getattr(model.config, 'n_embd', 1024))
         throughput = measure_throughput(model, eval_loader)
         
         results[config_name] = {
@@ -73,9 +81,13 @@ def calculate_perplexity(model, eval_loader):
     avg_loss = min(avg_loss, 20.0)
     return math.exp(avg_loss)
 
-def calculate_model_size(layer_configs):
+def calculate_model_size(layer_configs, n_embd=1024):
+    """Calculate model size based on actual model dimensions"""
     total_bits = 0
-    params_per_layer = 12 * 768 * 768
+    # Estimate parameters per layer based on embedding dimension
+    # Attention: 4 * n_embd^2 (qkv projection + output)
+    # MLP: 8 * n_embd^2 (fc + proj, assuming 4x expansion)
+    params_per_layer = 12 * n_embd * n_embd
     
     for config in layer_configs:
         attn_bits = config.get('attn_bits', 32)
@@ -105,9 +117,12 @@ def measure_throughput(model, eval_loader):
     return total_tokens / max(elapsed_time, 0.001)
 
 class AdversarialRobustnessTester:
-    def __init__(self, model, epsilon=0.01):
+    def __init__(self, model, epsilon=None, config=None):
         self.model = model
-        self.epsilon = epsilon
+        if config is None:
+            config = AdversarialConfig()
+        self.config = config
+        self.epsilon = epsilon if epsilon is not None else config.epsilon
         
     def fgsm_attack(self, inputs, labels):
         self.model.eval()
@@ -127,14 +142,17 @@ class AdversarialRobustnessTester:
         
         return perturbed_embeddings.detach()
     
-    def evaluate_robustness(self, test_loader, use_random_precision=True):
+    def evaluate_robustness(self, test_loader, use_random_precision=None):
         self.model.eval()
         
         clean_correct = 0
         adv_correct = 0
         total = 0
         
-        bit_widths = [4, 6, 8] if use_random_precision else [8]
+        if use_random_precision is None:
+            use_random_precision = self.config.use_random_precision
+        
+        bit_widths = self.config.bit_widths if use_random_precision else [self.config.bit_widths[-1]]
         
         for batch in test_loader:
             device = next(self.model.parameters()).device
@@ -165,10 +183,10 @@ class AdversarialRobustnessTester:
                 
                 total += 1
                 
-                if total >= 100:
+                if total >= self.config.test_samples:
                     break
             
-            if total >= 100:
+            if total >= self.config.test_samples:
                 break
         
         clean_accuracy = clean_correct / max(total, 1)

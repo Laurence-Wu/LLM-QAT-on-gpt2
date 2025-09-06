@@ -30,18 +30,18 @@ class QuantizationFunction(torch.autograd.Function):
 class LearnableFakeQuantize(nn.Module):
     def __init__(self, num_bits=8, symmetric=True, per_channel=False, channel_dim=0):
         super().__init__()
-        self.num_bits = num_bits
+        self.num_bits = max(1, min(num_bits, 32))  # Clamp to valid range
         self.symmetric = symmetric
         self.per_channel = per_channel
         self.channel_dim = channel_dim
         self.eps = 1e-7
         
         self.quant_min = 0
-        self.quant_max = 2 ** num_bits - 1
+        self.quant_max = 2 ** self.num_bits - 1
         
         if symmetric:
-            self.quant_min = -(2 ** (num_bits - 1))
-            self.quant_max = 2 ** (num_bits - 1) - 1
+            self.quant_min = -(2 ** (self.num_bits - 1))
+            self.quant_max = 2 ** (self.num_bits - 1) - 1
         
         self.register_buffer('scale', torch.ones(1))
         self.register_buffer('zero_point', torch.zeros(1))
