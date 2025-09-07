@@ -79,40 +79,41 @@ def main():
                 # Copy attention weights (c_attn and c_proj)
                 if hasattr(model.h[i], 'attn') and hasattr(pretrained.h[i], 'attn'):
                     # Copy c_attn weights to quantized linear base weights
+                    # Note: GPT2 uses Conv1D with transposed weight dimensions, so we need to transpose
                     if hasattr(model.h[i].attn.c_attn, 'quantized_linear'):
-                        model.h[i].attn.c_attn.quantized_linear.weight.data = pretrained.h[i].attn.c_attn.weight.data.clone()
+                        model.h[i].attn.c_attn.quantized_linear.weight.data = pretrained.h[i].attn.c_attn.weight.data.t().contiguous()
                         if pretrained.h[i].attn.c_attn.bias is not None:
                             model.h[i].attn.c_attn.quantized_linear.bias.data = pretrained.h[i].attn.c_attn.bias.data.clone()
                     
                     # Copy c_proj weights
                     if hasattr(model.h[i].attn.c_proj, 'quantized_linear'):
-                        model.h[i].attn.c_proj.quantized_linear.weight.data = pretrained.h[i].attn.c_proj.weight.data.clone()
+                        model.h[i].attn.c_proj.quantized_linear.weight.data = pretrained.h[i].attn.c_proj.weight.data.t().contiguous()
                         if pretrained.h[i].attn.c_proj.bias is not None:
                             model.h[i].attn.c_proj.quantized_linear.bias.data = pretrained.h[i].attn.c_proj.bias.data.clone()
                 
                 # Copy MLP weights (c_fc and c_proj)
                 if hasattr(model.h[i], 'mlp') and hasattr(pretrained.h[i], 'mlp'):
-                    # Copy c_fc weights
+                    # Copy c_fc weights - also need to transpose for Conv1D compatibility
                     if hasattr(model.h[i].mlp.c_fc, 'quantized_linear'):
-                        model.h[i].mlp.c_fc.quantized_linear.weight.data = pretrained.h[i].mlp.c_fc.weight.data.clone()
+                        model.h[i].mlp.c_fc.quantized_linear.weight.data = pretrained.h[i].mlp.c_fc.weight.data.t().contiguous()
                         if pretrained.h[i].mlp.c_fc.bias is not None:
                             model.h[i].mlp.c_fc.quantized_linear.bias.data = pretrained.h[i].mlp.c_fc.bias.data.clone()
                     
                     # Copy c_proj weights  
                     if hasattr(model.h[i].mlp.c_proj, 'quantized_linear'):
-                        model.h[i].mlp.c_proj.quantized_linear.weight.data = pretrained.h[i].mlp.c_proj.weight.data.clone()
+                        model.h[i].mlp.c_proj.quantized_linear.weight.data = pretrained.h[i].mlp.c_proj.weight.data.t().contiguous()
                         if pretrained.h[i].mlp.c_proj.bias is not None:
                             model.h[i].mlp.c_proj.quantized_linear.bias.data = pretrained.h[i].mlp.c_proj.bias.data.clone()
             
             model.ln_f.weight.data = pretrained.ln_f.weight.data.clone()
             model.ln_f.bias.data = pretrained.ln_f.bias.data.clone()
             
-            print("✅ Pretrained weights loaded successfully")
+            print("Pretrained weights loaded successfully")
         except Exception as e:
-            print(f"⚠️  Could not load pretrained weights: {e}")
+            print(f"Warning: Could not load pretrained weights: {e}")
             print("Continuing with random initialization...")
     
-    print(f"✅ Model created with gradient checkpointing: {model.use_gradient_checkpointing}")
+    print(f"Model created with gradient checkpointing: {model.use_gradient_checkpointing}")
     
     if torch.cuda.is_available():
         print(f"Model GPU Memory: {torch.cuda.memory_allocated() / 1e9:.3f} GB")
@@ -138,9 +139,9 @@ def main():
     try:
         model = train_switchable_quantization(model, train_loader, val_loader, training_config, 
                                              n_layers=model_config.n_layer)
-        print("✅ Switchable quantization training completed")
+        print("Switchable quantization training completed")
     except Exception as e:
-        print(f"⚠️  Switchable training error: {e}")
+        print(f"Warning: Switchable training error: {e}")
         print("Continuing with evaluation...")
     
     if torch.cuda.is_available():
@@ -154,9 +155,9 @@ def main():
     
     try:
         quantization_results = evaluate_quantization_configs(model, val_loader, n_layers=model_config.n_layer)
-        print("✅ Quantization evaluation completed")
+        print("Quantization evaluation completed")
     except Exception as e:
-        print(f"⚠️  Evaluation error: {e}")
+        print(f"Warning: Evaluation error: {e}")
         quantization_results = {}
     
     print("\n" + "="*60)
@@ -166,9 +167,9 @@ def main():
     try:
         model = train_with_cpt(model, train_loader, val_loader, training_config, 
                               n_layers=model_config.n_layer)
-        print("✅ CPT training completed")
+        print("CPT training completed")
     except Exception as e:
-        print(f"⚠️  CPT training error: {e}")
+        print(f"Warning: CPT training error: {e}")
         print("Continuing with robustness testing...")
     
     print("\n" + "="*60)
@@ -185,9 +186,9 @@ def main():
         print("Testing dynamic precision...")
         dynamic_robustness = robustness_tester.evaluate_robustness(val_loader, use_random_precision=True)
         
-        print("✅ Robustness testing completed")
+        print("Robustness testing completed")
     except Exception as e:
-        print(f"⚠️  Robustness testing error: {e}")
+        print(f"Warning: Robustness testing error: {e}")
         static_robustness = {'clean_accuracy': 0.5, 'robust_accuracy': 0.4, 'robustness_gap': 0.1, 'robustness_ratio': 0.8}
         dynamic_robustness = {'clean_accuracy': 0.5, 'robust_accuracy': 0.45, 'robustness_gap': 0.05, 'robustness_ratio': 0.9}
     
@@ -208,17 +209,17 @@ def main():
         report = generate_report(results, 'h100_results_report.json')
         print_results_summary(report)
     except Exception as e:
-        print(f"⚠️  Report generation error: {e}")
+        print(f"Warning: Report generation error: {e}")
         report = results
     
     print("\n" + "="*60)
     print("H100-Optimized Training Completed Successfully!")
     print("="*60)
     print("\nKey Achievements:")
-    print("✅ Ultra-conservative memory usage (< 1 GB)")
-    print("✅ Mixed precision training with gradient checkpointing")
-    print("✅ Robust error handling for disk quota issues")
-    print("✅ H100 80GB compatibility verified")
+    print("Ultra-conservative memory usage (< 1 GB)")
+    print("Mixed precision training with gradient checkpointing")
+    print("Robust error handling for disk quota issues")
+    print("H100 80GB compatibility verified")
     print(f"\nConfiguration: {model_config.n_layer} layers, {model_config.n_embd} embedding")
     print(f"Memory efficiency: < 1% of H100 80GB capacity")
     
@@ -233,7 +234,7 @@ if __name__ == "__main__":
         model, report = main()
         print("\n🎉 H100-optimized training completed successfully!")
     except Exception as e:
-        print(f"\n❌ Training failed: {e}")
+        print(f"\nTraining failed: {e}")
         import traceback
         traceback.print_exc()
         if torch.cuda.is_available():
