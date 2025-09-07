@@ -31,7 +31,7 @@ class QuantizationConfig:
 class TrainingConfig:
     learning_rate: float = 1e-4  # Increased for faster convergence
     batch_size: int = 16  # Increased for better gradient estimates
-    num_iterations: int = 5000  # Sufficient for convergence
+    num_iterations: int = 1000  # As specified in algtest2 requirements
     warmup_steps: int = 500  # 10% warmup for stability
     gradient_accumulation_steps: int = 2  # Reduced for more frequent updates
     max_seq_length: int = 512  # Standard sequence length

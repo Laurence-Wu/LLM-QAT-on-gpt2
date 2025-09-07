@@ -76,7 +76,33 @@ def main():
                 model.h[i].ln_2.bias.data = pretrained.h[i].ln_2.bias.data.clone()
                 
                 # Initialize quantized layers with pretrained weights
-                # This maintains the pretrained knowledge while allowing quantization
+                # Copy attention weights (c_attn and c_proj)
+                if hasattr(model.h[i], 'attn') and hasattr(pretrained.h[i], 'attn'):
+                    # Copy c_attn weights to quantized linear base weights
+                    if hasattr(model.h[i].attn.c_attn, 'quantized_linear'):
+                        model.h[i].attn.c_attn.quantized_linear.weight.data = pretrained.h[i].attn.c_attn.weight.data.clone()
+                        if pretrained.h[i].attn.c_attn.bias is not None:
+                            model.h[i].attn.c_attn.quantized_linear.bias.data = pretrained.h[i].attn.c_attn.bias.data.clone()
+                    
+                    # Copy c_proj weights
+                    if hasattr(model.h[i].attn.c_proj, 'quantized_linear'):
+                        model.h[i].attn.c_proj.quantized_linear.weight.data = pretrained.h[i].attn.c_proj.weight.data.clone()
+                        if pretrained.h[i].attn.c_proj.bias is not None:
+                            model.h[i].attn.c_proj.quantized_linear.bias.data = pretrained.h[i].attn.c_proj.bias.data.clone()
+                
+                # Copy MLP weights (c_fc and c_proj)
+                if hasattr(model.h[i], 'mlp') and hasattr(pretrained.h[i], 'mlp'):
+                    # Copy c_fc weights
+                    if hasattr(model.h[i].mlp.c_fc, 'quantized_linear'):
+                        model.h[i].mlp.c_fc.quantized_linear.weight.data = pretrained.h[i].mlp.c_fc.weight.data.clone()
+                        if pretrained.h[i].mlp.c_fc.bias is not None:
+                            model.h[i].mlp.c_fc.quantized_linear.bias.data = pretrained.h[i].mlp.c_fc.bias.data.clone()
+                    
+                    # Copy c_proj weights  
+                    if hasattr(model.h[i].mlp.c_proj, 'quantized_linear'):
+                        model.h[i].mlp.c_proj.quantized_linear.weight.data = pretrained.h[i].mlp.c_proj.weight.data.clone()
+                        if pretrained.h[i].mlp.c_proj.bias is not None:
+                            model.h[i].mlp.c_proj.quantized_linear.bias.data = pretrained.h[i].mlp.c_proj.bias.data.clone()
             
             model.ln_f.weight.data = pretrained.ln_f.weight.data.clone()
             model.ln_f.bias.data = pretrained.ln_f.bias.data.clone()
@@ -98,8 +124,8 @@ def main():
     print("Loading datasets...")
     train_loader, val_loader = create_dataloaders(
         tokenizer,
-        train_split='train[:10000]',  # Proper dataset size for training
-        val_split='validation[:1000]',  # Adequate validation set
+        train_split='train[:20000]',  # Sufficient for 1000 iterations with effective batch size 32
+        val_split='validation[:2000]',  # Adequate validation set for proper evaluation
         batch_size=training_config.batch_size,
         max_length=training_config.max_seq_length,
         doc_stride=training_config.doc_stride

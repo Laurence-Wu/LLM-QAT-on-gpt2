@@ -6,6 +6,134 @@ import random
 from typing import Dict, List, Any
 from config_h100 import AdversarialConfig
 
+def calculate_bitops(model, input_shape=(1, 512), bit_width=8):
+    """
+    Calculate BitOPs (Binary Operations) for efficiency measurement.
+    BitOPs = Operations × Input_bits × Weight_bits
+    
+    Args:
+        model: The model to analyze
+        input_shape: Shape of input tensor (batch_size, seq_length)
+        bit_width: Current quantization bit width
+    
+    Returns:
+        dict: BitOPs statistics including total, per-layer breakdown
+    """
+    device = next(model.parameters()).device
+    batch_size, seq_length = input_shape
+    
+    bitops_breakdown = {}
+    total_bitops = 0
+    
+    # Embedding BitOPs
+    vocab_size = model.wte.num_embeddings
+    embed_dim = model.wte.embedding_dim
+    embedding_bitops = batch_size * seq_length * vocab_size * embed_dim * bit_width * bit_width
+    bitops_breakdown['embedding'] = embedding_bitops
+    total_bitops += embedding_bitops
+    
+    # Transformer blocks BitOPs
+    for i, block in enumerate(model.h):
+        block_bitops = 0
+        
+        # Attention BitOPs
+        # Q, K, V projections: 3 linear layers
+        attn_proj_ops = 3 * batch_size * seq_length * embed_dim * embed_dim
+        attn_bitops = attn_proj_ops * bit_width * bit_width
+        
+        # Attention matrix computation: Q @ K^T
+        attn_matrix_ops = batch_size * model.config.n_head * seq_length * seq_length * (embed_dim // model.config.n_head)
+        attn_matrix_bitops = attn_matrix_ops * bit_width * bit_width
+        
+        # Attention output: Attn @ V
+        attn_output_ops = batch_size * model.config.n_head * seq_length * seq_length * (embed_dim // model.config.n_head)
+        attn_output_bitops = attn_output_ops * bit_width * bit_width
+        
+        # Output projection
+        output_proj_ops = batch_size * seq_length * embed_dim * embed_dim
+        output_proj_bitops = output_proj_ops * bit_width * bit_width
+        
+        total_attn_bitops = attn_bitops + attn_matrix_bitops + attn_output_bitops + output_proj_bitops
+        block_bitops += total_attn_bitops
+        
+        # MLP BitOPs
+        # c_fc: embed_dim -> 4*embed_dim
+        mlp_fc_ops = batch_size * seq_length * embed_dim * (4 * embed_dim)
+        mlp_fc_bitops = mlp_fc_ops * bit_width * bit_width
+        
+        # c_proj: 4*embed_dim -> embed_dim  
+        mlp_proj_ops = batch_size * seq_length * (4 * embed_dim) * embed_dim
+        mlp_proj_bitops = mlp_proj_ops * bit_width * bit_width
+        
+        total_mlp_bitops = mlp_fc_bitops + mlp_proj_bitops
+        block_bitops += total_mlp_bitops
+        
+        bitops_breakdown[f'block_{i}'] = {
+            'total': block_bitops,
+            'attention': total_attn_bitops, 
+            'mlp': total_mlp_bitops
+        }
+        total_bitops += block_bitops
+    
+    # Output head BitOPs (language modeling head)
+    lm_head_ops = batch_size * seq_length * embed_dim * vocab_size
+    lm_head_bitops = lm_head_ops * bit_width * bit_width
+    bitops_breakdown['lm_head'] = lm_head_bitops
+    total_bitops += lm_head_bitops
+    
+    return {
+        'total_bitops': total_bitops,
+        'bitops_per_token': total_bitops / (batch_size * seq_length),
+        'breakdown': bitops_breakdown,
+        'efficiency_score': 1e12 / total_bitops,  # Higher is more efficient
+        'bit_width': bit_width
+    }
+
+def calculate_model_efficiency_metrics(model, input_shape=(1, 512), precision_config=None):
+    """
+    Calculate comprehensive efficiency metrics including BitOPs for different precisions.
+    
+    Args:
+        model: The model to analyze
+        input_shape: Input tensor shape 
+        precision_config: Layer-wise precision configuration
+    
+    Returns:
+        dict: Comprehensive efficiency metrics
+    """
+    if precision_config is None:
+        # Default uniform 8-bit
+        precision_config = [{'attn_bits': 8, 'mlp_bits': 8} for _ in range(len(model.h))]
+    
+    # Calculate BitOPs for different precision scenarios
+    metrics = {}
+    
+    # Calculate for different uniform bit widths
+    for bits in [4, 8, 16, 32]:
+        bitops_stats = calculate_bitops(model, input_shape, bits)
+        metrics[f'{bits}bit_uniform'] = bitops_stats
+    
+    # Calculate for current mixed precision configuration
+    # Approximate average bit width from config
+    total_layers = len(precision_config)
+    avg_attn_bits = sum(config['attn_bits'] for config in precision_config) / total_layers
+    avg_mlp_bits = sum(config['mlp_bits'] for config in precision_config) / total_layers
+    avg_bits = (avg_attn_bits + avg_mlp_bits) / 2
+    
+    mixed_precision_stats = calculate_bitops(model, input_shape, avg_bits)
+    metrics['mixed_precision'] = mixed_precision_stats
+    metrics['mixed_precision']['config'] = precision_config
+    metrics['mixed_precision']['avg_bits'] = avg_bits
+    
+    # Calculate compression ratio vs FP32
+    fp32_bitops = metrics['32bit_uniform']['total_bitops']
+    for key in metrics:
+        if 'total_bitops' in metrics[key]:
+            metrics[key]['compression_ratio'] = fp32_bitops / metrics[key]['total_bitops']
+            metrics[key]['memory_reduction'] = 1 - (metrics[key]['total_bitops'] / fp32_bitops)
+    
+    return metrics
+
 def evaluate_model(model, eval_loader):
     model.eval()
     total_loss = 0
@@ -57,12 +185,18 @@ def evaluate_quantization_configs(model, eval_loader, n_layers: int = 12):
         model_size = calculate_model_size(config, n_embd=getattr(model.config, 'n_embd', 1024))
         throughput = measure_throughput(model, eval_loader)
         
+        # Calculate BitOPs efficiency metrics
+        efficiency_metrics = calculate_model_efficiency_metrics(model, input_shape=(1, 512), precision_config=config)
+        
         results[config_name] = {
             'perplexity': perplexity,
             'model_size_mb': model_size,
             'throughput_tokens_per_sec': throughput,
             'efficiency_score': throughput / (model_size * max(perplexity, 1.0)),
-            'config_applied': config[0] if config else {}  # Log first layer config for verification
+            'config_applied': config[0] if config else {},  # Log first layer config for verification
+            'bitops_metrics': efficiency_metrics,
+            'compression_ratio': efficiency_metrics['mixed_precision']['compression_ratio'] if 'mixed_precision' in efficiency_metrics else 1.0,
+            'memory_reduction_pct': efficiency_metrics['mixed_precision']['memory_reduction'] * 100 if 'mixed_precision' in efficiency_metrics else 0.0
         }
     
     return results

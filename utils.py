@@ -87,6 +87,22 @@ def print_results_summary(report: Dict[str, Any]):
             print(f"    - Model Size: {metrics['model_size_mb']:.2f} MB")
             print(f"    - Throughput: {metrics['throughput_tokens_per_sec']:.2f} tokens/sec")
             print(f"    - Efficiency Score: {metrics['efficiency_score']}")
+            
+            # Add BitOPs metrics if available
+            if 'compression_ratio' in metrics:
+                print(f"    - Compression Ratio: {metrics['compression_ratio']:.2f}x")
+            if 'memory_reduction_pct' in metrics:
+                print(f"    - Memory Reduction: {metrics['memory_reduction_pct']:.1f}%")
+            
+            # Show BitOPs breakdown for mixed precision if available
+            if 'bitops_metrics' in metrics and 'mixed_precision' in metrics['bitops_metrics']:
+                bitops_data = metrics['bitops_metrics']['mixed_precision']
+                total_bitops = bitops_data.get('total_bitops', 0)
+                efficiency_score_bitops = bitops_data.get('efficiency_score', 0)
+                print(f"    - Total BitOPs: {total_bitops:.2e}")
+                print(f"    - BitOPs Efficiency Score: {efficiency_score_bitops:.2f}")
+                if 'avg_bits' in bitops_data:
+                    print(f"    - Average Precision: {bitops_data['avg_bits']:.1f} bits")
     
     if 'adversarial_robustness' in report:
         print("\nAdversarial Robustness:")
