@@ -204,58 +204,77 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
     
     try:
         for iteration in tqdm(range(config.num_iterations), desc="switchableP"):
+                
+                # Debug every 100 iterations
+                if iteration % 100 == 0:
+                    print(f"Iter {iteration}")
+                    log_memory_usage(f"Iter {iteration}")
+                
+                model.train() # my little flag ~~~~~
             
-            # Debug every 100 iterations
-            if iteration % 100 == 0:
-                print(f"Iter {iteration}")
-                log_memory_usage(f"Iter {iteration}")
+            # Get current bit width from schedule
+            current_bit_width = bit_width_schedule[iteration]
+            training_stats['bit_width_usage'][current_bit_width] += 1
             
-            model.train() # my little flag ~~~~~
-        
-        # Get current bit width from schedule
-        current_bit_width = bit_width_schedule[iteration]
-        training_stats['bit_width_usage'][current_bit_width] += 1
-        
-        # Create layer precision configuration
-        layer_config = create_layer_precision_config(
-            current_bit_width, 
-            n_layers,
-            strategy=config.switch_strategy
-        )
-        
-        # Set model precision
-        model.set_layer_precision(layer_config)
-        
-        # Log memory at first iteration to catch early OOM
-        if iteration == 0:
-            log_memory_usage("Before First Forward Pass")
-        
-        # Training step
-        total_loss = 0
-        total_ce_loss = 0
-        total_kd_loss = 0
-        
-        for batch_idx, batch in enumerate(train_loader):
-            if batch_idx >= config.gradient_accumulation_steps:
-                break
+            # Create layer precision configuration
+            layer_config = create_layer_precision_config(
+                current_bit_width, 
+                n_layers,
+                strategy=config.switch_strategy
+            )
             
-            # Log memory on first batch to catch loading issues
-            if iteration == 0 and batch_idx == 0:
-                log_memory_usage("After Loading First Batch")
+            # Set model precision
+            model.set_layer_precision(layer_config)
             
-            device = next(model.parameters()).device
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch.get('attention_mask', None)
-            if attention_mask is not None:
-                attention_mask = attention_mask.to(device)
+            # Log memory at first iteration to catch early OOM
+            if iteration == 0:
+                log_memory_usage("Before First Forward Pass")
             
-            # Forward pass with mixed precision
-            if scaler is not None:
-                with torch.amp.autocast('cuda'):
+            # Training step
+            total_loss = 0
+            total_ce_loss = 0
+            total_kd_loss = 0
+            
+            for batch_idx, batch in enumerate(train_loader):
+                if batch_idx >= config.gradient_accumulation_steps:
+                    break
+                
+                # Log memory on first batch to catch loading issues
+                if iteration == 0 and batch_idx == 0:
+                    log_memory_usage("After Loading First Batch")
+                
+                device = next(model.parameters()).device
+                input_ids = batch['input_ids'].to(device)
+                attention_mask = batch.get('attention_mask', None)
+                if attention_mask is not None:
+                    attention_mask = attention_mask.to(device)
+                
+                # Forward pass with mixed precision
+                if scaler is not None:
+                    with torch.amp.autocast('cuda'):
+                        outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
+                        ce_loss = outputs['loss']
+                        
+                        # Knowledge distillation if teacher is available
+                        kd_loss = torch.tensor(0.0, device=device)
+                        if teacher_model is not None:
+                            with torch.no_grad():
+                                teacher_outputs = teacher_model(input_ids, attention_mask=attention_mask)
+                                teacher_logits = teacher_outputs.logits
+                            
+                            student_logits = outputs['logits']
+                            kd_loss = knowledge_distillation_loss(student_logits, teacher_logits)
+                            loss = 0.7 * ce_loss + 0.3 * kd_loss
+                        else:
+                            loss = ce_loss
+                        
+                        loss = loss / config.gradient_accumulation_steps
+                    
+                    scaler.scale(loss).backward()
+                else:
                     outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
                     ce_loss = outputs['loss']
                     
-                    # Knowledge distillation if teacher is available
                     kd_loss = torch.tensor(0.0, device=device)
                     if teacher_model is not None:
                         with torch.no_grad():
@@ -269,100 +288,81 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                         loss = ce_loss
                     
                     loss = loss / config.gradient_accumulation_steps
+                    loss.backward()
                 
-                scaler.scale(loss).backward()
+                total_loss += loss.item()
+                total_ce_loss += ce_loss.item()
+                total_kd_loss += kd_loss.item() if teacher_model is not None else 0
+            
+            # Optimizer step
+            if scaler is not None:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
+                scaler.step(optimizer)
+                scaler.update()
             else:
-                outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
-                ce_loss = outputs['loss']
-                
-                kd_loss = torch.tensor(0.0, device=device)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
+                optimizer.step()
+            
+            optimizer.zero_grad()
+            
+            if scheduler is not None and iteration < config.warmup_steps:
+                scheduler.step()
+            
+            # Record training loss
+            avg_loss = total_loss / config.gradient_accumulation_steps
+            training_stats['iteration_losses'].append(avg_loss)
+            
+            # Logging
+            if iteration % config.log_interval == 0:
+                print(f"\nIteration {iteration}/{config.num_iterations}")
+                print(f"Bit width: {current_bit_width}")
+                print(f"Loss: {avg_loss:.4f}")
+                print(f"CE Loss: {total_ce_loss / config.gradient_accumulation_steps:.4f}")
                 if teacher_model is not None:
-                    with torch.no_grad():
-                        teacher_outputs = teacher_model(input_ids, attention_mask=attention_mask)
-                        teacher_logits = teacher_outputs.logits
-                    
-                    student_logits = outputs['logits']
-                    kd_loss = knowledge_distillation_loss(student_logits, teacher_logits)
-                    loss = 0.7 * ce_loss + 0.3 * kd_loss
-                else:
-                    loss = ce_loss
-                
-                loss = loss / config.gradient_accumulation_steps
-                loss.backward()
-            
-            total_loss += loss.item()
-            total_ce_loss += ce_loss.item()
-            total_kd_loss += kd_loss.item() if teacher_model is not None else 0
-        
-        # Optimizer step
-        if scaler is not None:
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
-            optimizer.step()
-        
-        optimizer.zero_grad()
-        
-        if scheduler is not None and iteration < config.warmup_steps:
-            scheduler.step()
-        
-        # Record training loss
-        avg_loss = total_loss / config.gradient_accumulation_steps
-        training_stats['iteration_losses'].append(avg_loss)
-        
-        # Logging
-        if iteration % config.log_interval == 0:
-            print(f"\nIteration {iteration}/{config.num_iterations}")
-            print(f"Bit width: {current_bit_width}")
-            print(f"Loss: {avg_loss:.4f}")
-            print(f"CE Loss: {total_ce_loss / config.gradient_accumulation_steps:.4f}")
-            if teacher_model is not None:
-                print(f"KD Loss: {total_kd_loss / config.gradient_accumulation_steps:.4f}")
-            print(f"LR: {optimizer.param_groups[0]['lr']:.6f}")
+                    print(f"KD Loss: {total_kd_loss / config.gradient_accumulation_steps:.4f}")
+                print(f"LR: {optimizer.param_groups[0]['lr']:.6f}")
 
-        # Validation
-        if iteration % config.eval_interval == 0 and iteration > 0:
-            model.eval()
-            val_loss = 0
-            val_steps = 0
+            # Validation
+            if iteration % config.eval_interval == 0 and iteration > 0:
+                model.eval()
+                val_loss = 0
+                val_steps = 0
+                
+                with torch.no_grad():
+                    for batch_idx, batch in enumerate(val_loader):
+                        if batch_idx >= 10:  # Limit validation steps
+                            break
+                        
+                        device = next(model.parameters()).device
+                        input_ids = batch['input_ids'].to(device)
+                        attention_mask = batch.get('attention_mask', None)
+                        if attention_mask is not None:
+                            attention_mask = attention_mask.to(device)
+                        
+                        outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
+                        val_loss += outputs['loss'].item()
+                        val_steps += 1
+                
+                avg_val_loss = val_loss / max(val_steps, 1)
+                training_stats['validation_losses'].append(avg_val_loss)
+                
+                print(f"  Validation Loss: {avg_val_loss:.4f}")
+                
+                # Track best model
+                if avg_val_loss < training_stats['best_val_loss']:
+                    training_stats['best_val_loss'] = avg_val_loss
+                    training_stats['best_iteration'] = iteration
+                    print(f"  New best validation loss!")
             
-            with torch.no_grad():
-                for batch_idx, batch in enumerate(val_loader):
-                    if batch_idx >= 10:  # Limit validation steps
-                        break
-                    
-                    device = next(model.parameters()).device
-                    input_ids = batch['input_ids'].to(device)
-                    attention_mask = batch.get('attention_mask', None)
-                    if attention_mask is not None:
-                        attention_mask = attention_mask.to(device)
-                    
-                    outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
-                    val_loss += outputs['loss'].item()
-                    val_steps += 1
-            
-            avg_val_loss = val_loss / max(val_steps, 1)
-            training_stats['validation_losses'].append(avg_val_loss)
-            
-            print(f"  Validation Loss: {avg_val_loss:.4f}")
-            
-            # Track best model
-            if avg_val_loss < training_stats['best_val_loss']:
-                training_stats['best_val_loss'] = avg_val_loss
-                training_stats['best_iteration'] = iteration
-                print(f"  New best validation loss!")
-        
-            # Clear cache periodically
-            if iteration % config.empty_cache_interval == 0:
-                torch.cuda.empty_cache()
-                gc.collect()
-            
-        # After loop completion
-        print("Training loop completed")
-        log_memory_usage("Training Loop Completed")
+                # Clear cache periodically
+                if iteration % config.empty_cache_interval == 0:
+                    torch.cuda.empty_cache()
+                    gc.collect()
+                
+            # After loop completion
+            print("Training loop completed")
+            log_memory_usage("Training Loop Completed")
     
     except Exception as e:
         print(f"\n!!! TRAINING ERROR CAUGHT !!!")
