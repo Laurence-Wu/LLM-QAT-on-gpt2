@@ -194,8 +194,35 @@ class SwitchableQuantizedGPT2(nn.Module):
         return {'loss': loss, 'logits': logits}
     
     def set_layer_precision(self, layer_configs: List[Dict]):
+        """
+        Set precision for each layer based on provided configurations.
+        
+        Args:
+            layer_configs: List of dictionaries containing precision settings for each layer
+                         Each dict should have 'attn_bits' and 'mlp_bits' keys
+        """
         for i, config in enumerate(layer_configs):
             if i < len(self.h):
-                self.h[i].set_precision(**config)\
+                # Set attention precision
+                if hasattr(self.h[i].attn.c_attn, 'set_precision'):
+                    self.h[i].attn.c_attn.set_precision(
+                        config.get('attn_bits', 8), 
+                        config.get('attn_bits', 8)
+                    )
+                if hasattr(self.h[i].attn.c_proj, 'set_precision'):
+                    self.h[i].attn.c_proj.set_precision(
+                        config.get('attn_bits', 8), 
+                        config.get('attn_bits', 8)
+                    )
                 
-                
+                # Set MLP precision
+                if hasattr(self.h[i].mlp.c_fc, 'set_precision'):
+                    self.h[i].mlp.c_fc.set_precision(
+                        config.get('mlp_bits', 8), 
+                        config.get('mlp_bits', 8)
+                    )
+                if hasattr(self.h[i].mlp.c_proj, 'set_precision'):
+                    self.h[i].mlp.c_proj.set_precision(
+                        config.get('mlp_bits', 8), 
+                        config.get('mlp_bits', 8)
+                    )
