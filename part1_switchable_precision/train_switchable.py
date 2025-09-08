@@ -250,30 +250,44 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 
                 # Forward pass with mixed precision
                 print("Starting forward pass...")
+                print(f"Input shape: {input_ids.shape}")
+                print(f"Device: {input_ids.device}")
+                print(f"Model device: {next(model.parameters()).device}")
+                
                 if scaler is not None:
-                    with torch.amp.autocast('cuda'):
-                        outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
-                        print("Forward pass done")
-                        print(f"Output keys: {outputs.keys()}")
-                        ce_loss = outputs['loss']
-                        print("Got CE loss")
+                    print("Using mixed precision")
+                    try:
+                        with torch.amp.autocast('cuda'):
+                            print("Inside autocast context")
+                            outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
+                            print("Model call completed")
+                    except Exception as e:
+                        print(f"Forward pass error: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        raise
+                    
+                    print("Forward pass done")
+                    print(f"Output keys: {outputs.keys()}")
+                    ce_loss = outputs['loss']
+                    print("Got CE loss")
+                    # Knowledge distillation if teacher is available
+                    kd_loss = torch.tensor(0.0, device=device)
+                    print("Created KD loss tensor")
+                    if teacher_model is not None:
+                        print("using teacher model for kd")
+                        with torch.no_grad():
+                            teacher_outputs = teacher_model(input_ids, attention_mask=attention_mask)
+                            teacher_logits = teacher_outputs.logits
                         
-                        # Knowledge distillation if teacher is available
-                        kd_loss = torch.tensor(0.0, device=device)
-                        print("Created KD loss tensor")
-                        if teacher_model is not None:
-                            with torch.no_grad():
-                                teacher_outputs = teacher_model(input_ids, attention_mask=attention_mask)
-                                teacher_logits = teacher_outputs.logits
-                            
-                            student_logits = outputs['logits']
-                            kd_loss = knowledge_distillation_loss(student_logits, teacher_logits)
-                            loss = 0.7 * ce_loss + 0.3 * kd_loss
-                        else:
-                            loss = ce_loss
-                        
-                        loss = loss / config.gradient_accumulation_steps
-                        print("About to backward")
+                        student_logits = outputs['logits']
+                        kd_loss = knowledge_distillation_loss(student_logits, teacher_logits)
+                        loss = 0.7 * ce_loss + 0.3 * kd_loss
+                    else:
+                        loss = ce_loss
+                    
+                    loss = loss / config.gradient_accumulation_steps
+                    print("About to backward")
                     
                     scaler.scale(loss).backward()
                     print("Backward complete")
