@@ -204,13 +204,12 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
     
     try:
         for iteration in tqdm(range(config.num_iterations), desc="switchableP"):
-                
-                # Debug every 100 iterations
-                if iteration % 100 == 0:
-                    print(f"Iter {iteration}")
-                    log_memory_usage(f"Iter {iteration}")
-                
-                model.train() # my little flag ~~~~~
+            # Debug every 100 iterations
+            if iteration % 100 == 0:
+                print(f"Iter {iteration}")
+                log_memory_usage(f"Iter {iteration}")
+            
+            model.train() # my little flag ~~~~~
             
             # Get current bit width from schedule
             current_bit_width = bit_width_schedule[iteration]
