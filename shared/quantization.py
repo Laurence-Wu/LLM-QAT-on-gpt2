@@ -11,9 +11,12 @@ class QuantizationFunction(torch.autograd.Function):
         ctx.num_bits = num_bits
         ctx.symmetric = symmetric
         
+        # Symmetric MinMax quantization without clipping (following LLM-QAT paper)
         if symmetric:
-            output = torch.round(input / scale) * scale
-            output = torch.clamp(output, -scale * (2**(num_bits-1)), scale * (2**(num_bits-1) - 1))
+            # Paper formula: X_Q = α⌊X_R/α⌉, α = max(|X_R|)/(2^(N-1) - 1)
+            quantized = torch.round(input / scale)
+            output = quantized * scale
+            # NO CLIPPING - preserve outliers as recommended in paper
         else:
             output = torch.round(input / scale + zero_point)
             output = torch.clamp(output, 0, 2**num_bits - 1)
@@ -43,10 +46,18 @@ class LearnableFakeQuantize(nn.Module):
             self.quant_min = -(2 ** (self.num_bits - 1))
             self.quant_max = 2 ** (self.num_bits - 1) - 1
         
-        self.register_buffer('scale', torch.ones(1))
-        self.register_buffer('zero_point', torch.zeros(1))
-        self.register_buffer('running_min', torch.zeros(1))
-        self.register_buffer('running_max', torch.zeros(1))
+        # Initialize buffers for per-channel or per-tensor quantization
+        if per_channel:
+            # Will be resized during first forward pass
+            self.register_buffer('scale', torch.ones(1))
+            self.register_buffer('zero_point', torch.zeros(1))
+            self.register_buffer('running_min', torch.zeros(1))
+            self.register_buffer('running_max', torch.zeros(1))
+        else:
+            self.register_buffer('scale', torch.ones(1))
+            self.register_buffer('zero_point', torch.zeros(1))
+            self.register_buffer('running_min', torch.zeros(1))
+            self.register_buffer('running_max', torch.zeros(1))
         
         self.calibrated = False
     
@@ -56,21 +67,41 @@ class LearnableFakeQuantize(nn.Module):
             return x
             
         if self.training:
-            min_val = x.min()
-            max_val = x.max()
-            
-            if not self.calibrated:
-                self.running_min = min_val
-                self.running_max = max_val
-                self.calibrated = True
+            if self.per_channel:
+                # Per-channel statistics
+                dims = list(range(x.dim()))
+                dims.remove(self.channel_dim)
+                min_val = x.min(dim=dims, keepdim=True)[0]
+                max_val = x.max(dim=dims, keepdim=True)[0]
+                
+                # Resize buffers if needed
+                if not self.calibrated:
+                    self.running_min = min_val.clone()
+                    self.running_max = max_val.clone()
+                    self.scale = torch.ones_like(min_val)
+                    self.zero_point = torch.zeros_like(min_val)
+                    self.calibrated = True
+                else:
+                    self.running_min = self.running_min * 0.9 + min_val * 0.1
+                    self.running_max = self.running_max * 0.9 + max_val * 0.1
             else:
-                self.running_min = self.running_min * 0.9 + min_val * 0.1
-                self.running_max = self.running_max * 0.9 + max_val * 0.1
+                # Per-tensor statistics
+                min_val = x.min()
+                max_val = x.max()
+                
+                if not self.calibrated:
+                    self.running_min = min_val
+                    self.running_max = max_val
+                    self.calibrated = True
+                else:
+                    self.running_min = self.running_min * 0.9 + min_val * 0.1
+                    self.running_max = self.running_max * 0.9 + max_val * 0.1
         
         if self.symmetric:
+            # Paper formula: α = max(|X_R|)/(2^(N-1) - 1)
             max_val = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
             max_val = torch.clamp(max_val, min=self.eps)
-            self.scale.data = max_val / (self.quant_max - self.quant_min) * 2
+            self.scale.data = max_val / (2**(self.num_bits-1) - 1)
             self.zero_point.data = torch.zeros_like(self.scale.data)
         else:
             range_val = torch.clamp(self.running_max - self.running_min, min=self.eps)
@@ -101,8 +132,9 @@ class QuantizedLinear(nn.Module):
         else:
             self.register_parameter('bias', None)
         
-        self.weight_quantizer = LearnableFakeQuantize(weight_bits, symmetric=True)
-        self.activation_quantizer = LearnableFakeQuantize(activation_bits, symmetric=False)
+        # Per-channel weight quantization, per-token activation quantization (paper approach)
+        self.weight_quantizer = LearnableFakeQuantize(weight_bits, symmetric=True, per_channel=True, channel_dim=0)
+        self.activation_quantizer = LearnableFakeQuantize(activation_bits, symmetric=True)  # Paper uses symmetric for both
         
     def forward(self, input):
         input_q = self.activation_quantizer(input)
