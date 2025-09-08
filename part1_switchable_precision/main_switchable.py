@@ -164,13 +164,17 @@ def main():
         n_layers=model_config.n_layer
     )
     
-    print("Returned from training function successfully!")
+    print("Training returned")
     
     # Phase 2: save the result
-
+    print("Extracting state_dict...")
+    state_dict = trained_model.state_dict()
+    print("State dict extracted")
+    
+    print("Saving model...")
     model_save_path = 'switchable_model.pt'
     torch.save({
-        'model_state_dict': trained_model.state_dict(),
+        'model_state_dict': state_dict,
         'model_config': model_config.__dict__,
         'training_config': training_config.__dict__,
         'results': results

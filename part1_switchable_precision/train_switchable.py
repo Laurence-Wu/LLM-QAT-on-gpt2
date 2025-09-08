@@ -368,15 +368,14 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
         raise e
     
     # Save training statistics
-    log_memory_usage("Before Saving Stats")
+    log_memory_usage("Before Stats Save")
     try:
         import json
-        with open('training_stats.json', 'w') as f:
-            json.dump(training_stats, f, indent=2)
-        log_memory_usage("After Saving Stats")
-        print("Training stats saved to training_stats.json")
+        json.dump(training_stats, open('training_stats.json', 'w'), indent=2)
+        log_memory_usage("After Stats Save")
+        print("Stats saved")
     except Exception as e:
-        print(f"Error saving stats: {e}")
+        print(f"Stats error: {e}")
     
     log_memory_usage("Before Final Message")
     print(f"\nTraining completed. Best validation loss: {training_stats['best_val_loss']:.4f}")
