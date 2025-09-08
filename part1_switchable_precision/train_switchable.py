@@ -335,15 +335,14 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
             avg_loss = total_loss / config.gradient_accumulation_steps
             training_stats['iteration_losses'].append(avg_loss)
             
-            # Logging
-            if iteration % config.log_interval == 0:
-                print(f"\nIteration {iteration}/{config.num_iterations}")
-                print(f"Bit width: {current_bit_width}")
-                print(f"Loss: {avg_loss:.4f}")
-                print(f"CE Loss: {total_ce_loss / config.gradient_accumulation_steps:.4f}")
-                if teacher_model is not None:
-                    print(f"KD Loss: {total_kd_loss / config.gradient_accumulation_steps:.4f}")
-                print(f"LR: {optimizer.param_groups[0]['lr']:.6f}")
+            # Logging - removed modulo check, log every iteration
+            print(f"\nIteration {iteration}/{config.num_iterations}")
+            print(f"Bit width: {current_bit_width}")
+            print(f"Loss: {avg_loss:.4f}")
+            print(f"CE Loss: {total_ce_loss / config.gradient_accumulation_steps:.4f}")
+            if teacher_model is not None:
+                print(f"KD Loss: {total_kd_loss / config.gradient_accumulation_steps:.4f}")
+            print(f"LR: {optimizer.param_groups[0]['lr']:.6f}")
 
             # Validation
             if iteration % config.eval_interval == 0 and iteration > 0:
