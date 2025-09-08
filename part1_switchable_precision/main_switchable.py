@@ -169,8 +169,26 @@ def main():
     
     print("Training returned")
     
-    # Skip model saving to avoid crash
-    print("Skipping model save")
+    # Save the trained model
+    try:
+        import time
+        timestamp = time.strftime('%Y%m%d_%H%M%S')
+        model_filename = f"switchable_quantized_gpt2_{timestamp}.pth"
+        
+        print(f"Saving model to {model_filename}")
+        torch.save({
+            'model_state_dict': trained_model.state_dict(),
+            'model_config': model_config.__dict__,
+            'training_config': training_config.__dict__,
+            'timestamp': timestamp
+        }, model_filename)
+        print("Model saved successfully")
+        
+        results = {"model_saved": model_filename, "training_completed": True}
+        
+    except Exception as e:
+        print(f"Error saving model: {e}")
+        results = {"model_saved": None, "training_completed": True, "save_error": str(e)}
 
     return trained_model, results
 
