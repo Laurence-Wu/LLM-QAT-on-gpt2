@@ -6,8 +6,8 @@ from typing import Optional, Dict, List
 from transformers import GPT2Config
 from torch.utils.checkpoint import checkpoint
 
-from quantization import LearnableFakeQuantize
-from lora import QuantizedLinearWithLoRA
+from .quantization import LearnableFakeQuantize
+from .lora import QuantizedLinearWithLoRA
 
 class QuantizedGPT2Attention(nn.Module):
     def __init__(self, config: GPT2Config, bit_widths=None):
@@ -194,4 +194,6 @@ class SwitchableQuantizedGPT2(nn.Module):
     def set_layer_precision(self, layer_configs: List[Dict]):
         for i, config in enumerate(layer_configs):
             if i < len(self.h):
-                self.h[i].set_precision(**config)
+                self.h[i].set_precision(**config)\
+                
+                
