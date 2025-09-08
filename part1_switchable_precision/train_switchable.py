@@ -9,7 +9,31 @@ import torch.nn.functional as F
 import random
 from tqdm import tqdm
 import gc
+import psutil
+import os
 from typing import Optional, Dict, List
+
+
+def log_memory_usage(step: str = ""):
+    """Log current memory usage for debugging OOM issues."""
+    # CPU Memory
+    cpu_mem = psutil.virtual_memory()
+    cpu_used_gb = cpu_mem.used / (1024**3)
+    cpu_total_gb = cpu_mem.total / (1024**3)
+    cpu_percent = cpu_mem.percent
+    
+    print(f"[{step}] CPU Memory: {cpu_used_gb:.2f}/{cpu_total_gb:.2f} GB ({cpu_percent:.1f}%)")
+    
+    # GPU Memory
+    if torch.cuda.is_available():
+        gpu_allocated = torch.cuda.memory_allocated() / (1024**3)
+        gpu_reserved = torch.cuda.memory_reserved() / (1024**3)
+        print(f"[{step}] GPU Memory: {gpu_allocated:.2f} GB allocated, {gpu_reserved:.2f} GB reserved")
+    
+    # Process-specific memory
+    process = psutil.Process(os.getpid())
+    process_mem = process.memory_info().rss / (1024**3)
+    print(f"[{step}] Process Memory: {process_mem:.2f} GB")
 
 
 def knowledge_distillation_loss(student_logits, teacher_logits, temperature=4.0):
@@ -61,17 +85,6 @@ def get_bit_width_schedule(strategy: str, num_iterations: int, bit_widths: List[
 
 def create_layer_precision_config(bit_width: int, n_layers: int, 
                                  strategy: str = 'uniform') -> List[Dict]:
-    """
-    Create layer-wise precision configuration.
-    
-    Args:
-        bit_width: Base bit width to use
-        n_layers: Number of layers in the model
-        strategy: 'uniform', 'progressive', or 'mixed'
-    
-    Returns:
-        List of dictionaries specifying bit widths for each layer
-    """
     if strategy == 'uniform':
         # All layers use the same bit width
         return [{'attn_bits': bit_width, 'mlp_bits': bit_width} for _ in range(n_layers)]
@@ -125,6 +138,9 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
     gc.collect()
     model.use_gradient_checkpointing = True
     
+    # Log initial memory usage
+    log_memory_usage("Training Start")
+    
     # Setup optimizer
     optimizer = torch.optim.AdamW(
         model.parameters(), 
@@ -159,6 +175,7 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
         for param in teacher_model.parameters():
             param.requires_grad = False
         print("Teacher model loaded")
+        log_memory_usage("After Teacher Model Load")
     except Exception as e:
         print(f"teacher model error: {e}")
         teacher_model = None
@@ -183,9 +200,10 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
     
     # Main training loop
     print("\nStarting switchable precision training...")
+    log_memory_usage("Before Training Loop")
     for iteration in tqdm(range(config.num_iterations), desc="switchableP"):
         
-        model.train()
+        model.train() # my little flag ~~~~~
         
         # Get current bit width from schedule
         current_bit_width = bit_width_schedule[iteration]
@@ -195,7 +213,7 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
         layer_config = create_layer_precision_config(
             current_bit_width, 
             n_layers,
-            strategy='uniform' if iteration < config.warmup_steps else 'progressive'
+            strategy=config.switch_strategy
         )
         
         # Set model precision
@@ -283,13 +301,13 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
         # Logging
         if iteration % config.log_interval == 0:
             print(f"\nIteration {iteration}/{config.num_iterations}")
-            print(f"  Bit width: {current_bit_width}")
-            print(f"  Loss: {avg_loss:.4f}")
-            print(f"  CE Loss: {total_ce_loss / config.gradient_accumulation_steps:.4f}")
+            print(f"Bit width: {current_bit_width}")
+            print(f"Loss: {avg_loss:.4f}")
+            print(f"CE Loss: {total_ce_loss / config.gradient_accumulation_steps:.4f}")
             if teacher_model is not None:
-                print(f"  KD Loss: {total_kd_loss / config.gradient_accumulation_steps:.4f}")
-            print(f"  LR: {optimizer.param_groups[0]['lr']:.6f}")
-        
+                print(f"KD Loss: {total_kd_loss / config.gradient_accumulation_steps:.4f}")
+            print(f"LR: {optimizer.param_groups[0]['lr']:.6f}")
+
         # Validation
         if iteration % config.eval_interval == 0 and iteration > 0:
             model.eval()
