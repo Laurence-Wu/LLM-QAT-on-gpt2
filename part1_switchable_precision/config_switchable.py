@@ -41,8 +41,8 @@ class TrainingConfig:
     """
     def __init__(self):
         # Data configuration
-        self.train_split = 'train[:1000]'# Training data split
-        self.val_split = 'validation[:100]'# Validation data split
+        self.train_split = 'train[:2000]'# Training data split
+        self.val_split = 'validation[:200]'# Validation data split
         self.batch_size = 1
         self.max_seq_length = 256
         self.doc_stride = 128
@@ -52,7 +52,7 @@ class TrainingConfig:
         self.adam_epsilon = 1e-8
         self.adam_betas = (0.9, 0.999)
         # Training schedule
-        self.num_iterations = 100
+        self.num_iterations = 1000
         self.warmup_steps = 5
         self.eval_interval = 2
         self.save_interval = 100
