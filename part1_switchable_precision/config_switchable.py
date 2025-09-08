@@ -43,7 +43,7 @@ class TrainingConfig:
         # Data configuration
         self.train_split = 'train[:1000]'# Training data split
         self.val_split = 'validation[:100]'# Validation data split
-        self.batch_size = 4
+        self.batch_size = 1
         self.max_seq_length = 256
         self.doc_stride = 128
         # Optimization parameters
