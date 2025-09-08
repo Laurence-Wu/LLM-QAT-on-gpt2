@@ -68,11 +68,16 @@ class LearnableFakeQuantize(nn.Module):
             
         if self.training:
             if self.per_channel:
-                # Per-channel statistics
-                dims = list(range(x.dim()))
-                dims.remove(self.channel_dim)
-                min_val = x.min(dim=dims, keepdim=True)[0]
-                max_val = x.max(dim=dims, keepdim=True)[0]
+                # Per-channel statistics - calculate min/max along non-channel dimensions
+                dims_to_reduce = list(range(x.dim()))
+                dims_to_reduce.remove(self.channel_dim)
+                
+                # Calculate min/max by iteratively reducing dimensions
+                min_val = x
+                max_val = x
+                for dim in sorted(dims_to_reduce, reverse=True):  # Start from highest dim
+                    min_val = min_val.min(dim=dim, keepdim=True)[0]
+                    max_val = max_val.max(dim=dim, keepdim=True)[0]
                 
                 # Resize buffers if needed
                 if not self.calibrated:
