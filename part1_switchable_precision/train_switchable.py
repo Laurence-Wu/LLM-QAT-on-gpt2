@@ -309,7 +309,13 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 total_ce_loss += ce_loss.item()
                 total_kd_loss += kd_loss.item() if teacher_model is not None else 0
 
-                print(f"total_loss so far: {total_loss:.4f}")
+                # Clear intermediate tensors to free memory
+                del outputs, ce_loss, kd_loss, loss
+                if teacher_model is not None:
+                    del teacher_outputs, teacher_logits, student_logits
+                
+                # Clear GPU cache after each batch
+                torch.cuda.empty_cache()
             
             # Optimizer step
             if scaler is not None:
@@ -325,6 +331,10 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
             
             if scheduler is not None and iteration < config.warmup_steps:
                 scheduler.step()
+            
+            # Clear cache after each iteration
+            torch.cuda.empty_cache()
+            gc.collect()
             
             # Record training loss
             avg_loss = total_loss / config.gradient_accumulation_steps
@@ -362,8 +372,8 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                     training_stats['best_iteration'] = iteration
                     print(f"  New best validation loss!")
             
-            # Clear cache periodically
-            if iteration % config.empty_cache_interval == 0:
+            # Additional periodic deep cleanup
+            if iteration % 10 == 0:
                 torch.cuda.empty_cache()
                 gc.collect()
                 
