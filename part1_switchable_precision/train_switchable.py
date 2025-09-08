@@ -254,10 +254,13 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                     with torch.amp.autocast('cuda'):
                         outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
                         print("Forward pass done")
+                        print(f"Output keys: {outputs.keys()}")
                         ce_loss = outputs['loss']
+                        print("Got CE loss")
                         
                         # Knowledge distillation if teacher is available
                         kd_loss = torch.tensor(0.0, device=device)
+                        print("Created KD loss tensor")
                         if teacher_model is not None:
                             with torch.no_grad():
                                 teacher_outputs = teacher_model(input_ids, attention_mask=attention_mask)
@@ -270,8 +273,10 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                             loss = ce_loss
                         
                         loss = loss / config.gradient_accumulation_steps
+                        print("About to backward")
                     
                     scaler.scale(loss).backward()
+                    print("Backward complete")
                 else:
                     outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
                     ce_loss = outputs['loss']
