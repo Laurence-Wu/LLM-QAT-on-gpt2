@@ -355,11 +355,12 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 training_stats['best_iteration'] = iteration
                 print(f"  New best validation loss!")
         
-        # Clear cache periodically
-        if iteration % config.empty_cache_interval == 0:
-            torch.cuda.empty_cache()
-            gc.collect()
+            # Clear cache periodically
+            if iteration % config.empty_cache_interval == 0:
+                torch.cuda.empty_cache()
+                gc.collect()
             
+        # After loop completion
         print("Training loop completed")
         log_memory_usage("Training Loop Completed")
     
