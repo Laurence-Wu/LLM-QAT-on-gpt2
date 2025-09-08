@@ -204,11 +204,6 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
     
     try:
         for iteration in tqdm(range(config.num_iterations), desc="switchableP"):
-            # Debug every 100 iterations
-            if iteration % 100 == 0:
-                print(f"Iter {iteration}")
-                log_memory_usage(f"Iter {iteration}")
-            
             model.train() # my little flag ~~~~~
             
             # Get current bit width from schedule
@@ -249,33 +244,33 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                     attention_mask = attention_mask.to(device)
                 
                 # Forward pass with mixed precision
-                print("Starting forward pass...")
-                print(f"Input shape: {input_ids.shape}")
-                print(f"Device: {input_ids.device}")
-                print(f"Model device: {next(model.parameters()).device}")
+                # print("Starting forward pass...")
+                # print(f"Input shape: {input_ids.shape}")
+                # print(f"Device: {input_ids.device}")
+                # print(f"Model device: {next(model.parameters()).device}")
                 
                 if scaler is not None:
-                    print("Using mixed precision")
+                    # print("Using mixed precision")
                     try:
                         with torch.amp.autocast('cuda'):
-                            print("Inside autocast context")
+                            # print("Inside autocast context")
                             outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
-                            print("Model call completed")
+                            # print("Model call completed")
                     except Exception as e:
                         print(f"Forward pass error: {e}")
                         import traceback
                         traceback.print_exc()
                         raise
                     
-                    print("Forward pass done")
-                    print(f"Output keys: {outputs.keys()}")
+                    # print("Forward pass done")
+                    # print(f"Output keys: {outputs.keys()}")
                     ce_loss = outputs['loss']
-                    print("Got CE loss")
+                    # print("Got CE loss")
                     # Knowledge distillation if teacher is available
                     kd_loss = torch.tensor(0.0, device=device)
-                    print("Created KD loss tensor")
+                    # print("Created KD loss tensor")
                     if teacher_model is not None:
-                        print("using teacher model for kd")
+                        # print("using teacher model for kd")
                         with torch.no_grad():
                             teacher_outputs = teacher_model(input_ids, attention_mask=attention_mask)
                             teacher_logits = teacher_outputs.logits
@@ -287,10 +282,10 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                         loss = ce_loss
                     
                     loss = loss / config.gradient_accumulation_steps
-                    print("About to backward")
+                    # print("About to backward")
                     
                     scaler.scale(loss).backward()
-                    print("Backward complete")
+                    # print("Backward complete")
                 else:
                     outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
                     ce_loss = outputs['loss']
@@ -313,7 +308,8 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 total_loss += loss.item()
                 total_ce_loss += ce_loss.item()
                 total_kd_loss += kd_loss.item() if teacher_model is not None else 0
-                print("Batch processing complete")
+
+                print(f"total_loss so far: {total_loss:.4f}")
             
             # Optimizer step
             if scaler is not None:
@@ -326,7 +322,6 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 optimizer.step()
             
             optimizer.zero_grad()
-            print("Optimizer step complete")
             
             if scheduler is not None and iteration < config.warmup_steps:
                 scheduler.step()
@@ -334,15 +329,6 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
             # Record training loss
             avg_loss = total_loss / config.gradient_accumulation_steps
             training_stats['iteration_losses'].append(avg_loss)
-            
-            # Logging - removed modulo check, log every iteration
-            print(f"\nIteration {iteration}/{config.num_iterations}")
-            print(f"Bit width: {current_bit_width}")
-            print(f"Loss: {avg_loss:.4f}")
-            print(f"CE Loss: {total_ce_loss / config.gradient_accumulation_steps:.4f}")
-            if teacher_model is not None:
-                print(f"KD Loss: {total_kd_loss / config.gradient_accumulation_steps:.4f}")
-            print(f"LR: {optimizer.param_groups[0]['lr']:.6f}")
 
             # Validation
             if iteration % config.eval_interval == 0 and iteration > 0:
