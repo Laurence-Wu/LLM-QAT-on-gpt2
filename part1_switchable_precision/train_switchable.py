@@ -294,6 +294,7 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 total_loss += loss.item()
                 total_ce_loss += ce_loss.item()
                 total_kd_loss += kd_loss.item() if teacher_model is not None else 0
+                print("Batch processing complete")
             
             # Optimizer step
             if scaler is not None:
@@ -306,6 +307,7 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 optimizer.step()
             
             optimizer.zero_grad()
+            print("Optimizer step complete")
             
             if scheduler is not None and iteration < config.warmup_steps:
                 scheduler.step()
