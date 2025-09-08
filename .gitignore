@@ -33,8 +33,6 @@ ENV/
 best_model.pt
 
 # Data files
-*.json
-results_report.json
 *.csv
 *.h5
 *.hdf5
