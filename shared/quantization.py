@@ -46,18 +46,18 @@ class LearnableFakeQuantize(nn.Module):
             self.quant_min = -(2 ** (self.num_bits - 1))
             self.quant_max = 2 ** (self.num_bits - 1) - 1
         
-        # Initialize buffers for per-channel or per-tensor quantization
+        # Store quantization statistics on CPU to save GPU memory
+        # These will be moved to GPU only when needed for computation
         if per_channel:
-            # Will be resized during first forward pass
-            self.register_buffer('scale', torch.ones(1))
-            self.register_buffer('zero_point', torch.zeros(1))
-            self.register_buffer('running_min', torch.zeros(1))
-            self.register_buffer('running_max', torch.zeros(1))
+            self.scale = torch.ones(1)  # Will be resized during first forward pass
+            self.zero_point = torch.zeros(1)
+            self.running_min = torch.zeros(1)
+            self.running_max = torch.zeros(1)
         else:
-            self.register_buffer('scale', torch.ones(1))
-            self.register_buffer('zero_point', torch.zeros(1))
-            self.register_buffer('running_min', torch.zeros(1))
-            self.register_buffer('running_max', torch.zeros(1))
+            self.scale = torch.ones(1)
+            self.zero_point = torch.zeros(1) 
+            self.running_min = torch.zeros(1)
+            self.running_max = torch.zeros(1)
         
         self.calibrated = False
     
@@ -79,24 +79,27 @@ class LearnableFakeQuantize(nn.Module):
                     min_val = min_val.min(dim=dim, keepdim=True)[0]
                     max_val = max_val.max(dim=dim, keepdim=True)[0]
                 
-                # Resize buffers if needed
+                # Store statistics on CPU to save GPU memory
+                if not self.calibrated:
+                    self.running_min = min_val.cpu().clone()  # Move to CPU
+                    self.running_max = max_val.cpu().clone()  # Move to CPU
+                    self.scale = torch.ones_like(self.running_min)  # Keep on CPU
+                    self.zero_point = torch.zeros_like(self.running_min)  # Keep on CPU
+                    self.calibrated = True
+                else:
+                    # Update on CPU
+                    min_cpu = min_val.cpu()
+                    max_cpu = max_val.cpu()
+                    self.running_min = self.running_min * 0.9 + min_cpu * 0.1
+                    self.running_max = self.running_max * 0.9 + max_cpu * 0.1
+            else:
+                # Per-tensor statistics - store on CPU
+                min_val = x.min().cpu()  # Move to CPU
+                max_val = x.max().cpu()  # Move to CPU
+                
                 if not self.calibrated:
                     self.running_min = min_val.clone()
                     self.running_max = max_val.clone()
-                    self.scale = torch.ones_like(min_val)
-                    self.zero_point = torch.zeros_like(min_val)
-                    self.calibrated = True
-                else:
-                    self.running_min = self.running_min * 0.9 + min_val * 0.1
-                    self.running_max = self.running_max * 0.9 + max_val * 0.1
-            else:
-                # Per-tensor statistics
-                min_val = x.min()
-                max_val = x.max()
-                
-                if not self.calibrated:
-                    self.running_min = min_val
-                    self.running_max = max_val
                     self.calibrated = True
                 else:
                     self.running_min = self.running_min * 0.9 + min_val * 0.1
@@ -106,22 +109,26 @@ class LearnableFakeQuantize(nn.Module):
             # Paper formula: α = max(|X_R|)/(2^(N-1) - 1)
             max_val = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
             max_val = torch.clamp(max_val, min=self.eps)
-            self.scale.data = max_val / (2**(self.num_bits-1) - 1)
-            self.zero_point.data = torch.zeros_like(self.scale.data)
+            self.scale = max_val / (2**(self.num_bits-1) - 1)
+            self.zero_point = torch.zeros_like(self.scale)
         else:
             range_val = torch.clamp(self.running_max - self.running_min, min=self.eps)
             denom = self.quant_max - self.quant_min
             if denom > 0:
-                self.scale.data = range_val / denom
-                if torch.any(self.scale.data > 0):
-                    self.zero_point.data = torch.round(self.quant_min - self.running_min / self.scale.data)
+                self.scale = range_val / denom
+                if torch.any(self.scale > 0):
+                    self.zero_point = torch.round(self.quant_min - self.running_min / self.scale)
                 else:
-                    self.zero_point.data = torch.zeros_like(self.zero_point.data)
+                    self.zero_point = torch.zeros_like(self.zero_point)
             else:
-                self.scale.data = torch.ones_like(self.scale.data)
-                self.zero_point.data = torch.zeros_like(self.zero_point.data)
+                self.scale = torch.ones_like(self.scale)
+                self.zero_point = torch.zeros_like(self.zero_point)
         
-        return QuantizationFunction.apply(x, self.scale, self.zero_point, 
+        # Move scale and zero_point to GPU only when needed for computation
+        scale_gpu = self.scale.to(x.device)
+        zero_point_gpu = self.zero_point.to(x.device)
+        
+        return QuantizationFunction.apply(x, scale_gpu, zero_point_gpu, 
                                          self.num_bits, self.symmetric)
 
 class QuantizedLinear(nn.Module):
