@@ -22,7 +22,10 @@ class LoRALayer(nn.Module):
         nn.init.zeros_(self.lora_B)
         
     def forward(self, x):
-        return (x @ self.lora_A @ self.lora_B) * self.scaling
+        # Ensure all tensors are on the same device
+        lora_A = self.lora_A.to(x.device)
+        lora_B = self.lora_B.to(x.device)
+        return (x @ lora_A @ lora_B) * self.scaling
 
 class MultiPrecisionLoRA(nn.Module):
     def __init__(self, in_features, out_features, bit_widths=None):
