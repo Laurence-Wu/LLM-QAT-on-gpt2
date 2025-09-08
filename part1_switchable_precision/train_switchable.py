@@ -224,7 +224,7 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
             if iteration == 0:
                 log_memory_usage("Before First Forward Pass")
             
-            # Training step
+            # Training step - reset accumulators  
             total_loss = 0
             total_ce_loss = 0
             total_kd_loss = 0
@@ -284,6 +284,7 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                     loss = loss / config.gradient_accumulation_steps
                     # print("About to backward")
                     
+                    # No need for retain_graph - each forward pass creates its own graph
                     scaler.scale(loss).backward()
                     # print("Backward complete")
                 else:
@@ -303,6 +304,7 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                         loss = ce_loss
                     
                     loss = loss / config.gradient_accumulation_steps
+                    # No need for retain_graph - each forward pass creates its own graph
                     loss.backward()
                 
                 total_loss += loss.item()
@@ -322,6 +324,7 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
                 optimizer.step()
             
+            # Reset gradients for next iteration (after optimizer.step())
             optimizer.zero_grad()
             
             if scheduler is not None and iteration < config.warmup_steps:
