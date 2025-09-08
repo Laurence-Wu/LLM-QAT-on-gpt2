@@ -166,19 +166,8 @@ def main():
     
     print("Training returned")
     
-    # Phase 2: save the result
-    print("Extracting state_dict...")
-    state_dict = trained_model.state_dict()
-    print("State dict extracted")
-    
-    print("Saving model...")
-    model_save_path = 'switchable_model.pt'
-    torch.save({
-        'model_state_dict': state_dict,
-        'model_config': model_config.__dict__,
-        'training_config': training_config.__dict__,
-        'results': results
-    }, model_save_path)
+    # Skip model saving to avoid crash
+    print("Skipping model save")
 
     return trained_model, results
 
