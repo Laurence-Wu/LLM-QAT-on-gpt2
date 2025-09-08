@@ -40,7 +40,9 @@ class QuantizedGPT2Attention(nn.Module):
         v = self.kv_quantizer(v)
         
         attn_weights = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)
-        attn_weights = attn_weights.masked_fill(self.bias[:T, :T] == 0, float('-inf'))
+        # Ensure bias is on the same device as attn_weights
+        bias_mask = self.bias[:T, :T].to(attn_weights.device)
+        attn_weights = attn_weights.masked_fill(bias_mask == 0, float('-inf'))
         attn_weights = F.softmax(attn_weights, dim=-1)
         
         attn_output = attn_weights @ v
@@ -148,7 +150,7 @@ class SwitchableQuantizedGPT2(nn.Module):
         
         for block in self.h:
             if self.use_gradient_checkpointing and self.training:
-                hidden_states = checkpoint(block, hidden_states, attention_mask)
+                hidden_states = checkpoint(block, hidden_states, attention_mask, use_reentrant=False)
             else:
                 hidden_states = block(hidden_states, attention_mask)
         
@@ -174,7 +176,7 @@ class SwitchableQuantizedGPT2(nn.Module):
         
         for block in self.h:
             if self.use_gradient_checkpointing and self.training:
-                hidden_states = checkpoint(block, hidden_states, attention_mask)
+                hidden_states = checkpoint(block, hidden_states, attention_mask, use_reentrant=False)
             else:
                 hidden_states = block(hidden_states, attention_mask)
         
