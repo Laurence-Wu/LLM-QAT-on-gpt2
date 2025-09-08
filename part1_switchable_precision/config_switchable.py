@@ -64,7 +64,7 @@ class TrainingConfig:
         self.bit_width_schedule = None          # Custom schedule if strategy is 'scheduled'
         
         # Loss and metrics
-        self.gradient_accumulation_steps = 4 # Gradient accumulation for larger effective batch
+        self.gradient_accumulation_steps = 2 # Gradient accumulation for larger effective batch
         self.max_grad_norm = 1.0  # Gradient clipping threshold
         
         # Memory optimization
