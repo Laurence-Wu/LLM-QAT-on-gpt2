@@ -43,9 +43,12 @@ def initialize_model(model_config, device):
     )
     
     # Initialize model with switchable quantization
-    model = SwitchableQuantizedGPT2(gpt2_config).to(device)
+    model = SwitchableQuantizedGPT2(gpt2_config)
     
     load_pretrained_weights(model)
+    
+    # Move model to device AFTER loading weights
+    model = model.to(device)
     
     print(f"Model initialized with {model_config.n_layer} layers")
     print(f"Switchable bit widths: {model_config.bit_widths}")
