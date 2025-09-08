@@ -364,16 +364,11 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
         traceback.print_exc()
         raise e
     
-    # Print training summary
-    print("\n" + "="*60)
-    print("TRAINING SUMMARY")
-    print("="*60)
-    print(f"Best validation loss: {training_stats['best_val_loss']:.4f}")
-    print(f"Best iteration: {training_stats['best_iteration']}")
-    print("\nBit-width usage distribution:")
-    total_usage = sum(training_stats['bit_width_usage'].values())
-    for bit_width, count in training_stats['bit_width_usage'].items():
-        percentage = (count / total_usage) * 100
-        print(f"  {bit_width}-bit: {percentage:.1f}% ({count}/{total_usage} iterations)")
+    # Save training statistics
+    import json
+    with open('training_stats.json', 'w') as f:
+        json.dump(training_stats, f, indent=2)
+    
+    print(f"\nTraining completed. Best validation loss: {training_stats['best_val_loss']:.4f}")
     
     return model
