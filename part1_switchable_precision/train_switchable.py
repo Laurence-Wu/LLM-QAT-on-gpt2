@@ -205,6 +205,11 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
     try:
         for iteration in tqdm(range(config.num_iterations), desc="switchableP"):
             
+            # Debug every 100 iterations
+            if iteration % 100 == 0:
+                print(f"Iter {iteration}")
+                log_memory_usage(f"Iter {iteration}")
+            
             model.train() # my little flag ~~~~~
         
         # Get current bit width from schedule
@@ -355,8 +360,8 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
             torch.cuda.empty_cache()
             gc.collect()
             
+        print("Training loop completed")
         log_memory_usage("Training Loop Completed")
-        print("Training loop finished successfully!")
     
     except Exception as e:
         print(f"\n!!! TRAINING ERROR CAUGHT !!!")
@@ -377,8 +382,6 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
     except Exception as e:
         print(f"Stats error: {e}")
     
-    log_memory_usage("Before Final Message")
-    print(f"\nTraining completed. Best validation loss: {training_stats['best_val_loss']:.4f}")
-    
-    log_memory_usage("Before Return Model")
+    print("Before return")
+    log_memory_usage("Before Return")
     return model
