@@ -253,7 +253,7 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 if scaler is not None:
                     with torch.amp.autocast('cuda'):
                         outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
-                print("Forward pass done")
+                        print("Forward pass done")
                         ce_loss = outputs['loss']
                         
                         # Knowledge distillation if teacher is available
