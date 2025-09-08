@@ -201,9 +201,11 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
     # Main training loop
     print("\nStarting switchable precision training...")
     log_memory_usage("Before Training Loop")
-    for iteration in tqdm(range(config.num_iterations), desc="switchableP"):
-        
-        model.train() # my little flag ~~~~~
+    
+    try:
+        for iteration in tqdm(range(config.num_iterations), desc="switchableP"):
+            
+            model.train() # my little flag ~~~~~
         
         # Get current bit width from schedule
         current_bit_width = bit_width_schedule[iteration]
@@ -219,6 +221,10 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
         # Set model precision
         model.set_layer_precision(layer_config)
         
+        # Log memory at first iteration to catch early OOM
+        if iteration == 0:
+            log_memory_usage("Before First Forward Pass")
+        
         # Training step
         total_loss = 0
         total_ce_loss = 0
@@ -227,6 +233,10 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
         for batch_idx, batch in enumerate(train_loader):
             if batch_idx >= config.gradient_accumulation_steps:
                 break
+            
+            # Log memory on first batch to catch loading issues
+            if iteration == 0 and batch_idx == 0:
+                log_memory_usage("After Loading First Batch")
             
             device = next(model.parameters()).device
             input_ids = batch['input_ids'].to(device)
@@ -344,6 +354,15 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
         if iteration % config.empty_cache_interval == 0:
             torch.cuda.empty_cache()
             gc.collect()
+    
+    except Exception as e:
+        print(f"\n!!! TRAINING ERROR CAUGHT !!!")
+        print(f"Error type: {type(e).__name__}")
+        print(f"Error message: {str(e)}")
+        log_memory_usage("At Error")
+        import traceback
+        traceback.print_exc()
+        raise e
     
     # Print training summary
     print("\n" + "="*60)

@@ -41,8 +41,8 @@ class TrainingConfig:
     """
     def __init__(self):
         # Data configuration
-        self.train_split = 'train[:2000]'# Training data split
-        self.val_split = 'validation[:200]'# Validation data split
+        self.train_split = 'train[:20]'# Training data split
+        self.val_split = 'validation[:2]'# Validation data split
         self.batch_size = 16
         self.max_seq_length = 256
         self.doc_stride = 128
