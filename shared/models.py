@@ -6,8 +6,8 @@ from typing import Optional, Dict, List
 from transformers import GPT2Config
 from torch.utils.checkpoint import checkpoint
 
-from .quantization import LearnableFakeQuantize
-from .lora import QuantizedLinearWithLoRA
+from quantization import LearnableFakeQuantize
+from lora import QuantizedLinearWithLoRA
 
 class QuantizedGPT2Attention(nn.Module):
     def __init__(self, config: GPT2Config, bit_widths=None):
