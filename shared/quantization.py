@@ -125,8 +125,9 @@ class LearnableFakeQuantize(nn.Module):
                 self.zero_point = torch.zeros_like(self.zero_point)
         
         # Move scale and zero_point to GPU only when needed for computation
-        scale_gpu = self.scale.to(x.device)
-        zero_point_gpu = self.zero_point.to(x.device)
+        # Use detach() to break any potential gradient links
+        scale_gpu = self.scale.detach().to(x.device)
+        zero_point_gpu = self.zero_point.detach().to(x.device)
         
         return QuantizationFunction.apply(x, scale_gpu, zero_point_gpu, 
                                          self.num_bits, self.symmetric)

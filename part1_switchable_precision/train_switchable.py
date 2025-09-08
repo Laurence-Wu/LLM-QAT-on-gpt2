@@ -136,7 +136,8 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
     # Clear GPU cache for optimal memory usage
     torch.cuda.empty_cache()
     gc.collect()
-    model.use_gradient_checkpointing = True
+    # Temporarily disable gradient checkpointing to debug backward issue
+    model.use_gradient_checkpointing = False
     
     # Log initial memory usage
     log_memory_usage("Training Start")
@@ -224,10 +225,13 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
             if iteration == 0:
                 log_memory_usage("Before First Forward Pass")
             
-            # Training step - reset accumulators  
+            # Training step - reset accumulators and clear gradients
             total_loss = 0
             total_ce_loss = 0
             total_kd_loss = 0
+            
+            # Clear gradients at start of each iteration
+            optimizer.zero_grad()
             
             for batch_idx, batch in enumerate(train_loader):
                 if batch_idx >= config.gradient_accumulation_steps:
@@ -324,8 +328,7 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
                 optimizer.step()
             
-            # Reset gradients for next iteration (after optimizer.step())
-            optimizer.zero_grad()
+            # Gradients will be cleared at start of next iteration
             
             if scheduler is not None and iteration < config.warmup_steps:
                 scheduler.step()
