@@ -164,6 +164,8 @@ def main():
         n_layers=model_config.n_layer
     )
     
+    print("Returned from training function successfully!")
+    
     # Phase 2: save the result
 
     model_save_path = 'switchable_model.pt'

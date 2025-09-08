@@ -354,6 +354,9 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
         if iteration % config.empty_cache_interval == 0:
             torch.cuda.empty_cache()
             gc.collect()
+            
+        log_memory_usage("Training Loop Completed")
+        print("Training loop finished successfully!")
     
     except Exception as e:
         print(f"\n!!! TRAINING ERROR CAUGHT !!!")
@@ -365,10 +368,18 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
         raise e
     
     # Save training statistics
-    import json
-    with open('training_stats.json', 'w') as f:
-        json.dump(training_stats, f, indent=2)
+    log_memory_usage("Before Saving Stats")
+    try:
+        import json
+        with open('training_stats.json', 'w') as f:
+            json.dump(training_stats, f, indent=2)
+        log_memory_usage("After Saving Stats")
+        print("Training stats saved to training_stats.json")
+    except Exception as e:
+        print(f"Error saving stats: {e}")
     
+    log_memory_usage("Before Final Message")
     print(f"\nTraining completed. Best validation loss: {training_stats['best_val_loss']:.4f}")
     
+    log_memory_usage("Before Return Model")
     return model
