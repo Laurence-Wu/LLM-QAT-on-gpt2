@@ -25,7 +25,6 @@ from dataset import create_dataloaders
 # Import local configurations and training functions
 from config_switchable import ModelConfig, TrainingConfig
 from train_switchable import train_switchable_quantization
-from evaluate_switchable import evaluate_quantization_configs
 
 
 def initialize_model(model_config, device):
