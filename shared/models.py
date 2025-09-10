@@ -80,9 +80,7 @@ class QuantizedGPT2MLP(nn.Module):
 class QuantizedGPT2Block(nn.Module):
     def __init__(self, config: GPT2Config, bit_widths=None):
         super().__init__()
-        if bit_widths is None:
-            bit_widths = [4, 8, 16]
-            
+
         self.ln_1 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
         self.attn = QuantizedGPT2Attention(config, bit_widths)
         self.ln_2 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
@@ -109,25 +107,24 @@ class SwitchableQuantizedGPT2(nn.Module):
     def __init__(self, config: GPT2Config):
         super().__init__()
         self.config = config
-        self.use_gradient_checkpointing = True  # Enable by default for H100 efficiency
+        self.use_gradient_checkpointing = True
         
         self.wte = nn.Embedding(config.vocab_size, config.n_embd)
         self.wpe = nn.Embedding(config.n_positions, config.n_embd)
         self.drop = nn.Dropout(config.embd_pdrop)
         
-        bit_widths = getattr(config, 'bit_widths', [4, 8, 16])
-        self.h = nn.ModuleList([
-            QuantizedGPT2Block(config, bit_widths=bit_widths) 
-            for _ in range(config.n_layer)
-        ])
-        
+        bit_widths = config.bit_widths
+        self.h = nn.ModuleList()
+        for _ in range(config.n_layer):
+            self.h.append(QuantizedGPT2Block(config, bit_widths=bit_widths))
+
         self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
         
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         
         self.lm_head.weight = self.wte.weight
         
-        self.apply(self._init_weights)
+        self.apply(self._init_weights) ## handy trick learned from gemini
         
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -203,6 +200,7 @@ class SwitchableQuantizedGPT2(nn.Module):
         """
         for i, config in enumerate(layer_configs):
             if i < len(self.h):
+                
                 # Set attention precision
                 if hasattr(self.h[i].attn.c_attn, 'set_precision'):
                     self.h[i].attn.c_attn.set_precision(
@@ -226,3 +224,4 @@ class SwitchableQuantizedGPT2(nn.Module):
                         config.get('mlp_bits', 8), 
                         config.get('mlp_bits', 8)
                     )
+                    

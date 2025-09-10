@@ -37,17 +37,6 @@ def log_memory_usage(step: str = ""):
 
 
 def knowledge_distillation_loss(student_logits, teacher_logits, temperature=4.0):
-    """
-    Calculate knowledge distillation loss between student and teacher models.
-    
-    Args:
-        student_logits: Logits from the student model
-        teacher_logits: Logits from the teacher model
-        temperature: Temperature for softening probability distributions
-    
-    Returns:
-        KL divergence loss scaled by temperature squared
-    """
     soft_teacher = F.softmax(teacher_logits / temperature, dim=-1)
     soft_student = F.log_softmax(student_logits / temperature, dim=-1)
     
@@ -120,29 +109,14 @@ def create_layer_precision_config(bit_width: int, n_layers: int,
 
 
 def train_switchable_quantization(model, train_loader, val_loader, config, model_config, n_layers: int = 12):
-    """
-    Main training loop for switchable precision training.
-    
-    Args:
-        model: SwitchableQuantizedGPT2 model
-        train_loader: DataLoader for training data
-        val_loader: DataLoader for validation data
-        config: TrainingConfig object
-        n_layers: Number of layers in the model
-    
-    Returns:
-        Trained model
-    """
     # Clear GPU cache for optimal memory usage
     torch.cuda.empty_cache()
     gc.collect()
-    # Temporarily disable gradient checkpointing to debug backward issue
-    model.use_gradient_checkpointing = False
+    model.use_gradient_checkpointing = True
     
     # Log initial memory usage
     log_memory_usage("Training Start")
-    
-    # Setup optimizer
+    # favorite RMSprop and momentum optimizer ~
     optimizer = torch.optim.AdamW(
         model.parameters(), 
         lr=config.learning_rate,
@@ -153,13 +127,12 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
     
     # Setup learning rate scheduler
     scheduler = None
-    if config.warmup_steps > 0:
-        from torch.optim.lr_scheduler import CosineAnnealingLR
-        scheduler = CosineAnnealingLR(
-            optimizer, 
-            T_max=config.warmup_steps,
-            eta_min=config.learning_rate*0.1
-        )
+    from torch.optim.lr_scheduler import CosineAnnealingLR
+    scheduler = CosineAnnealingLR(
+        optimizer, 
+        T_max=config.warmup_steps,
+        eta_min=config.learning_rate*0.1
+    )
     
     # Setup mixed precision training
     scaler = torch.amp.GradScaler('cuda')
@@ -235,102 +208,45 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
             
             for batch_idx, batch in enumerate(train_loader):
                 if batch_idx >= config.gradient_accumulation_steps:
-                    break
-                
-                # Log memory on first batch to catch loading issues
-                if iteration == 0 and batch_idx == 0:
-                    log_memory_usage("After Loading First Batch")
-                
-                device = next(model.parameters()).device
+                    break # accumulate the gradients over some iterations
+
+                device = 'cuda'
                 input_ids = batch['input_ids'].to(device)
                 attention_mask = batch.get('attention_mask', None)
-                if attention_mask is not None:
-                    attention_mask = attention_mask.to(device)
-                
-                # Forward pass with mixed precision
-                # print("Starting forward pass...")
-                # print(f"Input shape: {input_ids.shape}")
-                # print(f"Device: {input_ids.device}")
-                # print(f"Model device: {next(model.parameters()).device}")
-                
-                if scaler is not None:
-                    # print("Using mixed precision")
-                    try:
-                        with torch.amp.autocast('cuda'):
-                            # print("Inside autocast context")
-                            outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
-                            # print("Model call completed")
-                    except Exception as e:
-                        print(f"Forward pass error: {e}")
-                        import traceback
-                        traceback.print_exc()
-                        raise
-                    
-                    # print("Forward pass done")
-                    # print(f"Output keys: {outputs.keys()}")
-                    ce_loss = outputs['loss']
-                    # print("Got CE loss")
-                    # Knowledge distillation if teacher is available
-                    kd_loss = torch.tensor(0.0, device=device)
-                    # print("Created KD loss tensor")
-                    if teacher_model is not None:
-                        # print("using teacher model for kd")
-                        with torch.no_grad():
-                            teacher_outputs = teacher_model(input_ids, attention_mask=attention_mask)
-                            teacher_logits = teacher_outputs.logits
-                        
-                        student_logits = outputs['logits']
-                        kd_loss = knowledge_distillation_loss(student_logits, teacher_logits)
-                        loss = 0.7 * ce_loss + 0.3 * kd_loss
-                    else:
-                        loss = ce_loss
-                    
-                    loss = loss / config.gradient_accumulation_steps
-                    # print("About to backward")
-                    
-                    # No need for retain_graph - each forward pass creates its own graph
-                    scaler.scale(loss).backward()
-                    # print("Backward complete")
-                else:
+                attention_mask = attention_mask.to(device)
+                with torch.amp.autocast('cuda'):
                     outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
-                    ce_loss = outputs['loss']
+                
+                ce_loss = outputs['loss']
+                kd_loss = torch.tensor(0.0, device=device)
+                with torch.no_grad():
+                    teacher_outputs = teacher_model(input_ids, attention_mask=attention_mask)
+                    teacher_logits = teacher_outputs.logits
                     
-                    kd_loss = torch.tensor(0.0, device=device)
-                    if teacher_model is not None:
-                        with torch.no_grad():
-                            teacher_outputs = teacher_model(input_ids, attention_mask=attention_mask)
-                            teacher_logits = teacher_outputs.logits
-                        
-                        student_logits = outputs['logits']
-                        kd_loss = knowledge_distillation_loss(student_logits, teacher_logits)
-                        loss = 0.7 * ce_loss + 0.3 * kd_loss
-                    else:
-                        loss = ce_loss
-                    
-                    loss = loss / config.gradient_accumulation_steps
-                    # No need for retain_graph - each forward pass creates its own graph
-                    loss.backward()
+                student_logits = outputs['logits']
+                kd_loss = knowledge_distillation_loss(student_logits, teacher_logits)
+                loss = 0.7 * ce_loss + 0.3 * kd_loss
+
+                loss = loss / config.gradient_accumulation_steps
+                
+                # No need for retain_graph - each forward pass creates its own graph
+                scaler.scale(loss).backward()
+                # print("Backward complete")
                 
                 total_loss += loss.item()
                 total_ce_loss += ce_loss.item()
-                total_kd_loss += kd_loss.item() if teacher_model is not None else 0
-
+                total_kd_loss += kd_loss.item()
                 print(f"total_loss so far: {total_loss:.4f}")
             # End of batch accumulation
             
             # Optimizer step
-            if scaler is not None:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
-                scaler.step(optimizer)
-                scaler.update()
-            else:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
-                optimizer.step()
-            
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
+            scaler.step(optimizer)
+            scaler.update()
             # Gradients will be cleared at start of next iteration
             
-            if scheduler is not None and iteration < config.warmup_steps:
+            if iteration < config.warmup_steps:
                 scheduler.step()
             
             # Record training loss

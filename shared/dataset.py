@@ -57,7 +57,7 @@ class SQuADDataset(Dataset):
         return self.examples[idx]
 
 def create_dataloaders(tokenizer, train_split, val_split, 
-                       batch_size=16, max_length=384, doc_stride=128):
+                       batch_size, max_length, doc_stride):
     train_dataset = SQuADDataset(tokenizer, split=train_split, 
                                  max_length=max_length, doc_stride=doc_stride)
     val_dataset = SQuADDataset(tokenizer, split=val_split, 

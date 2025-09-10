@@ -21,14 +21,11 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 # Import shared components
 from models import SwitchableQuantizedGPT2
 from dataset import create_dataloaders
-
-# Import local configurations and training functions
 from config_switchable import ModelConfig, TrainingConfig
 from train_switchable import train_switchable_quantization
 
 
 def initialize_model(model_config, device):
-    print("\nInitializing\n")
     
     # Create GPT-2 configuration with quantization support
     gpt2_config = GPT2Config(
@@ -44,10 +41,14 @@ def initialize_model(model_config, device):
     
     # Initialize model with switchable quantization
     model = SwitchableQuantizedGPT2(gpt2_config)
+    # initialize all the layers with apply() function
+    # layerNorm
     
+    # weights of QKV, projection of the output of transformer
+    # and the two feedforward layers
     load_pretrained_weights(model)
     
-    # Move model to device AFTER loading weights
+    # Model should be on the GPU
     model = model.to(device)
     
     print(f"Model initialized with {model_config.n_layer} layers")
@@ -57,68 +58,56 @@ def initialize_model(model_config, device):
 
 
 def load_pretrained_weights(model):
-    """
-    Load pretrained GPT-2 weights into the switchable quantized model.
+    print("Loading pretrained GPT-2 weights")
+    pretrained = GPT2Model.from_pretrained('gpt2')
     
-    Args:
-        model: SwitchableQuantizedGPT2 model to load weights into
-    """
-    try:
-        print("Loading pretrained GPT-2 weights...")
-        pretrained = GPT2Model.from_pretrained('gpt2')
+    # Copy embeddings
+    model.wte.weight.data = pretrained.wte.weight.data.clone()
+    model.wpe.weight.data = pretrained.wpe.weight.data.clone()
+    
+    # Copy transformer blocks
+    for i in range(min(len(model.h), len(pretrained.h))):
+        # Layer normalizations
+        model.h[i].ln_1.weight.data = pretrained.h[i].ln_1.weight.data.clone()
+        model.h[i].ln_1.bias.data = pretrained.h[i].ln_1.bias.data.clone()
+        model.h[i].ln_2.weight.data = pretrained.h[i].ln_2.weight.data.clone()
+        model.h[i].ln_2.bias.data = pretrained.h[i].ln_2.bias.data.clone()
         
-        # Copy embeddings
-        model.wte.weight.data = pretrained.wte.weight.data.clone()
-        model.wpe.weight.data = pretrained.wpe.weight.data.clone()
+        # Attention weights (handling Conv1D transpose)
+        if hasattr(model.h[i].attn.c_attn, 'quantized_linear'):
+            model.h[i].attn.c_attn.quantized_linear.weight.data = \
+                pretrained.h[i].attn.c_attn.weight.data.t().contiguous()
+            if pretrained.h[i].attn.c_attn.bias is not None:
+                model.h[i].attn.c_attn.quantized_linear.bias.data = \
+                    pretrained.h[i].attn.c_attn.bias.data.clone()
         
-        # Copy transformer blocks
-        for i in range(min(len(model.h), len(pretrained.h))):
-            # Layer normalizations
-            model.h[i].ln_1.weight.data = pretrained.h[i].ln_1.weight.data.clone()
-            model.h[i].ln_1.bias.data = pretrained.h[i].ln_1.bias.data.clone()
-            model.h[i].ln_2.weight.data = pretrained.h[i].ln_2.weight.data.clone()
-            model.h[i].ln_2.bias.data = pretrained.h[i].ln_2.bias.data.clone()
-            
-            # Attention weights (handling Conv1D transpose)
-            if hasattr(model.h[i].attn.c_attn, 'quantized_linear'):
-                model.h[i].attn.c_attn.quantized_linear.weight.data = \
-                    pretrained.h[i].attn.c_attn.weight.data.t().contiguous()
-                if pretrained.h[i].attn.c_attn.bias is not None:
-                    model.h[i].attn.c_attn.quantized_linear.bias.data = \
-                        pretrained.h[i].attn.c_attn.bias.data.clone()
-            
-            if hasattr(model.h[i].attn.c_proj, 'quantized_linear'):
-                model.h[i].attn.c_proj.quantized_linear.weight.data = \
-                    pretrained.h[i].attn.c_proj.weight.data.t().contiguous()
-                if pretrained.h[i].attn.c_proj.bias is not None:
-                    model.h[i].attn.c_proj.quantized_linear.bias.data = \
-                        pretrained.h[i].attn.c_proj.bias.data.clone()
-            
-            # MLP weights
-            if hasattr(model.h[i].mlp.c_fc, 'quantized_linear'):
-                model.h[i].mlp.c_fc.quantized_linear.weight.data = \
-                    pretrained.h[i].mlp.c_fc.weight.data.t().contiguous()
-                if pretrained.h[i].mlp.c_fc.bias is not None:
-                    model.h[i].mlp.c_fc.quantized_linear.bias.data = \
-                        pretrained.h[i].mlp.c_fc.bias.data.clone()
-            
-            if hasattr(model.h[i].mlp.c_proj, 'quantized_linear'):
-                model.h[i].mlp.c_proj.quantized_linear.weight.data = \
-                    pretrained.h[i].mlp.c_proj.weight.data.t().contiguous()
-                if pretrained.h[i].mlp.c_proj.bias is not None:
-                    model.h[i].mlp.c_proj.quantized_linear.bias.data = \
-                        pretrained.h[i].mlp.c_proj.bias.data.clone()
+        if hasattr(model.h[i].attn.c_proj, 'quantized_linear'):
+            model.h[i].attn.c_proj.quantized_linear.weight.data = \
+                pretrained.h[i].attn.c_proj.weight.data.t().contiguous()
+            if pretrained.h[i].attn.c_proj.bias is not None:
+                model.h[i].attn.c_proj.quantized_linear.bias.data = \
+                    pretrained.h[i].attn.c_proj.bias.data.clone()
         
-        # Final layer normalization
-        model.ln_f.weight.data = pretrained.ln_f.weight.data.clone()
-        model.ln_f.bias.data = pretrained.ln_f.bias.data.clone()
+        # MLP weights
+        if hasattr(model.h[i].mlp.c_fc, 'quantized_linear'):
+            model.h[i].mlp.c_fc.quantized_linear.weight.data = \
+                pretrained.h[i].mlp.c_fc.weight.data.t().contiguous()
+            if pretrained.h[i].mlp.c_fc.bias is not None:
+                model.h[i].mlp.c_fc.quantized_linear.bias.data = \
+                    pretrained.h[i].mlp.c_fc.bias.data.clone()
         
-        print("Pretrained weights successfully loaded")
-        
-    except Exception as e:
-        print(f"Warning: Could not load pretrained weights: {e}")
-        print("Continuing with random initialization...")
+        if hasattr(model.h[i].mlp.c_proj, 'quantized_linear'):
+            model.h[i].mlp.c_proj.quantized_linear.weight.data = \
+                pretrained.h[i].mlp.c_proj.weight.data.t().contiguous()
+            if pretrained.h[i].mlp.c_proj.bias is not None:
+                model.h[i].mlp.c_proj.quantized_linear.bias.data = \
+                    pretrained.h[i].mlp.c_proj.bias.data.clone()
+    
+    # Final layer normalization
+    model.ln_f.weight.data = pretrained.ln_f.weight.data.clone()
+    model.ln_f.bias.data = pretrained.ln_f.bias.data.clone()
 
+    print("Pretrained weights loaded")
 
 def main():
 
@@ -128,25 +117,20 @@ def main():
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         gc.collect()
-        print(f"GPU: {torch.cuda.get_device_name(0)}")
-        print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
     
-    # Load configurations
+    # Load configurations to cpu
     model_config = ModelConfig()
     training_config = TrainingConfig()
     
-    # Initialize model
+    # Initialize model to gpu
     model = initialize_model(model_config, device)
-    
-    if torch.cuda.is_available():
-        print(f"Model GPU Memory: {torch.cuda.memory_allocated() / 1e9:.3f} GB")
-    
-    # Setup tokenizer
+
+    # Setup tokenizer to cpu
     tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
-    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.pad_token = tokenizer.eos_token #use the end token as the padding to each sentences
     
-    # Create data loaders
-    print("\nLoading datasets...")
+    # Create data loaders in cpu
+    print("\nDatasets")
     train_loader, val_loader = create_dataloaders(
         tokenizer,
         train_split=training_config.train_split,
@@ -155,16 +139,17 @@ def main():
         max_length=training_config.max_seq_length,
         doc_stride=training_config.doc_stride
     )
-    
-    # Phase 1: Train with switchable quantization
-    
+
+    print(f"GPU: {torch.cuda.get_device_name(0)}")
+    print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+
+    # handle the procecssing part carefully
     trained_model = train_switchable_quantization(
         model, 
         train_loader, 
         val_loader, 
         training_config,
-        model_config,
-        n_layers=model_config.n_layer
+        model_config
     )
     
     print("Training returned")
@@ -194,8 +179,4 @@ def main():
 
 
 if __name__ == "__main__":
-    try:
-        model, results = main()
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
+    main()
