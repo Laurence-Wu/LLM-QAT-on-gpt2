@@ -16,6 +16,11 @@ def train_qat(model, train_loader, val_loader, config, model_config):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model = model.to(device)
     
+    # Clear cache before starting
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        gc.collect()
+    
     # Optimizer
     optimizer = AdamW(
         model.parameters(),
@@ -37,20 +42,24 @@ def train_qat(model, train_loader, val_loader, config, model_config):
     print(f"Iterations: {config.num_iterations}, Batch size: {config.batch_size}")
     print(f"Gradient accumulation: {config.gradient_accumulation_steps}")
     
+    # Create data iterator
+    train_iter = iter(train_loader)
+    
     # Main training loop
     for iteration in tqdm(range(config.num_iterations), desc="QAT"):
         model.train()
         
-        # Accumulate gradients
+        # Clear gradients only at the start of accumulation
+        optimizer.zero_grad(set_to_none=True)
         total_loss = 0
-        optimizer.zero_grad()
         
+        # Accumulate gradients over multiple steps
         for step in range(config.gradient_accumulation_steps):
             try:
-                batch = next(iter(train_loader))
-            except:
-                train_loader = iter(train_loader)
-                batch = next(train_loader)
+                batch = next(train_iter)
+            except StopIteration:
+                train_iter = iter(train_loader)
+                batch = next(train_iter)
             
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch.get('attention_mask')
@@ -62,15 +71,19 @@ def train_qat(model, train_loader, val_loader, config, model_config):
                 outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
                 loss = outputs['loss'] / config.gradient_accumulation_steps
             
-            # Backward
+            # Backward - accumulates gradients
             if scaler:
                 scaler.scale(loss).backward()
             else:
                 loss.backward()
             
             total_loss += loss.item()
+            
+            # Clean up intermediate tensors (but NOT gradients!)
+            del outputs, loss
+            # Keep input_ids for next iteration if needed
         
-        # Optimizer step
+        # Optimizer step - after all gradient accumulation
         if scaler:
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
@@ -82,9 +95,10 @@ def train_qat(model, train_loader, val_loader, config, model_config):
         
         scheduler.step()
         
-        # Memory cleanup
+        # Memory cleanup - only after optimizer step
         if iteration % config.empty_cache_interval == 0:
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             gc.collect()
         
         # Evaluation
@@ -107,7 +121,7 @@ def evaluate(model, val_loader, device, use_amp):
     
     with torch.no_grad():
         for batch in val_loader:
-            if num_batches >= 10:  # Quick eval on subset
+            if num_batches >= 5:  # Reduce eval batches to save memory
                 break
                 
             input_ids = batch['input_ids'].to(device)
@@ -121,5 +135,12 @@ def evaluate(model, val_loader, device, use_amp):
             
             total_loss += loss.item()
             num_batches += 1
+            
+            # Clean up
+            del outputs, loss
+    
+    # Clear cache after eval
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     
     return total_loss / max(num_batches, 1)
