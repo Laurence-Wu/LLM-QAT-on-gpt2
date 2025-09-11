@@ -325,15 +325,15 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 with torch.no_grad():
                     for name, param in model.named_parameters():
                         if param.requires_grad and param.grad is not None:
-                            # Scale the gradient for accumulation
-                            scaled_grad = param.grad.data / scaler.get_scale()
+                            # Don't scale here - let scaler.unscale_ handle it later
+                            grad_data = param.grad.data
                             
                             # Initialize CPU accumulator if first batch
                             if batch_idx == 0:
                                 cpu_gradients[name].zero_()
                             
-                            # Move gradient to CPU and accumulate
-                            cpu_gradients[name].add_(scaled_grad.cpu())
+                            # Move gradient to CPU and accumulate (still scaled)
+                            cpu_gradients[name].add_(grad_data.cpu())
                             
                             # Clear the GPU gradient immediately to free memory
                             param.grad = None
@@ -371,7 +371,7 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 for name, param in model.named_parameters():
                     if param.requires_grad and name in cpu_gradients:
                         # Move accumulated gradient from CPU to GPU
-                        # Divide by accumulation steps for proper averaging
+                        # The gradients are still scaled, and we divide by accumulation steps
                         param.grad = cpu_gradients[name].to('cuda') / config.gradient_accumulation_steps
             
             # ========== DEBUG MEMORY MONITORING START ==========
@@ -380,9 +380,10 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
             # ========== DEBUG MEMORY MONITORING END ==========
             
             # Optimizer step with accumulated gradients
-            # Note: No need to unscale since we already scaled during accumulation
+            # We need to use scaler properly since we're using mixed precision
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
-            optimizer.step()
+            scaler.step(optimizer)
             scaler.update()
             
             # ========== DEBUG MEMORY MONITORING START ==========
