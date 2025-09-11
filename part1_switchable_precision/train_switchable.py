@@ -36,12 +36,58 @@ def log_memory_usage(step: str = ""):
     print(f"[{step}] Process Memory: {process_mem:.2f} GB")
 
 
+def init_cpu_gradient_accumulator(model):
+    """Initialize CPU gradient accumulator for memory-efficient training."""
+    cpu_gradient_accumulator = {}
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            # Use float32 for CPU accumulation to maintain precision
+            cpu_gradient_accumulator[name] = torch.zeros_like(
+                param.data, device='cpu', dtype=torch.float32
+            )
+    return cpu_gradient_accumulator
+
+
+def accumulate_gradients_on_cpu(model, cpu_accumulator, keep_scaled=True):
+    """
+    Move gradients from GPU to CPU and accumulate.
+    Args:
+        model: The model with computed gradients
+        cpu_accumulator: Dictionary storing CPU gradients
+        keep_scaled: If True, keeps gradients scaled for AMP
+    """
+    with torch.no_grad():
+        for name, param in model.named_parameters():
+            if param.requires_grad and param.grad is not None:
+                # Move gradient to CPU and accumulate
+                grad_cpu = param.grad.cpu()
+                cpu_accumulator[name].add_(grad_cpu)
+                # Clear GPU gradient immediately to free memory
+                param.grad = None
+
+
+def transfer_gradients_to_gpu(model, cpu_accumulator, device='cuda'):
+    """
+    Transfer accumulated gradients from CPU back to GPU.
+    Args:
+        model: The model to receive gradients
+        cpu_accumulator: Dictionary storing CPU gradients
+        device: Target device for gradients
+    """
+    with torch.no_grad():
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                # Transfer gradient from CPU to GPU
+                param.grad = cpu_accumulator[name].to(device)
+
+
 def knowledge_distillation_loss(student_logits, teacher_logits, temperature=4.0):
+    teacher_logits = teacher_logits.detach() #detach the teacher node from the bp graph
     soft_teacher = F.softmax(teacher_logits / temperature, dim=-1)
     soft_student = F.log_softmax(student_logits / temperature, dim=-1)
     
     distillation_loss = F.kl_div(soft_student, soft_teacher, reduction='batchmean') * (temperature ** 2)
-    
+    del soft_teacher, soft_student # delete these intermediate value for memory saving
     return distillation_loss
 
 
@@ -116,6 +162,11 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
     
     # Log initial memory usage
     log_memory_usage("Training Start")
+    
+    # Initialize CPU gradient accumulator for memory-efficient training
+    cpu_gradient_accumulator = init_cpu_gradient_accumulator(model)
+    print(f"Initialized CPU gradient accumulator for {len(cpu_gradient_accumulator)} parameters")
+    
     # favorite RMSprop and momentum optimizer ~
     optimizer = torch.optim.AdamW(
         model.parameters(), 
@@ -199,7 +250,7 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
             total_ce_loss = 0
             total_kd_loss = 0
             
-            # Clear gradients at start of each iteration
+            # Clear GPU gradients at start of each iteration
             optimizer.zero_grad()
             
             for batch_idx, batch in enumerate(train_loader):
@@ -225,9 +276,11 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
 
                 loss = loss / config.gradient_accumulation_steps
                 
-                # No need for retain_graph - each forward pass creates its own graph
+                # Backward pass to compute gradients
                 scaler.scale(loss).backward()
-                # print("Backward complete")
+                
+                # Accumulate gradients on CPU to save GPU memory
+                accumulate_gradients_on_cpu(model, cpu_gradient_accumulator, keep_scaled=True)
                 
                 total_loss += loss.item()
                 total_ce_loss += ce_loss.item()
@@ -235,12 +288,22 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 print(f"total_loss so far: {total_loss:.4f}")
             # End of batch accumulation
             
-            # Optimizer step
+            # Transfer accumulated gradients from CPU back to GPU for optimizer step
+            transfer_gradients_to_gpu(model, cpu_gradient_accumulator, device='cuda')
+            
+            # Unscale gradients before clipping and optimizer step
             scaler.unscale_(optimizer)
+            
+            # Clip gradients after unscaling
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
+            
+            # Optimizer step with unscaled gradients
             scaler.step(optimizer)
             scaler.update()
-            # Gradients will be cleared at start of next iteration
+            
+            # Reset CPU gradient accumulator after optimizer step
+            for name in cpu_gradient_accumulator:
+                cpu_gradient_accumulator[name].zero_()
             
             if iteration < config.warmup_steps:
                 scheduler.step()
@@ -287,6 +350,8 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
             if iteration % config.empty_cache_interval == 0:
                 torch.cuda.empty_cache()
                 gc.collect()
+                print("GPU cache cleared.")
+                
                 
         # After loop completion
         print("Training loop completed")
