@@ -225,13 +225,21 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 
                 ce_loss = outputs['loss']
                 kd_loss = torch.tensor(0.0, device=device)
+                
+                # Get teacher logits without caching
                 with torch.no_grad():
-                    teacher_outputs = teacher_model(input_ids, attention_mask=attention_mask)
-                    teacher_logits = teacher_outputs.logits
+                    with torch.cuda.amp.autocast():
+                        teacher_outputs = teacher_model(input_ids, attention_mask=attention_mask)
+                        teacher_logits = teacher_outputs.logits.detach()
+                    # Clear any cached data from teacher model
+                    del teacher_outputs
                     
                 student_logits = outputs['logits']
                 kd_loss = knowledge_distillation_loss(student_logits, teacher_logits)
                 loss = 0.7 * ce_loss + 0.3 * kd_loss
+                
+                # Clean up teacher logits after use
+                del teacher_logits, student_logits
 
                 loss = loss / config.gradient_accumulation_steps
                 
