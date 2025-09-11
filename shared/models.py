@@ -140,8 +140,6 @@ class SwitchableQuantizedGPT2(nn.Module):
     
     def forward(self, input_ids, attention_mask=None, labels=None):
         batch_size, seq_length = input_ids.shape
-
-        print("input device is\n", input_ids.device)
         position_ids = torch.arange(seq_length, device=input_ids.device).unsqueeze(0)
         inputs_embeds = self.wte(input_ids)
         position_embeds = self.wpe(position_ids) #broad casted with a batch size of 1
