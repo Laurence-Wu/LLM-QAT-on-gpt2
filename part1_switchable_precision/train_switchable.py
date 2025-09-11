@@ -151,7 +151,8 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
     cpu_gradients = {}
     for name, param in model.named_parameters():
         if param.requires_grad:
-            cpu_gradients[name] = torch.zeros_like(param, dtype=torch.float32, device='cpu')
+            # Store gradients on CPU to save GPU memory
+            cpu_gradients[name] = torch.zeros_like(param, dtype=torch.float32, device='cpu', pin_memory=True)
     
     # favorite RMSprop and momentum optimizer ~
     optimizer = torch.optim.AdamW(
@@ -178,14 +179,14 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
     teacher_model = None
     try:
         from transformers import GPT2LMHeadModel
-        print("Loading teacher model")
+        print("Loading teacher model on CPU to save GPU memory")
         teacher_model = GPT2LMHeadModel.from_pretrained('gpt2')
-        device = next(model.parameters()).device
-        teacher_model = teacher_model.to(device)
+        # Keep teacher model on CPU and move data as needed
+        teacher_model = teacher_model.to('cpu')
         teacher_model.eval() # USE THE buffer information of running mean and variance
         for param in teacher_model.parameters():
             param.requires_grad = False
-        print("Teacher model loaded")
+        print("Teacher model loaded on CPU")
         log_memory_usage("After Teacher Model Load")
     except Exception as e:
         print(f"teacher model error: {e}")
@@ -236,10 +237,8 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
             total_ce_loss = 0
             total_kd_loss = 0
             
-            # Clear GPU gradients and reset CPU accumulator for this iteration
+            # Clear GPU gradients for this iteration
             optimizer.zero_grad(set_to_none=True)  # More aggressive gradient clearing
-            for name in cpu_gradients:
-                cpu_gradients[name].zero_()
             
             # ========== DEBUG MEMORY MONITORING START ==========
             if iteration % 5 == 0:  # Monitor every 5 iterations
@@ -281,21 +280,38 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 kd_loss = torch.tensor(0.0, device=device)
                 
                 # Get teacher logits without caching
-                with torch.no_grad():
-                    with torch.cuda.amp.autocast():
-                        teacher_outputs = teacher_model(input_ids, attention_mask=attention_mask)
-                        teacher_logits = teacher_outputs.logits.detach()
-                
-                # ========== DEBUG MEMORY MONITORING START ==========
-                if iteration % 5 == 0:
-                    log_memory_usage(f"After Teacher Forward")
-                # ========== DEBUG MEMORY MONITORING END ==========
+                if teacher_model is not None:
+                    with torch.no_grad():
+                        # Move inputs to CPU for teacher model
+                        cpu_input_ids = input_ids.cpu()
+                        cpu_attention_mask = attention_mask.cpu() if attention_mask is not None else None
+                        
+                        # Run teacher on CPU
+                        teacher_outputs = teacher_model(cpu_input_ids, attention_mask=cpu_attention_mask)
+                        # Move teacher logits to GPU for loss computation
+                        teacher_logits = teacher_outputs.logits.to('cuda', non_blocking=True)
                     
-                student_logits = outputs['logits']
-                kd_loss = knowledge_distillation_loss(student_logits, teacher_logits)
-                loss = 0.7 * ce_loss + 0.3 * kd_loss
+                    # ========== DEBUG MEMORY MONITORING START ==========
+                    if iteration % 5 == 0:
+                        log_memory_usage(f"After Teacher Forward")
+                    # ========== DEBUG MEMORY MONITORING END ==========
+                        
+                    student_logits = outputs['logits']
+                    kd_loss = knowledge_distillation_loss(student_logits, teacher_logits)
+                    loss = 0.7 * ce_loss + 0.3 * kd_loss
+                    
+                    # Clear teacher outputs immediately
+                    del teacher_outputs, teacher_logits, student_logits
+                    del cpu_input_ids, cpu_attention_mask
+                else:
+                    loss = ce_loss
 
                 loss = loss / config.gradient_accumulation_steps
+                
+                # Save loss values before deletion
+                loss_item = loss.item()
+                ce_loss_item = ce_loss.item()
+                kd_loss_item = kd_loss.item() if teacher_model is not None else 0.0
                 
                 # Backward pass to compute gradients
                 scaler.scale(loss).backward(retain_graph=False)
@@ -305,28 +321,44 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                     log_memory_usage(f"After Backward Pass")
                 # ========== DEBUG MEMORY MONITORING END ==========
                 
-                # Immediately move gradients to CPU and accumulate, then clear GPU
+                # Accumulate gradients on CPU to save GPU memory
                 with torch.no_grad():
                     for name, param in model.named_parameters():
                         if param.requires_grad and param.grad is not None:
-                            # Use .data to avoid keeping autograd graph
-                            grad_data = param.grad.data
-                            # Accumulate on CPU
-                            cpu_gradients[name].add_(grad_data.cpu())
-                            # Clear GPU gradient completely
+                            # Scale the gradient for accumulation
+                            scaled_grad = param.grad.data / scaler.get_scale()
+                            
+                            # Initialize CPU accumulator if first batch
+                            if batch_idx == 0:
+                                cpu_gradients[name].zero_()
+                            
+                            # Move gradient to CPU and accumulate
+                            # Using non_blocking=True for async transfer
+                            cpu_gradients[name].add_(scaled_grad.cpu(non_blocking=True))
+                            
+                            # Clear the GPU gradient immediately to free memory
                             param.grad = None
-                    
-                    # Force clear CUDA cache after each batch to prevent memory growth
-                    torch.cuda.empty_cache()
+                
+                # Ensure CUDA operations complete before clearing
+                torch.cuda.synchronize()
+                
+                # Clear intermediate variables
+                del outputs, ce_loss, loss
+                if teacher_model is not None:
+                    del kd_loss
+                del input_ids, attention_mask
+                
+                # Clear CUDA cache after each batch
+                torch.cuda.empty_cache()
                 
                 # ========== DEBUG MEMORY MONITORING START ==========
                 if iteration % 5 == 0:
                     log_memory_usage(f"After Gradient Transfer to CPU")
                 # ========== DEBUG MEMORY MONITORING END ==========
                 
-                total_loss += loss.item()
-                total_ce_loss += ce_loss.item()
-                total_kd_loss += kd_loss.item()
+                total_loss += loss_item
+                total_ce_loss += ce_loss_item
+                total_kd_loss += kd_loss_item
                 print(f"total_loss so far: {total_loss:.4f}")
             # End of batch accumulation
             
@@ -335,21 +367,23 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 log_memory_usage(f"Before Loading Gradients to GPU")
             # ========== DEBUG MEMORY MONITORING END ==========
             
-            # Load accumulated gradients from CPU back to GPU for optimizer step
+            # Transfer accumulated gradients from CPU to GPU for optimizer step
             with torch.no_grad():
                 for name, param in model.named_parameters():
-                    if param.requires_grad:
-                        param.grad = cpu_gradients[name].to('cuda')
+                    if param.requires_grad and name in cpu_gradients:
+                        # Move accumulated gradient from CPU to GPU
+                        # Divide by accumulation steps for proper averaging
+                        param.grad = cpu_gradients[name].to('cuda', non_blocking=False) / config.gradient_accumulation_steps
             
             # ========== DEBUG MEMORY MONITORING START ==========
             if iteration % 5 == 0:
                 log_memory_usage(f"After Loading Gradients to GPU")
             # ========== DEBUG MEMORY MONITORING END ==========
             
-            # Optimizer step with scaled gradients
-            scaler.unscale_(optimizer)
+            # Optimizer step with accumulated gradients
+            # Note: No need to unscale since we already scaled during accumulation
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
-            scaler.step(optimizer)
+            optimizer.step()
             scaler.update()
             
             # ========== DEBUG MEMORY MONITORING START ==========
