@@ -6,7 +6,7 @@ from typing import Optional, Dict, List
 from transformers import GPT2Config
 from torch.utils.checkpoint import checkpoint
 
-from part1_switchable_precision.train_switchable import log_memory_usage
+# Removed unused import
 from quantization import LearnableFakeQuantize
 from lora import QATLinearWithLoRA
 
