@@ -68,8 +68,6 @@ class MultiPrecisionLoRA(nn.Module):
 class QuantizedLinearWithLoRA(nn.Module):
     def __init__(self, in_features, out_features, bias=True, bit_widths=None):
         super().__init__()
-        if bit_widths is None:
-            bit_widths = [4, 8, 16]
             
         self.quantized_linear = QuantizedLinear(
             in_features, out_features, bias=bias,
@@ -103,3 +101,6 @@ class QuantizedLinearWithLoRA(nn.Module):
             self.quantized_linear.activation_quantizer.calibrated = False
         else:
             self.quantized_linear.activation_quantizer.num_bits = max(1, min(activation_bits, 32))
+
+
+

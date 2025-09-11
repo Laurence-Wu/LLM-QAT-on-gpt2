@@ -6,6 +6,7 @@ from typing import Optional, Dict, List
 from transformers import GPT2Config
 from torch.utils.checkpoint import checkpoint
 
+from part1_switchable_precision.train_switchable import log_memory_usage
 from quantization import LearnableFakeQuantize
 from lora import QuantizedLinearWithLoRA
 
@@ -139,12 +140,16 @@ class SwitchableQuantizedGPT2(nn.Module):
     
     def forward(self, input_ids, attention_mask=None, labels=None):
         batch_size, seq_length = input_ids.shape
-        
+
+        print("input device is\n", input_ids.device)
         position_ids = torch.arange(seq_length, device=input_ids.device).unsqueeze(0)
         inputs_embeds = self.wte(input_ids)
-        position_embeds = self.wpe(position_ids)
+        position_embeds = self.wpe(position_ids) #broad casted with a batch size of 1
         hidden_states = self.drop(inputs_embeds + position_embeds)
         
+        print("information loaded to cpu")
+        log_memory_usage("After embeddings")
+
         for block in self.h:
             if self.use_gradient_checkpointing and self.training:
                 hidden_states = checkpoint(block, hidden_states, attention_mask, use_reentrant=False)
@@ -161,7 +166,6 @@ class SwitchableQuantizedGPT2(nn.Module):
             shift_labels = labels[..., 1:].contiguous()
             loss = F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)), 
                                   shift_labels.view(-1))
-        
         return {'loss': loss, 'logits': logits}
     
     def forward_from_embeddings(self, inputs_embeds, attention_mask=None, labels=None):
