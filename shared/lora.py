@@ -1,106 +1,67 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import math
-from typing import List, Optional
 
 try:
-    from .quantization import QuantizedLinear
+    from .quantization import LearnableFakeQuantize
 except ImportError:
-    from quantization import QuantizedLinear
+    from quantization import LearnableFakeQuantize
 
-class LoRALayer(nn.Module):
-    def __init__(self, in_features, out_features, rank=8, alpha=16):
+class QATLoRALayer(nn.Module):
+    """Simple QAT LoRA: FP32 weights with fake quantization during forward."""
+    def __init__(self, in_features, out_features, rank=8, alpha=16, bits=8):
         super().__init__()
-        self.rank = rank
-        self.alpha = alpha
-        self.scaling = self.alpha / self.rank if rank > 0 else 1.0
+        self.scaling = alpha / rank
         
+        # FP32 weights
         self.lora_A = nn.Parameter(torch.empty(in_features, rank))
         self.lora_B = nn.Parameter(torch.empty(rank, out_features))
-        
         nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
         nn.init.zeros_(self.lora_B)
         
+        # Fake quantizers
+        self.quantize_A = LearnableFakeQuantize(num_bits=bits, symmetric=True)
+        self.quantize_B = LearnableFakeQuantize(num_bits=bits, symmetric=True)
+        
     def forward(self, x):
-        # Ensure all tensors are on the same device
-        lora_A = self.lora_A.to(x.device)
-        lora_B = self.lora_B.to(x.device)
+        lora_A = self.quantize_A(self.lora_A.to(x.device))
+        lora_B = self.quantize_B(self.lora_B.to(x.device))
         return (x @ lora_A @ lora_B) * self.scaling
 
-class MultiPrecisionLoRA(nn.Module):
-    def __init__(self, in_features, out_features, bit_widths=None):
+class QATLinearWithLoRA(nn.Module):
+    """QAT Linear layer: FP32 weights, fake quantization, LoRA adaptation."""
+    def __init__(self, in_features, out_features, bias=True, bits=8):
         super().__init__()
-        if bit_widths is None:
-            bit_widths = [4, 8, 16]
-        self.bit_widths = bit_widths
+        self.bits = bits
         
-        self.lora_modules = nn.ModuleDict()
-        for bits in bit_widths:
-            if bits <= 4:
-                rank = max(1, min(4, in_features // 128))
-            elif bits <= 8:
-                rank = max(2, min(8, in_features // 64))
-            else:  # 16-bit
-                rank = max(4, min(16, in_features // 32))
-            
-            alpha = rank * bits // 2
-            
-            self.lora_modules[f'lora_{bits}bit'] = LoRALayer(
-                in_features, out_features, rank=rank, alpha=alpha
-            )
+        # FP32 base layer
+        self.linear = nn.Linear(in_features, out_features, bias=bias)
         
-        self.current_bits = 8
+        # Fake quantizers
+        self.quantize_weight = LearnableFakeQuantize(num_bits=bits, symmetric=True)
+        self.quantize_input = LearnableFakeQuantize(num_bits=bits, symmetric=False)
         
-    def forward(self, x, bits=None):
-        if bits is None:
-            bits = self.current_bits
-        
-        key = f'lora_{bits}bit'
-        if key in self.lora_modules:
-            return self.lora_modules[key](x)
-        else:
-            nearest_bits = min(self.bit_widths, key=lambda b: abs(b - bits))
-            return self.lora_modules[f'lora_{nearest_bits}bit'](x)
-    
-    def set_bits(self, bits):
-        self.current_bits = bits
-
-class QuantizedLinearWithLoRA(nn.Module):
-    def __init__(self, in_features, out_features, bias=True, bit_widths=None):
-        super().__init__()
-            
-        self.quantized_linear = QuantizedLinear(
-            in_features, out_features, bias=bias,
-            weight_bits=8, activation_bits=8
-        )
-        
-        self.lora = MultiPrecisionLoRA(in_features, out_features, bit_widths)
-        self.current_weight_bits = 8
-        self.current_activation_bits = 8
+        # LoRA adapter
+        rank = max(4, min(16, in_features // 64))
+        self.lora = QATLoRALayer(in_features, out_features, rank=rank, alpha=rank*2, bits=bits)
         
     def forward(self, x):
-        base_output = self.quantized_linear(x)
-        lora_output = self.lora(x, bits=self.current_weight_bits)
-        return base_output + lora_output
+        # Quantize input and weights
+        x_q = self.quantize_input(x)
+        w_q = self.quantize_weight(self.linear.weight)
+        
+        # Base output + LoRA
+        base = F.linear(x_q, w_q, self.linear.bias)
+        lora = self.lora(x)
+        return base + lora
     
     def set_precision(self, weight_bits, activation_bits):
-        self.current_weight_bits = weight_bits
-        self.current_activation_bits = activation_bits
-        self.lora.set_bits(weight_bits)
-        
-        # Properly handle FP32 by disabling quantization
-        if weight_bits >= 32:
-            # For FP32, set quantizer to passthrough mode
-            self.quantized_linear.weight_quantizer.num_bits = 32
-            self.quantized_linear.weight_quantizer.calibrated = False
-        else:
-            self.quantized_linear.weight_quantizer.num_bits = max(1, min(weight_bits, 32))
-            
-        if activation_bits >= 32:
-            self.quantized_linear.activation_quantizer.num_bits = 32
-            self.quantized_linear.activation_quantizer.calibrated = False
-        else:
-            self.quantized_linear.activation_quantizer.num_bits = max(1, min(activation_bits, 32))
+        """For compatibility - Part 1 uses fixed precision."""
+        pass
+
+# Alias for compatibility
+QuantizedLinearWithLoRA = QATLinearWithLoRA
 
 
 

@@ -8,20 +8,17 @@ from torch.utils.checkpoint import checkpoint
 
 from part1_switchable_precision.train_switchable import log_memory_usage
 from quantization import LearnableFakeQuantize
-from lora import QuantizedLinearWithLoRA
+from lora import QATLinearWithLoRA
 
-class QuantizedGPT2Attention(nn.Module):
-    def __init__(self, config: GPT2Config, bit_widths=None):
+class QATGPT2Attention(nn.Module):
+    def __init__(self, config: GPT2Config, bits=8):
         super().__init__()
-        if bit_widths is None:
-            bit_widths = [4, 8, 16]
-        
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.head_dim = self.n_embd // self.n_head
         
-        self.c_attn = QuantizedLinearWithLoRA(config.n_embd, 3 * config.n_embd, bit_widths=bit_widths)
-        self.c_proj = QuantizedLinearWithLoRA(config.n_embd, config.n_embd, bit_widths=bit_widths)
+        self.c_attn = QATLinearWithLoRA(config.n_embd, 3 * config.n_embd, bits=bits)
+        self.c_proj = QATLinearWithLoRA(config.n_embd, config.n_embd, bits=bits)
         
         self.kv_quantizer = LearnableFakeQuantize(num_bits=8, symmetric=False)
         
@@ -58,14 +55,11 @@ class QuantizedGPT2Attention(nn.Module):
         self.c_proj.set_precision(weight_bits, activation_bits)
         self.kv_quantizer.num_bits = kv_bits
 
-class QuantizedGPT2MLP(nn.Module):
-    def __init__(self, config: GPT2Config, bit_widths=None):
+class QATGPT2MLP(nn.Module):
+    def __init__(self, config: GPT2Config, bits=8):
         super().__init__()
-        if bit_widths is None:
-            bit_widths = [4, 8, 16]
-            
-        self.c_fc = QuantizedLinearWithLoRA(config.n_embd, 4 * config.n_embd, bit_widths=bit_widths)
-        self.c_proj = QuantizedLinearWithLoRA(4 * config.n_embd, config.n_embd, bit_widths=bit_widths)
+        self.c_fc = QATLinearWithLoRA(config.n_embd, 4 * config.n_embd, bits=bits)
+        self.c_proj = QATLinearWithLoRA(4 * config.n_embd, config.n_embd, bits=bits)
         self.act = nn.GELU()
         
     def forward(self, hidden_states):
@@ -78,14 +72,13 @@ class QuantizedGPT2MLP(nn.Module):
         self.c_fc.set_precision(weight_bits, activation_bits)
         self.c_proj.set_precision(weight_bits, activation_bits)
 
-class QuantizedGPT2Block(nn.Module):
-    def __init__(self, config: GPT2Config, bit_widths=None):
+class QATGPT2Block(nn.Module):
+    def __init__(self, config: GPT2Config, bits=8):
         super().__init__()
-
         self.ln_1 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
-        self.attn = QuantizedGPT2Attention(config, bit_widths)
+        self.attn = QATGPT2Attention(config, bits)
         self.ln_2 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
-        self.mlp = QuantizedGPT2MLP(config, bit_widths)
+        self.mlp = QATGPT2MLP(config, bits)
         
     def forward(self, hidden_states, attention_mask=None):
         residual = hidden_states
@@ -104,7 +97,8 @@ class QuantizedGPT2Block(nn.Module):
         self.attn.set_precision(attn_bits, activation_bits, kv_bits)
         self.mlp.set_precision(mlp_bits, activation_bits)
 
-class SwitchableQuantizedGPT2(nn.Module):
+class QATGPT2(nn.Module):
+    """GPT-2 with QAT (single precision, fake quantization)."""
     def __init__(self, config: GPT2Config):
         super().__init__()
         self.config = config
@@ -114,10 +108,10 @@ class SwitchableQuantizedGPT2(nn.Module):
         self.wpe = nn.Embedding(config.n_positions, config.n_embd)
         self.drop = nn.Dropout(config.embd_pdrop)
         
-        bit_widths = config.bit_widths
-        self.h = nn.ModuleList()
-        for _ in range(config.n_layer):
-            self.h.append(QuantizedGPT2Block(config, bit_widths=bit_widths))
+        bits = getattr(config, 'quantization_bits', 8)
+        self.h = nn.ModuleList([
+            QATGPT2Block(config, bits) for _ in range(config.n_layer)
+        ])
 
         self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
         
@@ -189,38 +183,9 @@ class SwitchableQuantizedGPT2(nn.Module):
         
         return {'loss': loss, 'logits': logits}
     
-    def set_layer_precision(self, layer_configs: List[Dict]):
-        """
-        Set precision for each layer based on provided configurations.
-        
-        Args:
-            layer_configs: List of dictionaries containing precision settings for each layer
-                         Each dict should have 'attn_bits' and 'mlp_bits' keys
-        """
-        for i, config in enumerate(layer_configs):
-            if i < len(self.h):
-                
-                # Set attention precision
-                if hasattr(self.h[i].attn.c_attn, 'set_precision'):
-                    self.h[i].attn.c_attn.set_precision(
-                        config.get('attn_bits', 8), 
-                        config.get('attn_bits', 8)
-                    )
-                if hasattr(self.h[i].attn.c_proj, 'set_precision'):
-                    self.h[i].attn.c_proj.set_precision(
-                        config.get('attn_bits', 8), 
-                        config.get('attn_bits', 8)
-                    )
-                
-                # Set MLP precision
-                if hasattr(self.h[i].mlp.c_fc, 'set_precision'):
-                    self.h[i].mlp.c_fc.set_precision(
-                        config.get('mlp_bits', 8), 
-                        config.get('mlp_bits', 8)
-                    )
-                if hasattr(self.h[i].mlp.c_proj, 'set_precision'):
-                    self.h[i].mlp.c_proj.set_precision(
-                        config.get('mlp_bits', 8), 
-                        config.get('mlp_bits', 8)
-                    )
+# Alias for compatibility
+SwitchableQuantizedGPT2 = QATGPT2
+QuantizedGPT2Attention = QATGPT2Attention  
+QuantizedGPT2MLP = QATGPT2MLP
+QuantizedGPT2Block = QATGPT2Block
                     

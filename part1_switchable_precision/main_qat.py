@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Part 1: Switchable Precision Training
-This module implements training GPT-2 with switchable precision across different bit widths.
-The model can dynamically switch between different quantization levels during training.
+Part 1: QAT (Quantization-Aware Training)
+Single precision training with fake quantization to simulate low-precision effects.
 """
 
 import os
@@ -19,15 +18,13 @@ os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True,max_split_size
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 # Import shared components
-from models import SwitchableQuantizedGPT2
+from models import QATGPT2
 from dataset import create_dataloaders
-from config_switchable import ModelConfig, TrainingConfig
-from train_switchable import train_switchable_quantization
+from config_qat import ModelConfig, TrainingConfig
+from train_qat import train_qat
 
 
 def initialize_model(model_config, device):
-    
-    # Create GPT-2 configuration with quantization support
     gpt2_config = GPT2Config(
         vocab_size=model_config.vocab_size,
         n_positions=model_config.n_positions,
@@ -36,11 +33,10 @@ def initialize_model(model_config, device):
         n_head=model_config.n_head,
         layer_norm_epsilon=model_config.layer_norm_epsilon,
         embd_pdrop=model_config.embd_pdrop,
-        bit_widths=model_config.bit_widths
+        quantization_bits=model_config.quantization_bits
     )
     
-    # Initialize model with switchable quantization
-    model = SwitchableQuantizedGPT2(gpt2_config)
+    model = QATGPT2(gpt2_config)
     # initialize all the layers with apply() function
     # layerNorm
     
@@ -51,8 +47,7 @@ def initialize_model(model_config, device):
     # Model should be on the GPU
     model = model.to(device)
     
-    print(f"Model initialized with {model_config.n_layer} layers")
-    print(f"Switchable bit widths: {model_config.bit_widths}")
+    print(f"QAT Model: {model_config.n_layer} layers, {model_config.quantization_bits}-bit quantization")
     
     return model
 
@@ -73,34 +68,34 @@ def load_pretrained_weights(model):
         model.h[i].ln_2.weight.data = pretrained.h[i].ln_2.weight.data.clone()
         model.h[i].ln_2.bias.data = pretrained.h[i].ln_2.bias.data.clone()
         
-        # Attention weights (handling Conv1D transpose)
-        if hasattr(model.h[i].attn.c_attn, 'quantized_linear'):
-            model.h[i].attn.c_attn.quantized_linear.weight.data = \
+        # Attention weights - now using QATLinearWithLoRA with .linear attribute
+        if hasattr(model.h[i].attn.c_attn, 'linear'):
+            model.h[i].attn.c_attn.linear.weight.data = \
                 pretrained.h[i].attn.c_attn.weight.data.t().contiguous()
             if pretrained.h[i].attn.c_attn.bias is not None:
-                model.h[i].attn.c_attn.quantized_linear.bias.data = \
+                model.h[i].attn.c_attn.linear.bias.data = \
                     pretrained.h[i].attn.c_attn.bias.data.clone()
         
-        if hasattr(model.h[i].attn.c_proj, 'quantized_linear'):
-            model.h[i].attn.c_proj.quantized_linear.weight.data = \
+        if hasattr(model.h[i].attn.c_proj, 'linear'):
+            model.h[i].attn.c_proj.linear.weight.data = \
                 pretrained.h[i].attn.c_proj.weight.data.t().contiguous()
             if pretrained.h[i].attn.c_proj.bias is not None:
-                model.h[i].attn.c_proj.quantized_linear.bias.data = \
+                model.h[i].attn.c_proj.linear.bias.data = \
                     pretrained.h[i].attn.c_proj.bias.data.clone()
         
-        # MLP weights
-        if hasattr(model.h[i].mlp.c_fc, 'quantized_linear'):
-            model.h[i].mlp.c_fc.quantized_linear.weight.data = \
+        # MLP weights - now using QATLinearWithLoRA with .linear attribute
+        if hasattr(model.h[i].mlp.c_fc, 'linear'):
+            model.h[i].mlp.c_fc.linear.weight.data = \
                 pretrained.h[i].mlp.c_fc.weight.data.t().contiguous()
             if pretrained.h[i].mlp.c_fc.bias is not None:
-                model.h[i].mlp.c_fc.quantized_linear.bias.data = \
+                model.h[i].mlp.c_fc.linear.bias.data = \
                     pretrained.h[i].mlp.c_fc.bias.data.clone()
         
-        if hasattr(model.h[i].mlp.c_proj, 'quantized_linear'):
-            model.h[i].mlp.c_proj.quantized_linear.weight.data = \
+        if hasattr(model.h[i].mlp.c_proj, 'linear'):
+            model.h[i].mlp.c_proj.linear.weight.data = \
                 pretrained.h[i].mlp.c_proj.weight.data.t().contiguous()
             if pretrained.h[i].mlp.c_proj.bias is not None:
-                model.h[i].mlp.c_proj.quantized_linear.bias.data = \
+                model.h[i].mlp.c_proj.linear.bias.data = \
                     pretrained.h[i].mlp.c_proj.bias.data.clone()
     
     # Final layer normalization
@@ -143,8 +138,7 @@ def main():
     print(f"GPU: {torch.cuda.get_device_name(0)}")
     print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
 
-    # handle the procecssing part carefully
-    trained_model = train_switchable_quantization(
+    trained_model = train_qat(
         model, 
         train_loader, 
         val_loader, 
@@ -158,7 +152,7 @@ def main():
     try:
         import time
         timestamp = time.strftime('%Y%m%d_%H%M%S')
-        model_filename = f"switchable_quantized_gpt2_{timestamp}.pth"
+        model_filename = f"qat_gpt2_{model_config.quantization_bits}bit_{timestamp}.pth"
         
         print(f"Saving model to {model_filename}")
         torch.save({
