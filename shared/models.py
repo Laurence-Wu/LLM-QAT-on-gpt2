@@ -146,9 +146,6 @@ class SwitchableQuantizedGPT2(nn.Module):
         inputs_embeds = self.wte(input_ids)
         position_embeds = self.wpe(position_ids) #broad casted with a batch size of 1
         hidden_states = self.drop(inputs_embeds + position_embeds)
-        
-        print("information loaded to cpu")
-        log_memory_usage("After embeddings")
 
         for block in self.h:
             if self.use_gradient_checkpointing and self.training:
