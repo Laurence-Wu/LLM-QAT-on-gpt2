@@ -194,10 +194,6 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
             # Set model precision
             model.set_layer_precision(layer_config)
             
-            # Log memory at first iteration to catch early OOM
-            if iteration == 0:
-                log_memory_usage("Before First Forward Pass")
-            
             # Training step - reset accumulators and clear gradients
             total_loss = 0
             total_ce_loss = 0
@@ -253,6 +249,8 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
             avg_loss = total_loss / config.gradient_accumulation_steps
             training_stats['iteration_losses'].append(avg_loss)
 
+            log_memory_usage(f"End of Iteration {iteration}")
+            
             # Validation
             if iteration % config.eval_interval == 0 and iteration > 0:
                 model.eval()
