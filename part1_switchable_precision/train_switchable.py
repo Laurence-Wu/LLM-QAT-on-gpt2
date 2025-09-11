@@ -113,7 +113,10 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
     # Clear GPU cache for optimal memory usage
     torch.cuda.empty_cache()
     gc.collect()
+    
+    # Enable gradient checkpointing to save memory
     model.use_gradient_checkpointing = True
+    model.train()  # Ensure model is in training mode
     
     # Log initial memory usage
     log_memory_usage("Training Start")
@@ -231,27 +234,22 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                     with torch.cuda.amp.autocast():
                         teacher_outputs = teacher_model(input_ids, attention_mask=attention_mask)
                         teacher_logits = teacher_outputs.logits.detach()
-                    # Clear any cached data from teacher model
-                    del teacher_outputs
                     
                 student_logits = outputs['logits']
                 kd_loss = knowledge_distillation_loss(student_logits, teacher_logits)
                 loss = 0.7 * ce_loss + 0.3 * kd_loss
-                
-                # Clean up teacher logits after use
-                del teacher_logits, student_logits
 
                 loss = loss / config.gradient_accumulation_steps
                 
                 # Backward pass to compute gradients
-                scaler.scale(loss).backward()
+                scaler.scale(loss).backward(retain_graph=False)
                 
                 # Immediately move gradients to CPU and accumulate, then clear GPU
                 with torch.no_grad():
                     for name, param in model.named_parameters():
                         if param.requires_grad and param.grad is not None:
-                            # Accumulate scaled gradients on CPU
-                            cpu_gradients[name].add_(param.grad.cpu())
+                            # Accumulate scaled gradients on CPU - detach to break graph connections
+                            cpu_gradients[name].add_(param.grad.detach().cpu())
                             # Clear GPU gradient immediately to free memory
                             param.grad = None
                 
@@ -275,6 +273,10 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
             
             # Clear all gradients after optimizer step
             optimizer.zero_grad()
+            
+            # Force clear any remaining GPU cache periodically
+            if iteration % 10 == 0:
+                torch.cuda.empty_cache()
             
             if iteration < config.warmup_steps:
                 scheduler.step()
