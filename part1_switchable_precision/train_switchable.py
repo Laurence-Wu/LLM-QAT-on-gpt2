@@ -207,11 +207,10 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
             total_ce_loss = 0
             total_kd_loss = 0
             
-            # Load accumulated gradients from CPU to GPU
-            for name, param in model.named_parameters():
-                if param.requires_grad:
-                    param.grad = cpu_gradients[name].to('cuda')
-                    cpu_gradients[name].zero_()  # Reset CPU storage
+            # Clear GPU gradients and reset CPU accumulator for this iteration
+            optimizer.zero_grad()
+            for name in cpu_gradients:
+                cpu_gradients[name].zero_()
             
             for batch_idx, batch in enumerate(train_loader):
                 if batch_idx >= config.gradient_accumulation_steps:
@@ -236,8 +235,17 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
 
                 loss = loss / config.gradient_accumulation_steps
                 
-                # Backward pass to compute gradients (accumulates on GPU)
+                # Backward pass to compute gradients
                 scaler.scale(loss).backward()
+                
+                # Immediately move gradients to CPU and accumulate, then clear GPU
+                with torch.no_grad():
+                    for name, param in model.named_parameters():
+                        if param.requires_grad and param.grad is not None:
+                            # Accumulate scaled gradients on CPU
+                            cpu_gradients[name].add_(param.grad.cpu())
+                            # Clear GPU gradient immediately to free memory
+                            param.grad = None
                 
                 total_loss += loss.item()
                 total_ce_loss += ce_loss.item()
@@ -245,20 +253,19 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 print(f"total_loss so far: {total_loss:.4f}")
             # End of batch accumulation
             
+            # Load accumulated gradients from CPU back to GPU for optimizer step
+            with torch.no_grad():
+                for name, param in model.named_parameters():
+                    if param.requires_grad:
+                        param.grad = cpu_gradients[name].to('cuda')
+            
             # Optimizer step with scaled gradients
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
             scaler.step(optimizer)
             scaler.update()
             
-            # Transfer unscaled gradients from GPU to CPU for next iteration
-            with torch.no_grad():
-                for name, param in model.named_parameters():
-                    if param.requires_grad and param.grad is not None:
-                        cpu_gradients[name] = param.grad.cpu()
-                        param.grad = None  # Clear GPU gradient
-            
-            # Clear gradients on GPU
+            # Clear all gradients after optimizer step
             optimizer.zero_grad()
             
             if iteration < config.warmup_steps:
