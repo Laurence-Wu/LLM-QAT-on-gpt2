@@ -14,7 +14,7 @@ import os
 from typing import Optional, Dict, List
 
 
-def log_memory_usage(step: str = ""):
+def log_memory_usage(step: str = "", detailed=False):
     """Log current memory usage for debugging OOM issues."""
     # CPU Memory
     cpu_mem = psutil.virtual_memory()
@@ -28,12 +28,38 @@ def log_memory_usage(step: str = ""):
     if torch.cuda.is_available():
         gpu_allocated = torch.cuda.memory_allocated() / (1024**3)
         gpu_reserved = torch.cuda.memory_reserved() / (1024**3)
-        print(f"[{step}] GPU Memory: {gpu_allocated:.2f} GB allocated, {gpu_reserved:.2f} GB reserved")
+        gpu_cached = torch.cuda.memory_reserved() - torch.cuda.memory_allocated()
+        gpu_cached_gb = gpu_cached / (1024**3)
+        
+        print(f"[{step}] GPU Memory: {gpu_allocated:.2f} GB allocated, {gpu_reserved:.2f} GB reserved, {gpu_cached_gb:.2f} GB cached")
+        
+        if detailed:
+            # More detailed GPU memory stats
+            print(f"[{step}] GPU Max Memory Allocated: {torch.cuda.max_memory_allocated() / (1024**3):.2f} GB")
+            print(f"[{step}] GPU Max Memory Reserved: {torch.cuda.max_memory_reserved() / (1024**3):.2f} GB")
+            
+            # Check for memory fragmentation
+            try:
+                mem_stats = torch.cuda.memory_stats()
+                active_bytes = mem_stats.get('active_bytes.all.current', 0)
+                reserved_bytes = mem_stats.get('reserved_bytes.all.current', 0)
+                allocated_bytes = mem_stats.get('allocated_bytes.all.current', 0)
+                print(f"[{step}] Active: {active_bytes/(1024**3):.2f} GB, Allocated: {allocated_bytes/(1024**3):.2f} GB")
+            except:
+                pass
     
     # Process-specific memory
     process = psutil.Process(os.getpid())
     process_mem = process.memory_info().rss / (1024**3)
     print(f"[{step}] Process Memory: {process_mem:.2f} GB")
+    
+    # Return memory values for tracking
+    return {
+        'cpu_used_gb': cpu_used_gb,
+        'gpu_allocated_gb': gpu_allocated if torch.cuda.is_available() else 0,
+        'gpu_reserved_gb': gpu_reserved if torch.cuda.is_available() else 0,
+        'process_gb': process_mem
+    }
 
 
 def knowledge_distillation_loss(student_logits, teacher_logits, temperature=4.0):
@@ -215,16 +241,41 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
             for name in cpu_gradients:
                 cpu_gradients[name].zero_()
             
+            # ========== DEBUG MEMORY MONITORING START ==========
+            if iteration % 5 == 0:  # Monitor every 5 iterations
+                print(f"\n{'='*60}")
+                print(f"MEMORY DEBUG - Iteration {iteration}")
+                print(f"{'='*60}")
+                initial_mem = log_memory_usage("Iteration Start", detailed=True)
+            # ========== DEBUG MEMORY MONITORING END ==========
+            
             for batch_idx, batch in enumerate(train_loader):
                 if batch_idx >= config.gradient_accumulation_steps:
                     break # accumulate the gradients over some iterations
+
+                # ========== DEBUG MEMORY MONITORING START ==========
+                if iteration % 5 == 0:
+                    print(f"\n--- Batch {batch_idx}/{config.gradient_accumulation_steps} ---")
+                    log_memory_usage(f"Batch {batch_idx} Start")
+                # ========== DEBUG MEMORY MONITORING END ==========
 
                 device = 'cuda'
                 input_ids = batch['input_ids'].to(device)
                 attention_mask = batch.get('attention_mask', None)
                 attention_mask = attention_mask.to(device)
+                
+                # ========== DEBUG MEMORY MONITORING START ==========
+                if iteration % 5 == 0:
+                    log_memory_usage(f"After Data Transfer")
+                # ========== DEBUG MEMORY MONITORING END ==========
+                
                 with torch.amp.autocast('cuda'):
                     outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
+                
+                # ========== DEBUG MEMORY MONITORING START ==========
+                if iteration % 5 == 0:
+                    log_memory_usage(f"After Forward Pass")
+                # ========== DEBUG MEMORY MONITORING END ==========
                 
                 ce_loss = outputs['loss']
                 kd_loss = torch.tensor(0.0, device=device)
@@ -234,6 +285,11 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                     with torch.cuda.amp.autocast():
                         teacher_outputs = teacher_model(input_ids, attention_mask=attention_mask)
                         teacher_logits = teacher_outputs.logits.detach()
+                
+                # ========== DEBUG MEMORY MONITORING START ==========
+                if iteration % 5 == 0:
+                    log_memory_usage(f"After Teacher Forward")
+                # ========== DEBUG MEMORY MONITORING END ==========
                     
                 student_logits = outputs['logits']
                 kd_loss = knowledge_distillation_loss(student_logits, teacher_logits)
@@ -244,6 +300,11 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 # Backward pass to compute gradients
                 scaler.scale(loss).backward(retain_graph=False)
                 
+                # ========== DEBUG MEMORY MONITORING START ==========
+                if iteration % 5 == 0:
+                    log_memory_usage(f"After Backward Pass")
+                # ========== DEBUG MEMORY MONITORING END ==========
+                
                 # Immediately move gradients to CPU and accumulate, then clear GPU
                 with torch.no_grad():
                     for name, param in model.named_parameters():
@@ -253,11 +314,21 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                             # Clear GPU gradient immediately to free memory
                             param.grad = None
                 
+                # ========== DEBUG MEMORY MONITORING START ==========
+                if iteration % 5 == 0:
+                    log_memory_usage(f"After Gradient Transfer to CPU")
+                # ========== DEBUG MEMORY MONITORING END ==========
+                
                 total_loss += loss.item()
                 total_ce_loss += ce_loss.item()
                 total_kd_loss += kd_loss.item()
                 print(f"total_loss so far: {total_loss:.4f}")
             # End of batch accumulation
+            
+            # ========== DEBUG MEMORY MONITORING START ==========
+            if iteration % 5 == 0:
+                log_memory_usage(f"Before Loading Gradients to GPU")
+            # ========== DEBUG MEMORY MONITORING END ==========
             
             # Load accumulated gradients from CPU back to GPU for optimizer step
             with torch.no_grad():
@@ -265,18 +336,37 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                     if param.requires_grad:
                         param.grad = cpu_gradients[name].to('cuda')
             
+            # ========== DEBUG MEMORY MONITORING START ==========
+            if iteration % 5 == 0:
+                log_memory_usage(f"After Loading Gradients to GPU")
+            # ========== DEBUG MEMORY MONITORING END ==========
+            
             # Optimizer step with scaled gradients
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
             scaler.step(optimizer)
             scaler.update()
             
+            # ========== DEBUG MEMORY MONITORING START ==========
+            if iteration % 5 == 0:
+                log_memory_usage(f"After Optimizer Step")
+            # ========== DEBUG MEMORY MONITORING END ==========
+            
             # Clear all gradients after optimizer step
             optimizer.zero_grad()
+            
+            # ========== DEBUG MEMORY MONITORING START ==========
+            if iteration % 5 == 0:
+                log_memory_usage(f"After Clearing Gradients")
+            # ========== DEBUG MEMORY MONITORING END ==========
             
             # Force clear any remaining GPU cache periodically
             if iteration % 10 == 0:
                 torch.cuda.empty_cache()
+                # ========== DEBUG MEMORY MONITORING START ==========
+                if iteration % 5 == 0:
+                    log_memory_usage(f"After CUDA Cache Clear")
+                # ========== DEBUG MEMORY MONITORING END ==========
             
             if iteration < config.warmup_steps:
                 scheduler.step()
