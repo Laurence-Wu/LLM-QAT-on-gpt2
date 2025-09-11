@@ -52,7 +52,7 @@ class TrainingConfig:
         self.adam_epsilon = 1e-8
         self.adam_betas = (0.9, 0.999)
         # Training schedule
-        self.num_iterations = 1100
+        self.num_iterations = 2000
         self.warmup_steps = 5
         self.eval_interval = 2
         self.save_interval = 100
