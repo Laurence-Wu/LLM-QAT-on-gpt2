@@ -237,7 +237,7 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
             total_kd_loss = 0
             
             # Clear GPU gradients and reset CPU accumulator for this iteration
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)  # More aggressive gradient clearing
             for name in cpu_gradients:
                 cpu_gradients[name].zero_()
             
@@ -309,10 +309,15 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 with torch.no_grad():
                     for name, param in model.named_parameters():
                         if param.requires_grad and param.grad is not None:
-                            # Accumulate scaled gradients on CPU - detach to break graph connections
-                            cpu_gradients[name].add_(param.grad.detach().cpu())
-                            # Clear GPU gradient immediately to free memory
+                            # Use .data to avoid keeping autograd graph
+                            grad_data = param.grad.data
+                            # Accumulate on CPU
+                            cpu_gradients[name].add_(grad_data.cpu())
+                            # Clear GPU gradient completely
                             param.grad = None
+                    
+                    # Force clear CUDA cache after each batch to prevent memory growth
+                    torch.cuda.empty_cache()
                 
                 # ========== DEBUG MEMORY MONITORING START ==========
                 if iteration % 5 == 0:
@@ -353,7 +358,7 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
             # ========== DEBUG MEMORY MONITORING END ==========
             
             # Clear all gradients after optimizer step
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)  # Use set_to_none=True for better memory cleanup
             
             # ========== DEBUG MEMORY MONITORING START ==========
             if iteration % 5 == 0:
@@ -366,6 +371,16 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                 # ========== DEBUG MEMORY MONITORING START ==========
                 if iteration % 5 == 0:
                     log_memory_usage(f"After CUDA Cache Clear")
+                # ========== DEBUG MEMORY MONITORING END ==========
+            
+            # Additional aggressive memory cleanup every 50 iterations
+            if iteration % 50 == 0 and iteration > 0:
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()  # Ensure all CUDA operations are complete
+                gc.collect()  # Force Python garbage collection
+                # ========== DEBUG MEMORY MONITORING START ==========
+                print(f"\n>>> Aggressive cleanup at iteration {iteration}")
+                log_memory_usage(f"After Aggressive Cleanup", detailed=True)
                 # ========== DEBUG MEMORY MONITORING END ==========
             
             if iteration < config.warmup_steps:
