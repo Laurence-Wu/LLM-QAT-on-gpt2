@@ -289,7 +289,7 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                         # Run teacher on CPU
                         teacher_outputs = teacher_model(cpu_input_ids, attention_mask=cpu_attention_mask)
                         # Move teacher logits to GPU for loss computation
-                        teacher_logits = teacher_outputs.logits.to('cuda', non_blocking=True)
+                        teacher_logits = teacher_outputs.logits.to('cuda')
                     
                     # ========== DEBUG MEMORY MONITORING START ==========
                     if iteration % 5 == 0:
@@ -333,8 +333,7 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                                 cpu_gradients[name].zero_()
                             
                             # Move gradient to CPU and accumulate
-                            # Using non_blocking=True for async transfer
-                            cpu_gradients[name].add_(scaled_grad.cpu(non_blocking=True))
+                            cpu_gradients[name].add_(scaled_grad.cpu())
                             
                             # Clear the GPU gradient immediately to free memory
                             param.grad = None
@@ -373,7 +372,7 @@ def train_switchable_quantization(model, train_loader, val_loader, config, model
                     if param.requires_grad and name in cpu_gradients:
                         # Move accumulated gradient from CPU to GPU
                         # Divide by accumulation steps for proper averaging
-                        param.grad = cpu_gradients[name].to('cuda', non_blocking=False) / config.gradient_accumulation_steps
+                        param.grad = cpu_gradients[name].to('cuda') / config.gradient_accumulation_steps
             
             # ========== DEBUG MEMORY MONITORING START ==========
             if iteration % 5 == 0:
