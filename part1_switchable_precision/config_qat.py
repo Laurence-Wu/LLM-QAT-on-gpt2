@@ -12,15 +12,15 @@ class ModelConfig:
     Single precision with fake quantization.
     """
     def __init__(self):
-        # GPT-2 architecture
+        # GPT-2 architecture - reduced for memory efficiency
         self.vocab_size = 50257
-        self.n_positions = 256
+        self.n_positions = 128  # Reduced from 256
         self.n_embd = 768
-        self.n_layer = 6
+        self.n_layer = 4  # Reduced from 6 to save memory
         self.n_head = 12
         self.layer_norm_epsilon = 1e-5
         self.embd_pdrop = 0.1
-        
+
         # QAT settings (single precision)
         self.quantization_bits = 8  # Fixed precision for QAT
         self.use_gradient_checkpointing = True
@@ -35,8 +35,8 @@ class TrainingConfig:
         self.train_split = 'train[:2000]'
         self.val_split = 'validation[:200]'
         self.batch_size = 1
-        self.max_seq_length = 256
-        self.doc_stride = 128
+        self.max_seq_length = 128  # Match n_positions
+        self.doc_stride = 64  # Reduced accordingly
         
         # Optimization
         self.learning_rate = 1e-4

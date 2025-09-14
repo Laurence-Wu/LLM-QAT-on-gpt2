@@ -25,8 +25,9 @@ class QATLoRALayer(nn.Module):
         self.quantize_B = LearnableFakeQuantize(num_bits=bits, symmetric=True)
         
     def forward(self, x):
-        lora_A = self.quantize_A(self.lora_A.to(x.device))
-        lora_B = self.quantize_B(self.lora_B.to(x.device))
+        # Parameters are already on the correct device - no need to move them
+        lora_A = self.quantize_A(self.lora_A)
+        lora_B = self.quantize_B(self.lora_B)
         return (x @ lora_A @ lora_B) * self.scaling
 
 class QATLinearWithLoRA(nn.Module):

@@ -71,13 +71,15 @@ def train_qat(model, train_loader, val_loader, config, model_config):
                 outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
                 loss = outputs['loss'] / config.gradient_accumulation_steps
 
+            # Get loss value before backward (detach to avoid keeping graph)
+            loss_value = loss.detach().item()
+            total_loss += loss_value
+
             # Backward - accumulates gradients
             if scaler:
                 scaler.scale(loss).backward()
             else:
                 loss.backward()
-
-            total_loss += loss.item()
 
             # Clean up intermediate tensors immediately after backward
             del outputs, loss, input_ids
@@ -94,8 +96,11 @@ def train_qat(model, train_loader, val_loader, config, model_config):
         else:
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
             optimizer.step()
-        
+
         scheduler.step()
+
+        # CRITICAL: Clear gradients after optimizer step to free memory
+        optimizer.zero_grad(set_to_none=True)
         
         # Memory cleanup - only after optimizer step
         if iteration % config.empty_cache_interval == 0:
