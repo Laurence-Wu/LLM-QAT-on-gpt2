@@ -14,9 +14,9 @@ class ModelConfig:
     def __init__(self):
         # GPT-2 architecture - reduced for memory efficiency
         self.vocab_size = 50257
-        self.n_positions = 128  # Reduced from 256
+        self.n_positions = 256
         self.n_embd = 768
-        self.n_layer = 4  # Reduced from 6 to save memory
+        self.n_layer = 6
         self.n_head = 12
         self.layer_norm_epsilon = 1e-5
         self.embd_pdrop = 0.1
@@ -32,12 +32,12 @@ class TrainingConfig:
     """
     def __init__(self):
         # Data
-        self.train_split = 'train[:2000]'
-        self.val_split = 'validation[:200]'
-        self.batch_size = 1
-        self.max_seq_length = 128  # Match n_positions
-        self.doc_stride = 64  # Reduced accordingly
-        
+        self.train_split = 'train[:20000]'
+        self.val_split = 'validation[:2000]'
+        self.batch_size =8
+        self.max_seq_length = 256
+        self.doc_stride = 128
+
         # Optimization
         self.learning_rate = 1e-4
         self.weight_decay = 0.01
@@ -45,12 +45,11 @@ class TrainingConfig:
         self.adam_betas = (0.9, 0.999)
         
         # Training
-        self.num_iterations = 2000
-        self.warmup_steps = 5
+        self.num_iterations = 5000
+        self.warmup_steps = 100
         self.eval_interval = 50
         self.save_interval = 100
-        self.gradient_accumulation_steps = 4  # Increased to allow smaller effective memory per step
-        self.max_grad_norm = 1.0
+        self.gradient_accumulation_steps = 8
 
         # Memory optimization
         self.use_amp = True
