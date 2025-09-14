@@ -55,11 +55,11 @@ def initialize_model(model_config, device):
 def load_pretrained_weights(model):
     print("Loading pretrained GPT-2 weights")
     pretrained = GPT2Model.from_pretrained('gpt2')
-    
+
     # Copy embeddings
     model.wte.weight.data = pretrained.wte.weight.data.clone()
     model.wpe.weight.data = pretrained.wpe.weight.data.clone()
-    
+
     # Copy transformer blocks
     for i in range(min(len(model.h), len(pretrained.h))):
         # Layer normalizations
@@ -67,7 +67,7 @@ def load_pretrained_weights(model):
         model.h[i].ln_1.bias.data = pretrained.h[i].ln_1.bias.data.clone()
         model.h[i].ln_2.weight.data = pretrained.h[i].ln_2.weight.data.clone()
         model.h[i].ln_2.bias.data = pretrained.h[i].ln_2.bias.data.clone()
-        
+
         # Attention weights - now using QATLinearWithLoRA with .linear attribute
         if hasattr(model.h[i].attn.c_attn, 'linear'):
             model.h[i].attn.c_attn.linear.weight.data = \
@@ -75,14 +75,14 @@ def load_pretrained_weights(model):
             if pretrained.h[i].attn.c_attn.bias is not None:
                 model.h[i].attn.c_attn.linear.bias.data = \
                     pretrained.h[i].attn.c_attn.bias.data.clone()
-        
+
         if hasattr(model.h[i].attn.c_proj, 'linear'):
             model.h[i].attn.c_proj.linear.weight.data = \
                 pretrained.h[i].attn.c_proj.weight.data.t().contiguous()
             if pretrained.h[i].attn.c_proj.bias is not None:
                 model.h[i].attn.c_proj.linear.bias.data = \
                     pretrained.h[i].attn.c_proj.bias.data.clone()
-        
+
         # MLP weights - now using QATLinearWithLoRA with .linear attribute
         if hasattr(model.h[i].mlp.c_fc, 'linear'):
             model.h[i].mlp.c_fc.linear.weight.data = \
@@ -90,19 +90,25 @@ def load_pretrained_weights(model):
             if pretrained.h[i].mlp.c_fc.bias is not None:
                 model.h[i].mlp.c_fc.linear.bias.data = \
                     pretrained.h[i].mlp.c_fc.bias.data.clone()
-        
+
         if hasattr(model.h[i].mlp.c_proj, 'linear'):
             model.h[i].mlp.c_proj.linear.weight.data = \
                 pretrained.h[i].mlp.c_proj.weight.data.t().contiguous()
             if pretrained.h[i].mlp.c_proj.bias is not None:
                 model.h[i].mlp.c_proj.linear.bias.data = \
                     pretrained.h[i].mlp.c_proj.bias.data.clone()
-    
+
     # Final layer normalization
     model.ln_f.weight.data = pretrained.ln_f.weight.data.clone()
     model.ln_f.bias.data = pretrained.ln_f.bias.data.clone()
 
-    print("Pretrained weights loaded")
+    # Delete pretrained model to free memory immediately
+    del pretrained
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    gc.collect()
+
+    print("Pretrained weights loaded and memory cleaned")
 
 def main():
 

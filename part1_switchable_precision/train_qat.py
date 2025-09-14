@@ -60,28 +60,33 @@ def train_qat(model, train_loader, val_loader, config, model_config):
             except StopIteration:
                 train_iter = iter(train_loader)
                 batch = next(train_iter)
-            
+
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch.get('attention_mask')
             if attention_mask is not None:
                 attention_mask = attention_mask.to(device)
-            
+
             # Forward with AMP
             with torch.amp.autocast('cuda', enabled=config.use_amp):
                 outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
                 loss = outputs['loss'] / config.gradient_accumulation_steps
-            
+
             # Backward - accumulates gradients
             if scaler:
                 scaler.scale(loss).backward()
             else:
                 loss.backward()
-            
+
             total_loss += loss.item()
-            
-            # Clean up intermediate tensors (but NOT gradients!)
-            del outputs, loss
-            # Keep input_ids for next iteration if needed
+
+            # Aggressive cleanup of all intermediate tensors after backward pass
+            del outputs, loss, input_ids, batch
+            if attention_mask is not None:
+                del attention_mask
+
+            # Force immediate memory release
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
         
         # Optimizer step - after all gradient accumulation
         if scaler:
