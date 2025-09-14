@@ -50,6 +50,7 @@ class TrainingConfig:
         self.eval_interval = 50
         self.save_interval = 100
         self.gradient_accumulation_steps = 8
+        self.max_grad_norm = 1.0  # Gradient clipping
 
         # Memory optimization
         self.use_amp = True
