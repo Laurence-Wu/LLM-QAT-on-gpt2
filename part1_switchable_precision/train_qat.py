@@ -1,5 +1,5 @@
 """
-QAT Training Module - Single Precision with Fake Quantization
+QAT Training Module - Fixed memory leak version
 """
 
 import torch
@@ -11,16 +11,16 @@ import gc
 
 
 def train_qat(model, train_loader, val_loader, config, model_config):
-    """QAT training with single precision and fake quantization."""
-    
+    """QAT training with single precision and fake quantization - memory optimized."""
+
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model = model.to(device)
-    
+
     # Clear cache before starting
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         gc.collect()
-    
+
     # Optimizer
     optimizer = AdamW(
         model.parameters(),
@@ -29,30 +29,32 @@ def train_qat(model, train_loader, val_loader, config, model_config):
         betas=config.adam_betas,
         eps=config.adam_epsilon
     )
-    
-    # Scheduler  
+
+    # Scheduler
     scheduler = CosineAnnealingLR(optimizer, T_max=config.num_iterations)
-    
+
     # Mixed precision
     scaler = torch.amp.GradScaler('cuda') if config.use_amp else None
-    
+
     # Training metrics
     best_val_loss = float('inf')
     print(f"\nStarting QAT training ({model_config.quantization_bits}-bit)")
     print(f"Iterations: {config.num_iterations}, Batch size: {config.batch_size}")
     print(f"Gradient accumulation: {config.gradient_accumulation_steps}")
-    
+
     # Create data iterator
     train_iter = iter(train_loader)
-    
+
     # Main training loop
-    for iteration in tqdm(range(config.num_iterations), desc="QAT"):
+    progress_bar = tqdm(range(config.num_iterations), desc="QAT")
+
+    for iteration in progress_bar:
         model.train()
-        
+
         # Clear gradients only at the start of accumulation
         optimizer.zero_grad(set_to_none=True)
         total_loss = 0
-        
+
         # Accumulate gradients over multiple steps
         for step in range(config.gradient_accumulation_steps):
             try:
@@ -61,10 +63,10 @@ def train_qat(model, train_loader, val_loader, config, model_config):
                 train_iter = iter(train_loader)
                 batch = next(train_iter)
 
-            input_ids = batch['input_ids'].to(device)
+            input_ids = batch['input_ids'].to(device, non_blocking=True)
             attention_mask = batch.get('attention_mask')
             if attention_mask is not None:
-                attention_mask = attention_mask.to(device)
+                attention_mask = attention_mask.to(device, non_blocking=True)
 
             # Forward with AMP
             with torch.amp.autocast('cuda', enabled=config.use_amp):
@@ -81,12 +83,14 @@ def train_qat(model, train_loader, val_loader, config, model_config):
             else:
                 loss.backward()
 
-            # Clean up intermediate tensors immediately after backward
+            # CRITICAL FIX: Clean up intermediate tensors immediately
             del outputs, loss, input_ids
             if attention_mask is not None:
                 del attention_mask
+            # Force Python to release the batch dict
+            batch.clear()
             del batch
-        
+
         # Optimizer step - after all gradient accumulation
         if scaler:
             scaler.unscale_(optimizer)
@@ -101,53 +105,74 @@ def train_qat(model, train_loader, val_loader, config, model_config):
 
         # CRITICAL: Clear gradients after optimizer step to free memory
         optimizer.zero_grad(set_to_none=True)
-        
-        # Memory cleanup - only after optimizer step
-        if iteration % config.empty_cache_interval == 0:
+
+        # AGGRESSIVE memory cleanup - every 10 iterations
+        if iteration % 10 == 0:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             gc.collect()
-        
-        # Evaluation
+
+        # Update progress bar with memory info
+        if iteration % 20 == 0:
+            if torch.cuda.is_available():
+                allocated = torch.cuda.memory_allocated() / 1024**3
+                reserved = torch.cuda.memory_reserved() / 1024**3
+                progress_bar.set_postfix({
+                    'loss': f'{total_loss:.4f}',
+                    'gpu_alloc': f'{allocated:.1f}GB',
+                    'gpu_res': f'{reserved:.1f}GB'
+                })
+
+        # Evaluation with memory cleanup
         if iteration % config.eval_interval == 0 and iteration > 0:
             val_loss = evaluate(model, val_loader, device, config.use_amp)
             print(f"\n[Iter {iteration}] Train: {total_loss:.4f}, Val: {val_loss:.4f}")
-            
+
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
-    
+
+            # Force cleanup after eval
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
+
     print(f"\nTraining complete. Best val loss: {best_val_loss:.4f}")
     return model
 
 
 def evaluate(model, val_loader, device, use_amp):
-    """Quick evaluation on validation set."""
+    """Quick evaluation on validation set - memory optimized."""
     model.eval()
     total_loss = 0
     num_batches = 0
-    
+
     with torch.no_grad():
         for batch in val_loader:
             if num_batches >= 5:  # Reduce eval batches to save memory
                 break
-                
-            input_ids = batch['input_ids'].to(device)
+
+            input_ids = batch['input_ids'].to(device, non_blocking=True)
             attention_mask = batch.get('attention_mask')
             if attention_mask is not None:
-                attention_mask = attention_mask.to(device)
-            
+                attention_mask = attention_mask.to(device, non_blocking=True)
+
             with torch.amp.autocast('cuda', enabled=use_amp):
                 outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
                 loss = outputs['loss']
-            
+
             total_loss += loss.item()
             num_batches += 1
-            
-            # Clean up
-            del outputs, loss
-    
+
+            # Clean up immediately
+            del outputs, loss, input_ids
+            if attention_mask is not None:
+                del attention_mask
+            batch.clear()
+            del batch
+
     # Clear cache after eval
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    
+    gc.collect()
+
     return total_loss / max(num_batches, 1)
