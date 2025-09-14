@@ -6,9 +6,9 @@ from typing import Optional, Dict, List
 from transformers import GPT2Config
 from torch.utils.checkpoint import checkpoint
 
-# Removed unused import
-from quantization import LearnableFakeQuantize
-from lora import QATLinearWithLoRA
+# Use relative imports for shared modules
+from .quantization import LearnableFakeQuantize
+from .lora import QATLinearWithLoRA
 
 class QATGPT2Attention(nn.Module):
     def __init__(self, config: GPT2Config, bits=8):
