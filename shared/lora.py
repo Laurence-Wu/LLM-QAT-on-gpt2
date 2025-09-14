@@ -32,16 +32,14 @@ class QATLoRALayer(nn.Module):
         self.register_buffer('lora_B_quantized', torch.empty(rank, out_features))
 
     def forward(self, x):
-        # Quantize weights and reuse pre-allocated buffers
-        with torch.no_grad():
-            # Quantize into pre-allocated buffers
-            self.lora_A_quantized = self.quantize_A(self.lora_A)
-            self.lora_B_quantized = self.quantize_B(self.lora_B)
+        # Quantize weights - these need gradients for backprop
+        lora_A_quantized = self.quantize_A(self.lora_A)
+        lora_B_quantized = self.quantize_B(self.lora_B)
 
         # Use more memory-efficient matrix multiplication
         # Split the computation to avoid intermediate large tensors
-        output = torch.matmul(x, self.lora_A_quantized)
-        output = torch.matmul(output, self.lora_B_quantized)
+        output = torch.matmul(x, lora_A_quantized)
+        output = torch.matmul(output, lora_B_quantized)
         output = output * self.scaling
 
         return output
@@ -70,21 +68,16 @@ class QATLinearWithLoRA(nn.Module):
         self.register_buffer('input_quantized', None)  # Will be allocated on first use
 
     def forward(self, x):
-        # Quantize input - reuse buffer if possible
+        # Quantize input and weights - these need gradients
         x_q = self.quantize_input(x)
-
-        # Quantize weights - reuse buffer
-        with torch.no_grad():
-            self.weight_quantized = self.quantize_weight(self.linear.weight)
+        w_q = self.quantize_weight(self.linear.weight)
 
         # Base output + LoRA
-        # Use the quantized tensors directly without creating new ones
-        base = F.linear(x_q, self.weight_quantized, self.linear.bias)
+        base = F.linear(x_q, w_q, self.linear.bias)
         lora = self.lora(x)
 
-        # In-place addition if possible to save memory
-        output = base.add_(lora)
-        return output
+        # Add outputs
+        return base + lora
     
     def set_precision(self, weight_bits, activation_bits):
         """For compatibility - Part 1 uses fixed precision."""

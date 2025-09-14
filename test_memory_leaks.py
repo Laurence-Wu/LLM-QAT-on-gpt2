@@ -248,7 +248,27 @@ def test_gradient_checkpointing_leak(iterations=50):
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
     print("Testing with gradient checkpointing ENABLED...")
+
+    # Run a few warmup iterations to stabilize memory
+    print("Running warmup iterations...")
+    for _ in range(5):
+        input_ids = torch.randint(0, config.vocab_size, (2, 128))
+        if torch.cuda.is_available():
+            input_ids = input_ids.cuda()
+        outputs = model(input_ids, labels=input_ids)
+        loss = outputs['loss']
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+        del input_ids, outputs, loss
+
+    # Reset baseline after warmup
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     memory_before = monitor.get_memory_usage()
+    memory_history = []
 
     for i in range(iterations):
         input_ids = torch.randint(0, config.vocab_size, (2, 128))
@@ -266,18 +286,23 @@ def test_gradient_checkpointing_leak(iterations=50):
 
         if i % 10 == 0:
             current_memory = monitor.get_memory_usage()
+            memory_history.append(current_memory)
             increase = current_memory - memory_before
             print(f"Iteration {i:3d}: Memory increase: {increase:.2f} MB")
 
-    memory_after_gc = monitor.get_memory_usage()
-    total_increase = memory_after_gc - memory_before
+    # Analyze memory growth trend
+    if len(memory_history) > 2:
+        # Check if memory is growing consistently
+        growth_rate = (memory_history[-1] - memory_history[0]) / len(memory_history)
 
-    if total_increase > 100:
-        print(f"❌ FAIL: Gradient checkpointing leak - {total_increase:.2f} MB increase")
-        return False
-    else:
-        print(f"✅ PASS: No gradient checkpointing leak - {total_increase:.2f} MB increase")
-        return True
+        if growth_rate > 2:  # Growing more than 2 MB per checkpoint
+            print(f"❌ FAIL: Gradient checkpointing leak - {growth_rate:.2f} MB/checkpoint growth")
+            return False
+        else:
+            print(f"✅ PASS: No gradient checkpointing leak - {growth_rate:.2f} MB/checkpoint growth")
+            return True
+
+    return True
 
 
 def run_comprehensive_test():
