@@ -38,98 +38,96 @@ class LearnableFakeQuantize(nn.Module):
         self.per_channel = per_channel
         self.channel_dim = channel_dim
         self.eps = 1e-7
-        
+
         self.quant_min = 0
         self.quant_max = 2 ** self.num_bits - 1
-        
+
         if symmetric:
             self.quant_min = -(2 ** (self.num_bits - 1))
             self.quant_max = 2 ** (self.num_bits - 1) - 1
-        
-        # Store quantization statistics on CPU to save GPU memory
-        # These will be moved to GPU only when needed for computation
-        if per_channel:
-            self.scale = torch.ones(1)  # Will be resized during first forward pass
-            self.zero_point = torch.zeros(1)
-            self.running_min = torch.zeros(1)
-            self.running_max = torch.zeros(1)
-        else:
-            self.scale = torch.ones(1)
-            self.zero_point = torch.zeros(1) 
-            self.running_min = torch.zeros(1)
-            self.running_max = torch.zeros(1)
-        
+
+        # Register buffers for proper memory management and persistence
+        # Buffers are automatically moved with model.to(device) and saved with state_dict
+        self.register_buffer('scale', torch.ones(1))
+        self.register_buffer('zero_point', torch.zeros(1))
+        self.register_buffer('running_min', torch.zeros(1))
+        self.register_buffer('running_max', torch.zeros(1))
+
         self.calibrated = False
     
     def forward(self, x):
         # Pass through for FP32 mode
         if self.num_bits >= 32:
             return x
-            
+
         if self.training:
-            if self.per_channel:
-                # Per-channel statistics - calculate min/max along non-channel dimensions
-                dims_to_reduce = list(range(x.dim()))
-                dims_to_reduce.remove(self.channel_dim)
-                
-                # Calculate min/max by iteratively reducing dimensions
-                min_val = x
-                max_val = x
-                for dim in sorted(dims_to_reduce, reverse=True):  # Start from highest dim
-                    min_val = min_val.min(dim=dim, keepdim=True)[0]
-                    max_val = max_val.max(dim=dim, keepdim=True)[0]
-                
-                # Store statistics on CPU to save GPU memory
-                if not self.calibrated:
-                    self.running_min = min_val.cpu().clone()  # Move to CPU
-                    self.running_max = max_val.cpu().clone()  # Move to CPU
-                    self.scale = torch.ones_like(self.running_min)  # Keep on CPU
-                    self.zero_point = torch.zeros_like(self.running_min)  # Keep on CPU
-                    self.calibrated = True
+            with torch.no_grad():  # Ensure no gradient tracking for statistics
+                if self.per_channel:
+                    # Per-channel statistics - calculate min/max along non-channel dimensions
+                    dims_to_reduce = list(range(x.dim()))
+                    dims_to_reduce.remove(self.channel_dim)
+
+                    # Calculate min/max by iteratively reducing dimensions
+                    min_val = x
+                    max_val = x
+                    for dim in sorted(dims_to_reduce, reverse=True):  # Start from highest dim
+                        min_val = min_val.min(dim=dim, keepdim=True)[0]
+                        max_val = max_val.max(dim=dim, keepdim=True)[0]
+
+                    # Use in-place operations to avoid creating new tensors
+                    if not self.calibrated:
+                        # Resize buffers and copy values
+                        self.running_min.resize_as_(min_val).copy_(min_val)
+                        self.running_max.resize_as_(max_val).copy_(max_val)
+                        self.scale.resize_as_(min_val).fill_(1.0)
+                        self.zero_point.resize_as_(min_val).zero_()
+                        self.calibrated = True
+                    else:
+                        # In-place exponential moving average update
+                        self.running_min.mul_(0.9).add_(min_val, alpha=0.1)
+                        self.running_max.mul_(0.9).add_(max_val, alpha=0.1)
                 else:
-                    # Update on CPU
-                    min_cpu = min_val.cpu()
-                    max_cpu = max_val.cpu()
-                    self.running_min = self.running_min * 0.9 + min_cpu * 0.1
-                    self.running_max = self.running_max * 0.9 + max_cpu * 0.1
+                    # Per-tensor statistics
+                    min_val = x.min()
+                    max_val = x.max()
+
+                    if not self.calibrated:
+                        # Direct assignment for scalars
+                        self.running_min.copy_(min_val)
+                        self.running_max.copy_(max_val)
+                        self.calibrated = True
+                    else:
+                        # In-place exponential moving average update
+                        self.running_min.mul_(0.9).add_(min_val, alpha=0.1)
+                        self.running_max.mul_(0.9).add_(max_val, alpha=0.1)
+        
+        # Update scale and zero_point in-place to avoid creating new tensors
+        with torch.no_grad():
+            if self.symmetric:
+                # Paper formula: α = max(|X_R|)/(2^(N-1) - 1)
+                max_val = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
+                max_val = torch.clamp(max_val, min=self.eps)
+                # In-place update of scale
+                self.scale.copy_(max_val / (2**(self.num_bits-1) - 1))
+                self.zero_point.zero_()  # In-place zero
             else:
-                # Per-tensor statistics - store on CPU
-                min_val = x.min().cpu()  # Move to CPU
-                max_val = x.max().cpu()  # Move to CPU
-                
-                if not self.calibrated:
-                    self.running_min = min_val.clone()
-                    self.running_max = max_val.clone()
-                    self.calibrated = True
+                range_val = torch.clamp(self.running_max - self.running_min, min=self.eps)
+                denom = self.quant_max - self.quant_min
+                if denom > 0:
+                    # In-place update of scale
+                    self.scale.copy_(range_val / denom)
+                    if torch.any(self.scale > 0):
+                        # In-place update of zero_point
+                        self.zero_point.copy_(torch.round(self.quant_min - self.running_min / self.scale))
+                    else:
+                        self.zero_point.zero_()
                 else:
-                    self.running_min = self.running_min * 0.9 + min_val * 0.1
-                    self.running_max = self.running_max * 0.9 + max_val * 0.1
-        
-        if self.symmetric:
-            # Paper formula: α = max(|X_R|)/(2^(N-1) - 1)
-            max_val = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
-            max_val = torch.clamp(max_val, min=self.eps)
-            self.scale = max_val / (2**(self.num_bits-1) - 1)
-            self.zero_point = torch.zeros_like(self.scale)
-        else:
-            range_val = torch.clamp(self.running_max - self.running_min, min=self.eps)
-            denom = self.quant_max - self.quant_min
-            if denom > 0:
-                self.scale = range_val / denom
-                if torch.any(self.scale > 0):
-                    self.zero_point = torch.round(self.quant_min - self.running_min / self.scale)
-                else:
-                    self.zero_point = torch.zeros_like(self.zero_point)
-            else:
-                self.scale = torch.ones_like(self.scale)
-                self.zero_point = torch.zeros_like(self.zero_point)
-        
-        # Move scale and zero_point to GPU only when needed for computation
-        # Use detach() to break any potential gradient links
-        scale_gpu = self.scale.detach().to(x.device)
-        zero_point_gpu = self.zero_point.detach().to(x.device)
-        
-        return QuantizationFunction.apply(x, scale_gpu, zero_point_gpu, 
+                    self.scale.fill_(1.0)
+                    self.zero_point.zero_()
+
+        # Scale and zero_point are already registered buffers, so they're on the right device
+        # Just use them directly without creating new tensors
+        return QuantizationFunction.apply(x, self.scale, self.zero_point,
                                          self.num_bits, self.symmetric)
 
 class QuantizedLinear(nn.Module):
