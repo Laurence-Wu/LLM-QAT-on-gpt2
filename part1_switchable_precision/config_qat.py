@@ -49,11 +49,11 @@ class TrainingConfig:
         self.warmup_steps = 5
         self.eval_interval = 50
         self.save_interval = 100
-        self.gradient_accumulation_steps = 2
+        self.gradient_accumulation_steps = 4  # Increased to allow smaller effective memory per step
         self.max_grad_norm = 1.0
-        
+
         # Memory optimization
         self.use_amp = True
-        self.empty_cache_interval = 10
+        self.empty_cache_interval = 25  # Less frequent cache clearing to avoid fragmentation
 
 

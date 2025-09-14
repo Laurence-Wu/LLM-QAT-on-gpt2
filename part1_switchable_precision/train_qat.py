@@ -79,14 +79,11 @@ def train_qat(model, train_loader, val_loader, config, model_config):
 
             total_loss += loss.item()
 
-            # Aggressive cleanup of all intermediate tensors after backward pass
-            del outputs, loss, input_ids, batch
+            # Clean up intermediate tensors immediately after backward
+            del outputs, loss, input_ids
             if attention_mask is not None:
                 del attention_mask
-
-            # Force immediate memory release
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            del batch
         
         # Optimizer step - after all gradient accumulation
         if scaler:

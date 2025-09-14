@@ -35,20 +35,25 @@ def initialize_model(model_config, device):
         embd_pdrop=model_config.embd_pdrop,
         quantization_bits=model_config.quantization_bits
     )
-    
+
     model = QATGPT2(gpt2_config)
+
+    # Explicitly enable gradient checkpointing
+    model.use_gradient_checkpointing = True
+
     # initialize all the layers with apply() function
     # layerNorm
-    
+
     # weights of QKV, projection of the output of transformer
     # and the two feedforward layers
     load_pretrained_weights(model)
-    
+
     # Model should be on the GPU
     model = model.to(device)
-    
+
     print(f"QAT Model: {model_config.n_layer} layers, {model_config.quantization_bits}-bit quantization")
-    
+    print(f"Gradient checkpointing: {model.use_gradient_checkpointing}")
+
     return model
 
 
