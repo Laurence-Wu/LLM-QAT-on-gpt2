@@ -19,8 +19,8 @@ os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True,max_split_size
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 # Import shared components
-from shared.models import SwitchableQuantizedGPT2
-from shared.dataset import create_dataloaders
+from models import SwitchableQuantizedGPT2
+from dataset import create_dataloaders
 
 # Import local configurations and training functions
 from config_cyclic import ModelConfig, CyclicTrainingConfig, CyclicPrecisionConfig

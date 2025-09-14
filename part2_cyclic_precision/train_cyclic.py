@@ -172,8 +172,9 @@ def train_with_cpt(model, train_loader, val_loader, training_config,
     """
     print("\nStarting Cyclic Precision Training...")
     
-    # Clear GPU cache
-    torch.cuda.empty_cache()
+    # Clear GPU cache before training
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     gc.collect()
     
     # Setup optimizer
@@ -226,31 +227,47 @@ def train_with_cpt(model, train_loader, val_loader, training_config,
             for param_group in optimizer.param_groups:
                 param_group['lr'] = training_config.learning_rate * lr_scale
         
-        # Training step
+        # Training step with memory optimization
         total_loss = 0
+        optimizer.zero_grad(set_to_none=True)  # Clear gradients more efficiently
+
         for batch_idx, batch in enumerate(train_loader):
             if batch_idx >= training_config.gradient_accumulation_steps:
                 break
-            
+
             device = next(model.parameters()).device
-            input_ids = batch['input_ids'].to(device)
+            input_ids = batch['input_ids'].to(device, non_blocking=True)
             attention_mask = batch.get('attention_mask')
             if attention_mask is not None:
-                attention_mask = attention_mask.to(device)
-            
+                attention_mask = attention_mask.to(device, non_blocking=True)
+
             # Forward pass
             if scaler is not None:
                 with torch.amp.autocast('cuda'):
                     outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
                     loss = outputs['loss'] / training_config.gradient_accumulation_steps
-                
-                scaler.scale(loss).backward()
+
+                # Detach loss value to prevent graph retention
+                loss_value = loss.detach().item()
+                total_loss += loss_value
+
+                scaler.scale(loss).backward(retain_graph=False)
             else:
                 outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
                 loss = outputs['loss'] / training_config.gradient_accumulation_steps
-                loss.backward()
-            
-            total_loss += loss.item()
+
+                # Detach loss value to prevent graph retention
+                loss_value = loss.detach().item()
+                total_loss += loss_value
+
+                loss.backward(retain_graph=False)
+
+            # Clean up intermediate tensors immediately
+            del outputs, loss, input_ids
+            if attention_mask is not None:
+                del attention_mask
+            batch.clear()
+            del batch
         
         # Optimizer step
         if scaler is not None:
@@ -262,15 +279,19 @@ def train_with_cpt(model, train_loader, val_loader, training_config,
             torch.nn.utils.clip_grad_norm_(model.parameters(), training_config.max_grad_norm)
             optimizer.step()
         
-        optimizer.zero_grad()
-        
         # Update scheduler
         cyclic_scheduler.update(iteration)
-        
+
         # Record loss
         avg_loss = total_loss
         stats['iteration_losses'].append(avg_loss)
         stats['final_loss'] = avg_loss
+
+        # Periodic memory cleanup to prevent accumulation
+        if iteration % 10 == 0:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
         
         # Logging
         if iteration % training_config.log_interval == 0:
@@ -388,31 +409,47 @@ def train_with_static_precision(model, train_loader, val_loader, training_config
                          desc=f"Static {bit_config}"):
         model.train()
         
-        # Training step
+        # Training step with memory optimization
         total_loss = 0
+        optimizer.zero_grad(set_to_none=True)  # Clear gradients more efficiently
+
         for batch_idx, batch in enumerate(train_loader):
             if batch_idx >= training_config.gradient_accumulation_steps:
                 break
-            
+
             device = next(model.parameters()).device
-            input_ids = batch['input_ids'].to(device)
+            input_ids = batch['input_ids'].to(device, non_blocking=True)
             attention_mask = batch.get('attention_mask')
             if attention_mask is not None:
-                attention_mask = attention_mask.to(device)
-            
+                attention_mask = attention_mask.to(device, non_blocking=True)
+
             # Forward pass
             if scaler is not None:
                 with torch.amp.autocast('cuda'):
                     outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
                     loss = outputs['loss'] / training_config.gradient_accumulation_steps
-                
-                scaler.scale(loss).backward()
+
+                # Detach loss value to prevent graph retention
+                loss_value = loss.detach().item()
+                total_loss += loss_value
+
+                scaler.scale(loss).backward(retain_graph=False)
             else:
                 outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
                 loss = outputs['loss'] / training_config.gradient_accumulation_steps
-                loss.backward()
-            
-            total_loss += loss.item()
+
+                # Detach loss value to prevent graph retention
+                loss_value = loss.detach().item()
+                total_loss += loss_value
+
+                loss.backward(retain_graph=False)
+
+            # Clean up intermediate tensors immediately
+            del outputs, loss, input_ids
+            if attention_mask is not None:
+                del attention_mask
+            batch.clear()
+            del batch
         
         # Optimizer step
         if scaler is not None:
