@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
+# Try relative imports first, fall back to direct imports
 try:
     from .quantization import LearnableFakeQuantize
 except ImportError:
