@@ -45,7 +45,7 @@ class TrainingConfig:
         self.adam_betas = (0.9, 0.999)
         
         # Training
-        self.num_iterations = 5000
+        self.num_iterations = 3500
         self.warmup_steps = 100
         self.eval_interval = 50
         self.save_interval = 100
