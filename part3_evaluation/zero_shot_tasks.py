@@ -38,7 +38,8 @@ class ZeroShotEvaluator:
             ]
 
         try:
-            tasks['PIQA'] = load_dataset('piqa', split='validation[:500]')
+            # Try newer format for PIQA
+            tasks['PIQA'] = load_dataset('ybisk/piqa', split='validation[:500]')
         except Exception as e:
             print(f"Warning: Could not load PIQA dataset: {e}")
             # Create mock PIQA data for testing
@@ -48,7 +49,8 @@ class ZeroShotEvaluator:
             ]
 
         try:
-            tasks['SIQA'] = load_dataset('social_i_qa', split='validation[:500]')
+            # Try newer format for SIQA
+            tasks['SIQA'] = load_dataset('allenai/social_i_qa', split='validation[:500]')
         except Exception as e:
             print(f"Warning: Could not load SIQA dataset: {e}")
             # Create mock SIQA data for testing
