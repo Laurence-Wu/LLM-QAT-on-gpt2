@@ -118,8 +118,7 @@ def load_pretrained_weights(model):
 
     # Clean up
     del pretrained
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    torch.cuda.empty_cache()
     gc.collect()
 
     print("Pretrained weights loaded")
@@ -129,7 +128,7 @@ def main():
     """Main CPT training function."""
 
     # Setup device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda')
     print(f"Using device: {device}")
 
     if torch.cuda.is_available():

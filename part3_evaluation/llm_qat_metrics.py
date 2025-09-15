@@ -12,7 +12,7 @@ class LLMQATEvaluation:
         self.model = model
         self.tokenizer = tokenizer
         self.model_size = model_size
-        self.device = device if torch.cuda.is_available() else 'cpu'
+        self.device = 'cuda'
         self.model = self.model.to(self.device)
 
         self.model_params = self._count_parameters()
@@ -85,9 +85,9 @@ class LLMQATEvaluation:
 
         weight_size_gb = (self.model_params * weight_bits) / (8 * 1024)
 
-        n_layers = self.model.config.n_layer if hasattr(self.model.config, 'n_layer') else 12
-        n_heads = self.model.config.n_head if hasattr(self.model.config, 'n_head') else 12
-        d_head = self.model.config.n_embd // n_heads if hasattr(self.model.config, 'n_embd') else 64
+        n_layers = self.model.config.n_layer
+        n_heads = self.model.config.n_head
+        d_head = self.model.config.n_embd // n_heads
         max_seq_len = 2048
         batch_size = 1
 

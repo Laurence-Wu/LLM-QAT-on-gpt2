@@ -281,7 +281,7 @@ def create_dataloaders(tokenizer, dataset_type='squad', train_split='train',
             batch_size=batch_size,
             shuffle=False,
             num_workers=num_workers,
-            pin_memory=torch.cuda.is_available(),
+            pin_memory=True,
             persistent_workers=(num_workers > 0),
             collate_fn=collate_fn
         )

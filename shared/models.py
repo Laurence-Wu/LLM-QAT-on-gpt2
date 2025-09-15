@@ -163,7 +163,7 @@ class QATGPT2(nn.Module):
                 hidden_states = block(hidden_states, attention_mask)
 
             # Force cleanup after every 4 layers to prevent memory accumulation
-            if i % 4 == 3 and torch.cuda.is_available():
+            if i % 4 == 3:
                 torch.cuda.empty_cache()
 
         hidden_states = self.ln_f(hidden_states)
@@ -204,7 +204,7 @@ class QATGPT2(nn.Module):
                 hidden_states = block(hidden_states, attention_mask)
 
             # Force cleanup after every 4 layers to prevent memory accumulation
-            if i % 4 == 3 and torch.cuda.is_available():
+            if i % 4 == 3:
                 torch.cuda.empty_cache()
 
         hidden_states = self.ln_f(hidden_states)
@@ -312,7 +312,7 @@ class SwitchableQATGPT2Attention(nn.Module):
         # Get LoRA configs from config
         lora_rank_per_bit = {4: 32, 8: 16, 16: 8}
         lora_alpha_per_bit = {4: 64, 8: 32, 16: 16}
-        lora_dropout = config.lora_dropout if hasattr(config, 'lora_dropout') else 0.1
+        lora_dropout = config.lora_dropout
 
         # Switchable layers
         self.c_attn = SwitchableQATLinearWithLoRA(
@@ -372,7 +372,7 @@ class SwitchableQATGPT2MLP(nn.Module):
         # Get LoRA configs
         lora_rank_per_bit = {4: 32, 8: 16, 16: 8}
         lora_alpha_per_bit = {4: 64, 8: 32, 16: 16}
-        lora_dropout = config.lora_dropout if hasattr(config, 'lora_dropout') else 0.1
+        lora_dropout = config.lora_dropout
 
         self.c_fc = SwitchableQATLinearWithLoRA(
             config.n_embd, 4 * config.n_embd,
@@ -508,7 +508,7 @@ class SwitchableQATGPT2(nn.Module):
             else:
                 hidden_states = block(hidden_states, attention_mask)
 
-            if i % 4 == 3 and torch.cuda.is_available():
+            if i % 4 == 3:
                 torch.cuda.empty_cache()
 
         hidden_states = self.ln_f(hidden_states)
@@ -538,14 +538,11 @@ class SwitchableQATGPT2(nn.Module):
             with torch.no_grad():
                 outputs = self.forward(input_ids=input_ids)
                 logits = outputs['logits']
-
                 next_token_logits = logits[:, -1, :] / temperature
-
                 if do_sample:
                     if top_k > 0:
                         indices_to_remove = next_token_logits < torch.topk(next_token_logits, top_k)[0][..., -1, None]
                         next_token_logits[indices_to_remove] = float('-inf')
-
                     if top_p < 1.0:
                         sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
                         cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
@@ -595,7 +592,7 @@ class SwitchableQATGPT2(nn.Module):
             else:
                 hidden_states = block(hidden_states, attention_mask)
 
-            if i % 4 == 3 and torch.cuda.is_available():
+            if i % 4 == 3:
                 torch.cuda.empty_cache()
 
         hidden_states = self.ln_f(hidden_states)

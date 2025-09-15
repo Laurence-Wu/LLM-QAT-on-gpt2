@@ -182,8 +182,7 @@ def train_with_cpt(model, train_loader, val_loader, training_config,
     print("="*60)
     
     # Clear GPU cache before training
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    torch.cuda.empty_cache()
     gc.collect()
     
     # Setup optimizer
@@ -199,7 +198,7 @@ def train_with_cpt(model, train_loader, val_loader, training_config,
     cyclic_scheduler = CyclicPrecisionScheduler(cyclic_config)
     
     # Setup mixed precision
-    scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() and training_config.use_amp else None
+    scaler = torch.amp.GradScaler('cuda') if training_config.use_amp else None
     
     # Training statistics
     stats = {
@@ -298,8 +297,7 @@ def train_with_cpt(model, train_loader, val_loader, training_config,
 
         # Periodic memory cleanup to prevent accumulation
         if iteration % 10 == 0:
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            torch.cuda.empty_cache()
             gc.collect()
         
         # Logging with bit-width change tracking
@@ -453,7 +451,7 @@ def train_with_static_precision(model, train_loader, val_loader, training_config
     )
     
     # Setup mixed precision
-    scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() and training_config.use_amp else None
+    scaler = torch.amp.GradScaler('cuda') if training_config.use_amp else None
     
     # Training statistics
     stats = {

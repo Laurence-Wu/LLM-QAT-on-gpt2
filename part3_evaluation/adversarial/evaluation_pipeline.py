@@ -21,7 +21,7 @@ class AdversarialEvaluationPipeline:
     def __init__(self, model, tokenizer, device='cuda'):
         self.model = model
         self.tokenizer = tokenizer
-        self.device = device if torch.cuda.is_available() else 'cpu'
+        self.device = 'cuda'
         self.model = self.model.to(self.device)
 
         self.attacker = AttackMethods(model, tokenizer, device)

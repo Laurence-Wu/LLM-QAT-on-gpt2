@@ -14,6 +14,11 @@ class BitConfigurations:
             "name": "8-8-8",
             "description": "8-bit integer quantization"
         },
+        "INT4": {
+            "W": 4, "A": 4, "KV": 4,
+            "name": "4-4-4",
+            "description": "4-bit integer quantization"
+        },
         "W4A8KV8": {
             "W": 4, "A": 8, "KV": 8,
             "name": "4-8-8",
@@ -55,28 +60,27 @@ class BitConfigurations:
     def apply_config_to_model(model, config: Dict):
         """
         Apply W-A-KV configuration to switchable model
-        Set weight bits, activation bits, and KV cache bits
+        For switchable models, we only set the weight precision
+        since the model handles activation and KV cache internally
         """
         weight_bits = config.get('W', 8)
-        activation_bits = config.get('A', 8)
-        kv_bits = config.get('KV', 8)
 
+        # For switchable models, we set the precision if it's supported
         if hasattr(model, 'set_global_precision'):
-            model.set_global_precision(weight_bits)
-        elif hasattr(model, 'set_layer_precision'):
-            n_layers = model.n_layer if hasattr(model, 'n_layer') else model.config.n_layer
-            layer_config = [weight_bits] * n_layers
-            model.set_layer_precision(layer_config)
-
-        if hasattr(model, 'set_activation_bits'):
-            model.set_activation_bits(activation_bits)
-
-        if hasattr(model, 'set_kv_cache_bits'):
-            model.set_kv_cache_bits(kv_bits)
-        elif hasattr(model, 'h') and len(model.h) > 0:
-            for block in model.h:
-                if hasattr(block, 'attn') and hasattr(block.attn, 'kv_quantizer'):
-                    block.attn.kv_quantizer.set_num_bits(kv_bits)
+            # Check if the requested bit-width is supported
+            if hasattr(model, 'bit_widths') and weight_bits in model.bit_widths:
+                model.set_global_precision(weight_bits)
+            else:
+                # Find the closest supported bit-width
+                if hasattr(model, 'bit_widths'):
+                    supported = model.bit_widths
+                    closest = min(supported, key=lambda x: abs(x - weight_bits))
+                    print(f"Warning: {weight_bits}-bit not supported, using {closest}-bit instead")
+                    model.set_global_precision(closest)
+                else:
+                    model.set_global_precision(weight_bits)
+        elif hasattr(model, 'set_precision'):
+            model.set_precision(weight_bits)
 
         return model
 

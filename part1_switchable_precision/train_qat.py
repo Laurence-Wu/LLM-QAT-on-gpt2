@@ -33,16 +33,15 @@ def get_next_bitwidth(iteration, model_config):
 def train_qat(model, train_loader, val_loader, config, model_config):
     """QAT training with switchable precision support."""
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda'
     model = model.to(device)
 
     # Check if using switchable model
-    is_switchable = hasattr(model, 'set_precision') and model_config.use_switchable
+    is_switchable = model_config.use_switchable
 
     # Clear cache before starting
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        gc.collect()
+    torch.cuda.empty_cache()
+    gc.collect()
 
     # Optimizer
     optimizer = AdamW(
@@ -151,10 +150,7 @@ def train_qat(model, train_loader, val_loader, config, model_config):
         training_stats['iteration_losses'].append(total_loss)
         training_stats['bit_width_usage'].append(current_bits)  # Track actual bit-width used
         training_stats['learning_rates'].append(optimizer.param_groups[0]['lr'])
-        if torch.cuda.is_available():
-            training_stats['memory_usage'].append(torch.cuda.memory_allocated() / 1024**2)  # MB
-        else:
-            training_stats['memory_usage'].append(0)
+        training_stats['memory_usage'].append(torch.cuda.memory_allocated() / 1024**2)  # MB
 
         # Track loss per bit-width if switchable
         if is_switchable:
@@ -162,22 +158,20 @@ def train_qat(model, train_loader, val_loader, config, model_config):
 
         # Periodic memory cleanup to prevent accumulation
         if iteration % 10 == 0:
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            torch.cuda.empty_cache()
             gc.collect()
 
         # Update progress bar with memory info
         if iteration % 20 == 0:
-            if torch.cuda.is_available():
-                allocated = torch.cuda.memory_allocated() / 1024**3
-                reserved = torch.cuda.memory_reserved() / 1024**3
-                postfix_dict = {
-                    'loss': f'{total_loss:.4f}',
-                    'gpu_alloc': f'{allocated:.1f}GB',
-                    'gpu_res': f'{reserved:.1f}GB'
-                }
-                if is_switchable:
-                    postfix_dict['bits'] = current_bits
+            allocated = torch.cuda.memory_allocated() / 1024**3
+            reserved = torch.cuda.memory_reserved() / 1024**3
+            postfix_dict = {
+                'loss': f'{total_loss:.4f}',
+                'gpu_alloc': f'{allocated:.1f}GB',
+                'gpu_res': f'{reserved:.1f}GB'
+            }
+            if is_switchable:
+                postfix_dict['bits'] = current_bits
                 progress_bar.set_postfix(postfix_dict)
 
         # Evaluation with memory cleanup
@@ -189,8 +183,7 @@ def train_qat(model, train_loader, val_loader, config, model_config):
             training_stats['validation_losses'].append(val_loss)
 
             # Force cleanup after eval
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            torch.cuda.empty_cache()
             gc.collect()
 
     print(f"\nTraining complete.")
@@ -275,8 +268,7 @@ def evaluate(model, val_loader, device, use_amp):
             del batch
 
     # Clear cache after eval
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    torch.cuda.empty_cache()
     gc.collect()
 
     return total_loss / max(num_batches, 1)

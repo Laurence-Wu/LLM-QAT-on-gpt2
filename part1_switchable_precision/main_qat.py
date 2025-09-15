@@ -108,7 +108,7 @@ def load_pretrained_weights(model):
     print("pretrained weights loaded successfully.")
 
 def main():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda')
     print(f" {device}")
     torch.cuda.empty_cache()
     gc.collect()

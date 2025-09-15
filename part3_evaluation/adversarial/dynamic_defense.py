@@ -16,7 +16,7 @@ class DynamicQuantizationDefense:
         self.model = model
         self.tokenizer = tokenizer
         self.bit_widths = sorted(bit_widths)
-        self.device = device if torch.cuda.is_available() else 'cpu'
+        self.device = 'cuda'
         self.model = self.model.to(self.device)
 
         self.perturbation_detector = PerturbationDetector(model, tokenizer)

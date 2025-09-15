@@ -23,27 +23,69 @@ from baseline_comparison import BaselineComparison
 
 def load_switchable_model(model_path: str = None):
     """Load switchable precision model"""
-    config = GPT2Config(
-        vocab_size=50257,
-        n_positions=256,
-        n_embd=768,
-        n_layer=6,
-        n_head=12,
-        layer_norm_epsilon=1e-5,
-        embd_pdrop=0.1
-    )
 
-    model = SwitchableQATGPT2(config, bit_widths=[2, 3, 4, 6, 8, 16])
+    # Default bit widths - will be overridden if loading from checkpoint
+    default_bit_widths = [4, 8, 16]
 
     if model_path and os.path.exists(model_path):
         print(f"Loading model from {model_path}")
-        checkpoint = torch.load(model_path, map_location='cuda' if torch.cuda.is_available() else 'cpu')
+        checkpoint = torch.load(model_path, map_location='cuda')
+
+        # Extract model configuration from checkpoint if available
+        if isinstance(checkpoint, dict) and 'model_config' in checkpoint:
+            model_config = checkpoint['model_config']
+            bit_widths = model_config.get('bit_widths', default_bit_widths)
+
+            config = GPT2Config(
+                vocab_size=model_config.get('vocab_size', 50257),
+                n_positions=model_config.get('n_positions', 256),
+                n_embd=model_config.get('n_embd', 768),
+                n_layer=model_config.get('n_layer', 6),
+                n_head=model_config.get('n_head', 12),
+                layer_norm_epsilon=model_config.get('layer_norm_epsilon', 1e-5),
+                embd_pdrop=model_config.get('embd_pdrop', 0.1),
+                lora_rank=model_config.get('lora_rank', 16),
+                lora_alpha=model_config.get('lora_alpha', 32),
+                lora_dropout=model_config.get('lora_dropout', 0.1)
+            )
+        else:
+            # Use default configuration
+            bit_widths = default_bit_widths
+            config = GPT2Config(
+                vocab_size=50257,
+                n_positions=256,
+                n_embd=768,
+                n_layer=6,
+                n_head=12,
+                layer_norm_epsilon=1e-5,
+                embd_pdrop=0.1,
+                lora_rank=16,
+                lora_alpha=32,
+                lora_dropout=0.1
+            )
+
+        print(f"Creating model with bit-widths: {bit_widths}")
+        model = SwitchableQATGPT2(config, bit_widths=bit_widths)
+
         if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
             model.load_state_dict(checkpoint['model_state_dict'])
         else:
             model = checkpoint
     else:
-        print("Using randomly initialized model")
+        print("Using randomly initialized model with default bit-widths: [4, 8, 16]")
+        config = GPT2Config(
+            vocab_size=50257,
+            n_positions=256,
+            n_embd=768,
+            n_layer=6,
+            n_head=12,
+            layer_norm_epsilon=1e-5,
+            embd_pdrop=0.1,
+            lora_rank=16,
+            lora_alpha=32,
+            lora_dropout=0.1
+        )
+        model = SwitchableQATGPT2(config, bit_widths=default_bit_widths)
 
     return model
 
@@ -62,8 +104,8 @@ def main():
     parser.add_argument('--output_dir', type=str, default='part3_evaluation/results',
                        help='Directory to save results')
     parser.add_argument('--configs', nargs='+',
-                       default=['W4A8KV8', 'W4A8KV4', 'INT8', 'FP16'],
-                       help='Configurations to evaluate (e.g., W4A8KV8 W4A8KV4 INT8)')
+                       default=['INT4', 'INT8', 'FP16'],
+                       help='Configurations to evaluate (e.g., INT4 INT8 FP16)')
     parser.add_argument('--skip_few_shot', action='store_true',
                        help='Skip few-shot evaluation (faster)')
     parser.add_argument('--skip_zero_shot', action='store_true',

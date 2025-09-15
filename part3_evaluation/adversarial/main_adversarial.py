@@ -45,7 +45,7 @@ def load_model_and_tokenizer(model_path: str = None):
 
     if model_path and os.path.exists(model_path):
         print(f"Loading model from {model_path}")
-        checkpoint = torch.load(model_path, map_location='cuda' if torch.cuda.is_available() else 'cpu')
+        checkpoint = torch.load(model_path, map_location='cuda')
         if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
             model.load_state_dict(checkpoint['model_state_dict'])
         else:
@@ -107,7 +107,7 @@ def run_attack_specific_evaluation(model, tokenizer, test_data: List[Tuple[torch
     print("="*70)
 
     attacker = AttackMethods(model, tokenizer)
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda'
 
     results = {}
 
@@ -197,7 +197,7 @@ def run_defense_evaluation(model, tokenizer, test_data: List[Tuple[torch.Tensor,
 
     defender = DynamicQuantizationDefense(model, tokenizer)
     attacker = AttackMethods(model, tokenizer)
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda'
 
     results = {}
 
