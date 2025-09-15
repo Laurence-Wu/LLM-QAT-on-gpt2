@@ -215,6 +215,42 @@ def main():
                 stats_to_save[key] = [v.tolist() if hasattr(v, 'tolist') else v for v in value]
             else:
                 stats_to_save[key] = value
+
+        # Add configuration information
+        stats_to_save['model_config'] = {
+            'model_name': model_config.model_name,
+            'output_model_path': model_config.output_model_path,
+            'quantization_bits': model_config.quantization_bits,
+            'use_gradient_checkpointing': model_config.use_gradient_checkpointing
+        }
+
+        stats_to_save['training_config'] = {
+            'train_split': training_config.train_split,
+            'val_split': training_config.val_split,
+            'batch_size': training_config.batch_size,
+            'max_seq_length': training_config.max_seq_length,
+            'doc_stride': training_config.doc_stride,
+            'learning_rate': training_config.learning_rate,
+            'weight_decay': training_config.weight_decay,
+            'adam_epsilon': training_config.adam_epsilon,
+            'adam_betas': training_config.adam_betas,
+            'max_grad_norm': training_config.max_grad_norm,
+            'num_iterations': training_config.num_iterations,
+            'gradient_accumulation_steps': training_config.gradient_accumulation_steps,
+            'eval_interval': training_config.eval_interval,
+            'use_amp': training_config.use_amp,
+            'num_workers': training_config.num_workers
+        }
+
+        stats_to_save['cyclic_config'] = {
+            'bit_widths': cyclic_config.bit_widths,
+            'cycle_length': cyclic_config.cycle_length,
+            'annealing_type': cyclic_config.annealing_type,
+            'temperature': cyclic_config.temperature,
+            'min_temperature': cyclic_config.min_temperature,
+            'temperature_decay': cyclic_config.temperature_decay
+        }
+
         json.dump(stats_to_save, f, indent=2)
 
     # Print final statistics

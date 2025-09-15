@@ -32,7 +32,7 @@ def train_qat(model, train_loader, val_loader, config, model_config):
         eps=config.adam_epsilon
     )
 
-    # Scheduler
+    # cosine Scheduler
     scheduler = CosineAnnealingLR(
         optimizer,
         T_max=config.num_iterations,  # Maximum number of iterations
@@ -43,8 +43,6 @@ def train_qat(model, train_loader, val_loader, config, model_config):
     scaler = torch.amp.GradScaler('cuda') if config.use_amp else None
 
     # Training metrics
-    best_val_loss = float('inf')
-    best_iteration = 0
     print(f"\nStarting QAT training ({model_config.quantization_bits}-bit)")
     print(f"Iterations: {config.num_iterations}, Batch size: {config.batch_size}")
     print(f"Gradient accumulation: {config.gradient_accumulation_steps}")
@@ -55,9 +53,7 @@ def train_qat(model, train_loader, val_loader, config, model_config):
         'validation_losses': [],
         'bit_width_usage': [],
         'learning_rates': [],
-        'memory_usage': [],
-        'best_val_loss': None,
-        'best_iteration': None
+        'memory_usage': []
     }
 
     # Create data iterator
@@ -157,18 +153,12 @@ def train_qat(model, train_loader, val_loader, config, model_config):
             # Store validation loss
             training_stats['validation_losses'].append(val_loss)
 
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                best_iteration = iteration
-                training_stats['best_val_loss'] = best_val_loss
-                training_stats['best_iteration'] = best_iteration
-
             # Force cleanup after eval
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             gc.collect()
 
-    print(f"\nTraining complete. Best val loss: {best_val_loss:.4f}")
+    print(f"\nTraining complete.")
 
     # Save training statistics to JSON file
     timestamp = time.strftime('%Y%m%d_%H%M%S')
@@ -184,6 +174,34 @@ def train_qat(model, train_loader, val_loader, config, model_config):
                 stats_to_save[key] = [v.tolist() if hasattr(v, 'tolist') else v for v in value]
             else:
                 stats_to_save[key] = value
+
+        # Add configuration information
+        stats_to_save['model_config'] = {
+            'model_name': model_config.model_name,
+            'output_model_path': model_config.output_model_path,
+            'quantization_bits': model_config.quantization_bits,
+            'use_gradient_checkpointing': model_config.use_gradient_checkpointing
+        }
+
+        stats_to_save['training_config'] = {
+            'train_split': config.train_split,
+            'val_split': config.val_split,
+            'batch_size': config.batch_size,
+            'max_seq_length': config.max_seq_length,
+            'doc_stride': config.doc_stride,
+            'learning_rate': config.learning_rate,
+            'weight_decay': config.weight_decay,
+            'adam_epsilon': config.adam_epsilon,
+            'adam_betas': config.adam_betas,
+            'max_grad_norm': config.max_grad_norm,
+            'num_iterations': config.num_iterations,
+            'gradient_accumulation_steps': config.gradient_accumulation_steps,
+            'eval_interval': config.eval_interval,
+            'save_interval': config.save_interval,
+            'use_amp': config.use_amp,
+            'num_workers': config.num_workers
+        }
+
         json.dump(stats_to_save, f, indent=2)
 
     print(f"Training statistics saved to {stats_path}")

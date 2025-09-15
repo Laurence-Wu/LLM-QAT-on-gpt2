@@ -26,8 +26,8 @@ class TrainingConfig:
     """Training configuration for QAT."""
     def __init__(self):
         # Dataset
-        self.train_split = 'train[:87599]'
-        self.val_split = 'validation[:10570]'
+        self.train_split = 'train[:5000]'
+        self.val_split = 'validation[:1000]'
         self.batch_size = 8
         self.max_seq_length = 256
         self.doc_stride = 128

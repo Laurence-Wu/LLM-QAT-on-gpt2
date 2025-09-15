@@ -36,7 +36,7 @@ def initialize_model(model_config, device):
         quantization_bits=model_config.quantization_bits
     )
 
-    model = QATGPT2(gpt2_config)
+    model = QATGPT2(gpt2_config, quantization_bits=model_config.quantization_bits)
 
     # Explicitly enable gradient checkpointing
     model.use_gradient_checkpointing = True
@@ -141,22 +141,22 @@ def main():
     
     print("Training returned")
     
-    # Save the trained model
-    try:
-        import time
-        timestamp = time.strftime('%Y%m%d_%H%M%S')
-        model_filename = f"qat_gpt2_{model_config.quantization_bits}bit_{timestamp}.pth"
+    # # Save the trained model
+    # try:
+    #     import time
+    #     timestamp = time.strftime('%Y%m%d_%H%M%S')
+    #     model_filename = f"qat_gpt2_{model_config.quantization_bits}bit_{timestamp}.pth"
         
-        torch.save({
-            'model_state_dict': trained_model.state_dict(),
-            'model_config': model_config.__dict__,
-            'training_config': training_config.__dict__,
-            'timestamp': timestamp
-        }, model_filename)
-        print(f"Saving model to {model_filename}")
-    except Exception as e:
-        print(f"Error saving model: {e}")
-    return trained_model
+    #     torch.save({
+    #         'model_state_dict': trained_model.state_dict(),
+    #         'model_config': model_config.__dict__,
+    #         'training_config': training_config.__dict__,
+    #         'timestamp': timestamp
+    #     }, model_filename)
+    #     print(f"Saving model to {model_filename}")
+    # except Exception as e:
+    #     print(f"Error saving model: {e}")
+    # return trained_model
 
 if __name__ == "__main__":
     main()
