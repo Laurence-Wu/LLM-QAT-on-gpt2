@@ -15,10 +15,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared.models import SwitchableQATGPT2
 from transformers import GPT2Config, GPT2Tokenizer
 
-from llm_qat_metrics import LLMQATEvaluation
-from bit_configurations import BitConfigurations
-from generate_tables import ResultTableGenerator
-from baseline_comparison import BaselineComparison
+from part3_evaluation.llm_qat_metrics import LLMQATEvaluation
+from part3_evaluation.bit_configurations import BitConfigurations
+from part3_evaluation.generate_tables import ResultTableGenerator
+from part3_evaluation.baseline_comparison import BaselineComparison
 
 
 def load_switchable_model(model_path: str = None):
@@ -29,7 +29,8 @@ def load_switchable_model(model_path: str = None):
 
     if model_path and os.path.exists(model_path):
         print(f"Loading model from {model_path}")
-        checkpoint = torch.load(model_path, map_location='cuda')
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        checkpoint = torch.load(model_path, map_location=device)
 
         # Extract model configuration from checkpoint if available
         if isinstance(checkpoint, dict) and 'model_config' in checkpoint:
@@ -78,7 +79,42 @@ def load_switchable_model(model_path: str = None):
         model = SwitchableQATGPT2(config, bit_widths=bit_widths)
 
         if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'])
+            # Load state dict with size mismatch handling for attention bias
+            state_dict = checkpoint['model_state_dict']
+            model_state = model.state_dict()
+
+            # Handle size mismatches for attention bias
+            for key in list(state_dict.keys()):
+                if '.bias' in key and key in model_state:
+                    saved_bias = state_dict[key]
+                    model_bias = model_state[key]
+
+                    if saved_bias.shape != model_bias.shape:
+                        # Resize the attention bias to match model's n_positions
+                        print(f"Resizing {key} from {saved_bias.shape} to {model_bias.shape}")
+                        # For attention bias (2D causal mask)
+                        if len(saved_bias.shape) == 2 and len(model_bias.shape) == 2:
+                            min_size = min(saved_bias.shape[0], model_bias.shape[0])
+                            new_bias = torch.zeros_like(model_bias)
+                            new_bias[:min_size, :min_size] = saved_bias[:min_size, :min_size]
+                            # Fill the rest with the appropriate causal mask pattern if needed
+                            if min_size < model_bias.shape[0] and 'attn' in key:
+                                # Create proper causal mask for remaining positions
+                                for i in range(min_size, model_bias.shape[0]):
+                                    new_bias[i, :i+1] = 1
+                        else:
+                            # For 1D biases, just copy what we can
+                            min_size = min(saved_bias.shape[0], model_bias.shape[0])
+                            new_bias = torch.zeros_like(model_bias)
+                            if len(saved_bias.shape) == 1:
+                                new_bias[:min_size] = saved_bias[:min_size]
+                            else:
+                                new_bias = saved_bias  # Keep original if shape is unexpected
+                        state_dict[key] = new_bias
+
+            # Load the modified state dict
+            model.load_state_dict(state_dict, strict=False)
+            print("Model loaded successfully with resized biases")
         else:
             model = checkpoint
     else:
@@ -97,6 +133,10 @@ def load_switchable_model(model_path: str = None):
         )
         model = SwitchableQATGPT2(config, bit_widths=default_bit_widths)
 
+    # Move model to appropriate device
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model = model.to(device)
+    print(f"Model moved to {device}")
     return model
 
 
