@@ -18,18 +18,19 @@ class ModelConfig:
         self.embd_pdrop = 0.1
 
         # Quantization settings
-        self.quantization_bits = 8
+        self.quantization_bits = 8  # Default for single-precision mode
         self.use_gradient_checkpointing = True
 
-        # LoRA settings
-        self.lora_rank = 8
-        self.lora_alpha = 16
+        # LoRA settings (used when not in switchable mode)
+        self.lora_rank = 16
+        self.lora_alpha = 32
         self.lora_dropout = 0.1
 
         # Switchable precision settings
         self.bit_widths = [4, 8, 16]  # Supported bit-widths
-        self.lora_rank_per_bit = {4: 32, 8: 16, 16: 8}  # Different ranks per bit-width
-        self.lora_alpha_per_bit = {4: 64, 8: 32, 16: 16}  # Different alphas per bit-width
+        # Corrected: Lower precision should use lower rank for efficiency
+        self.lora_rank_per_bit = {4: 8, 8: 16, 16: 32}  # Lower bits = lower rank
+        self.lora_alpha_per_bit = {4: 16, 8: 32, 16: 64}  # Proportional alpha
         self.switch_strategy = 'cyclic'  # Options: 'cyclic', 'random', 'curriculum'
         self.switch_interval = 10  # Switch every N iterations (for cyclic)
         self.curriculum_schedule = [16, 16, 8, 8, 4]  # For curriculum strategy

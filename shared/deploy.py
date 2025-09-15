@@ -24,7 +24,17 @@ def convert_to_int8(model):
             # Process QATLinearWithLoRA layers
             if isinstance(module, nn.Module) and 'Linear' in module.__class__.__name__:
                 weight = module.linear.weight.data
-                weight_quantizer = module.quantize_weight
+
+                # Handle both regular QAT and Switchable QAT layers
+                if hasattr(module, 'quantize_weight'):
+                    weight_quantizer = module.quantize_weight
+                elif hasattr(module, 'quantizers_weight'):
+                    # For SwitchableQATLinearWithLoRA, get current bit-width quantizer
+                    current_bits = module.current_bits if hasattr(module, 'current_bits') else 8
+                    weight_quantizer = module.quantizers_weight[f'{current_bits}bit']
+                else:
+                    # Skip if no quantizer found
+                    continue
 
                 if weight_quantizer.symmetric:
                     # Symmetric quantization [-128, 127]
@@ -55,10 +65,17 @@ def convert_to_int8(model):
                     int8_state_dict[f"{prefix}bias"] = module.linear.bias.data.cpu()
 
                 # Store LoRA parameters (keep as FP32)
-                if module.lora is not None:
+                if hasattr(module, 'lora') and module.lora is not None:
                     int8_state_dict[f"{prefix}lora.A"] = module.lora.lora_A.data.cpu()
                     int8_state_dict[f"{prefix}lora.B"] = module.lora.lora_B.data.cpu()
                     int8_state_dict[f"{prefix}lora.scaling"] = torch.tensor(module.lora.scaling).cpu()
+                elif hasattr(module, 'loras'):
+                    # For SwitchableQATLinearWithLoRA, store current LoRA adapter
+                    current_bits = module.current_bits if hasattr(module, 'current_bits') else 8
+                    lora = module.loras[f'{current_bits}bit']
+                    int8_state_dict[f"{prefix}lora.A"] = lora.lora_A.data.cpu()
+                    int8_state_dict[f"{prefix}lora.B"] = lora.lora_B.data.cpu()
+                    int8_state_dict[f"{prefix}lora.scaling"] = torch.tensor(lora.scaling).cpu()
 
     return int8_state_dict
 
