@@ -83,7 +83,7 @@ class QATLinearWithLoRA(nn.Module):
     def set_precision(self, weight_bits, activation_bits):
         """Set the precision (bit-width) for quantization."""
         # Update weight quantizer
-        self.quantize_weight.num_bits = weight_bits
+        self.quantize_weight.set_num_bits(weight_bits)
         if hasattr(self.quantize_weight, 'quant_min'):
             if self.quantize_weight.symmetric:
                 self.quantize_weight.quant_min = -(2 ** (weight_bits - 1))
@@ -93,7 +93,7 @@ class QATLinearWithLoRA(nn.Module):
                 self.quantize_weight.quant_max = 2 ** weight_bits - 1
 
         # Update activation quantizer
-        self.quantize_input.num_bits = activation_bits
+        self.quantize_input.set_num_bits(activation_bits)
         if hasattr(self.quantize_input, 'quant_min'):
             if self.quantize_input.symmetric:
                 self.quantize_input.quant_min = -(2 ** (activation_bits - 1))
@@ -104,8 +104,8 @@ class QATLinearWithLoRA(nn.Module):
 
         # Update LoRA quantizers if they exist
         if hasattr(self.lora, 'quantize_A'):
-            self.lora.quantize_A.num_bits = weight_bits
-            self.lora.quantize_B.num_bits = weight_bits
+            self.lora.quantize_A.set_num_bits(weight_bits)
+            self.lora.quantize_B.set_num_bits(weight_bits)
 
 # Alias for compatibility
 QuantizedLinearWithLoRA = QATLinearWithLoRA

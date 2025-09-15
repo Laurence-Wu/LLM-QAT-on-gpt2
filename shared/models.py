@@ -57,7 +57,7 @@ class QATGPT2Attention(nn.Module):
     def set_precision(self, weight_bits, activation_bits, kv_bits=8):
         self.c_attn.set_precision(weight_bits, activation_bits)
         self.c_proj.set_precision(weight_bits, activation_bits)
-        self.kv_quantizer.num_bits = kv_bits
+        self.kv_quantizer.set_num_bits(kv_bits)
 
 class QATGPT2MLP(nn.Module):
     def __init__(self, config: GPT2Config, bits=8):
@@ -247,10 +247,3 @@ class QATGPT2(nn.Module):
         """
         for block in self.h:
             block.set_precision(bits, bits, bits, bits)
-
-# Alias for compatibility
-SwitchableQuantizedGPT2 = QATGPT2
-QuantizedGPT2Attention = QATGPT2Attention  
-QuantizedGPT2MLP = QATGPT2MLP
-QuantizedGPT2Block = QATGPT2Block
-                    

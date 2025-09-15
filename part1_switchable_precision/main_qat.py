@@ -73,35 +73,20 @@ def load_pretrained_weights(model):
         model.h[i].ln_2.weight.data = pretrained.h[i].ln_2.weight.data.clone()
         model.h[i].ln_2.bias.data = pretrained.h[i].ln_2.bias.data.clone()
 
-        # Attention weights - now using QATLinearWithLoRA with .linear attribute
-        if hasattr(model.h[i].attn.c_attn, 'linear'):
-            model.h[i].attn.c_attn.linear.weight.data = \
-                pretrained.h[i].attn.c_attn.weight.data.t().contiguous()
-            if pretrained.h[i].attn.c_attn.bias is not None:
-                model.h[i].attn.c_attn.linear.bias.data = \
-                    pretrained.h[i].attn.c_attn.bias.data.clone()
+        # For QKV matrixs
+        model.h[i].attn.c_attn.linear.weight.data = pretrained.h[i].attn.c_attn.weight.data.t().contiguous()
+        model.h[i].attn.c_attn.linear.bias.data = pretrained.h[i].attn.c_attn.bias.data.clone()
+        #  for attention layer projection
+        model.h[i].attn.c_proj.linear.weight.data = pretrained.h[i].attn.c_proj.weight.data.t().contiguous()
+        model.h[i].attn.c_proj.linear.bias.data = pretrained.h[i].attn.c_proj.bias.data.clone()
 
-        if hasattr(model.h[i].attn.c_proj, 'linear'):
-            model.h[i].attn.c_proj.linear.weight.data = \
-                pretrained.h[i].attn.c_proj.weight.data.t().contiguous()
-            if pretrained.h[i].attn.c_proj.bias is not None:
-                model.h[i].attn.c_proj.linear.bias.data = \
-                    pretrained.h[i].attn.c_proj.bias.data.clone()
+        # feedforward projection matrix to a higher dimension.
+        model.h[i].mlp.c_fc.linear.weight.data = pretrained.h[i].mlp.c_fc.weight.data.t().contiguous()
+        model.h[i].mlp.c_fc.linear.bias.data = pretrained.h[i].mlp.c_fc.bias.data.clone()
 
-        # MLP weights - now using QATLinearWithLoRA with .linear attribute
-        if hasattr(model.h[i].mlp.c_fc, 'linear'):
-            model.h[i].mlp.c_fc.linear.weight.data = \
-                pretrained.h[i].mlp.c_fc.weight.data.t().contiguous()
-            if pretrained.h[i].mlp.c_fc.bias is not None:
-                model.h[i].mlp.c_fc.linear.bias.data = \
-                    pretrained.h[i].mlp.c_fc.bias.data.clone()
-
-        if hasattr(model.h[i].mlp.c_proj, 'linear'):
-            model.h[i].mlp.c_proj.linear.weight.data = \
-                pretrained.h[i].mlp.c_proj.weight.data.t().contiguous()
-            if pretrained.h[i].mlp.c_proj.bias is not None:
-                model.h[i].mlp.c_proj.linear.bias.data = \
-                    pretrained.h[i].mlp.c_proj.bias.data.clone()
+        # feedforward projection matrix from a higher dimension.
+        model.h[i].mlp.c_proj.linear.weight.data = pretrained.h[i].mlp.c_proj.weight.data.t().contiguous()
+        model.h[i].mlp.c_proj.linear.bias.data = pretrained.h[i].mlp.c_proj.bias.data.clone()
 
     # Final layer normalization
     model.ln_f.weight.data = pretrained.ln_f.weight.data.clone()
@@ -109,20 +94,16 @@ def load_pretrained_weights(model):
 
     # Delete pretrained model to free memory immediately
     del pretrained
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    torch.cuda.empty_cache()
     gc.collect()
 
-    print("Pretrained weights loaded and memory cleaned")
+    print("pretrained weights loaded successfully.")
 
 def main():
-
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f" {device}")
-    
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        gc.collect()
+    torch.cuda.empty_cache()
+    gc.collect()
     
     # Load configurations to cpu
     model_config = ModelConfig()
@@ -145,7 +126,8 @@ def main():
         max_length=training_config.max_seq_length,
         doc_stride=training_config.doc_stride
     )
-
+    
+    ## print the current gpu
     print(f"GPU: {torch.cuda.get_device_name(0)}")
     print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
 
@@ -165,23 +147,16 @@ def main():
         timestamp = time.strftime('%Y%m%d_%H%M%S')
         model_filename = f"qat_gpt2_{model_config.quantization_bits}bit_{timestamp}.pth"
         
-        print(f"Saving model to {model_filename}")
         torch.save({
             'model_state_dict': trained_model.state_dict(),
             'model_config': model_config.__dict__,
             'training_config': training_config.__dict__,
             'timestamp': timestamp
         }, model_filename)
-        print("Model saved successfully")
-        
-        results = {"model_saved": model_filename, "training_completed": True}
-        
+        print(f"Saving model to {model_filename}")
     except Exception as e:
         print(f"Error saving model: {e}")
-        results = {"model_saved": None, "training_completed": True, "save_error": str(e)}
-
-    return trained_model, results
-
+    return trained_model
 
 if __name__ == "__main__":
     main()
