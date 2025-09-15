@@ -77,13 +77,11 @@ class PerplexityEvaluator:
             with torch.no_grad():
                 try:
                     outputs = self.model(input_ids, labels=input_ids)
-                    loss = outputs['loss']
+                    loss = outputs['loss']  # This is already averaged per token
 
-                    if begin_loc == 0:
-                        nlls.append(loss * input_ids.shape[1])
-                    else:
-                        trg_len = end_loc - max(prev_end_loc, begin_loc)
-                        nlls.append(loss * trg_len)
+                    # Just accumulate the losses - they're already averaged
+                    # We'll compute the mean of means later
+                    nlls.append(loss.item())
 
                     prev_end_loc = end_loc
                 except Exception as e:
@@ -98,9 +96,13 @@ class PerplexityEvaluator:
         if not nlls:
             return float('inf')
 
-        ppl = torch.exp(torch.stack(nlls).sum() / prev_end_loc)
+        # Calculate average loss across all segments
+        avg_loss = sum(nlls) / len(nlls)
 
-        return ppl.item()
+        # Perplexity is exp(average_loss)
+        ppl = math.exp(avg_loss)
+
+        return ppl
 
     def evaluate_all_datasets(self, bit_config: Dict) -> Dict:
         """
