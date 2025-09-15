@@ -18,10 +18,11 @@ os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True,max_split_size
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 # Import shared components
-from models import QATGPT2
+from models import QATGPT2, SwitchableQATGPT2
 from dataset import create_dataloaders
 from config_qat import ModelConfig, TrainingConfig
 from train_qat import train_qat
+from deploy import save_int8_checkpoint
 
 
 def initialize_model(model_config, device):
@@ -33,10 +34,17 @@ def initialize_model(model_config, device):
         n_head=model_config.n_head,
         layer_norm_epsilon=model_config.layer_norm_epsilon,
         embd_pdrop=model_config.embd_pdrop,
-        quantization_bits=model_config.quantization_bits
+        quantization_bits=model_config.quantization_bits,
+        lora_rank=model_config.lora_rank,
+        lora_alpha=model_config.lora_alpha,
+        lora_dropout=model_config.lora_dropout
     )
 
-    model = QATGPT2(gpt2_config, quantization_bits=model_config.quantization_bits)
+    # Use switchable model if configured
+    if model_config.use_switchable:
+        model = SwitchableQATGPT2(gpt2_config, bit_widths=model_config.bit_widths)
+    else:
+        model = QATGPT2(gpt2_config)
 
     # Explicitly enable gradient checkpointing
     model.use_gradient_checkpointing = True
@@ -139,24 +147,31 @@ def main():
         model_config
     )
     
-    print("Training returned")
-    
-    # # Save the trained model
-    # try:
-    #     import time
-    #     timestamp = time.strftime('%Y%m%d_%H%M%S')
-    #     model_filename = f"qat_gpt2_{model_config.quantization_bits}bit_{timestamp}.pth"
-        
-    #     torch.save({
-    #         'model_state_dict': trained_model.state_dict(),
-    #         'model_config': model_config.__dict__,
-    #         'training_config': training_config.__dict__,
-    #         'timestamp': timestamp
-    #     }, model_filename)
-    #     print(f"Saving model to {model_filename}")
-    # except Exception as e:
-    #     print(f"Error saving model: {e}")
-    # return trained_model
+    print("Training complete")
+
+    # Save both FP32 and INT8 models
+    try:
+        import time
+        timestamp = time.strftime('%Y%m%d_%H%M%S')
+
+        # Save FP32 model (standard checkpoint)
+        fp32_filename = f"qat_gpt2_{model_config.quantization_bits}bit_fp32_{timestamp}.pth"
+        torch.save({
+            'model_state_dict': trained_model.state_dict(),
+            'model_config': model_config.__dict__,
+            'training_config': training_config.__dict__,
+            'timestamp': timestamp
+        }, fp32_filename)
+        print(f"Saved FP32 model to {fp32_filename}")
+
+        # Save INT8 model (quantized for deployment)
+        int8_filename = f"qat_gpt2_{model_config.quantization_bits}bit_int8_{timestamp}.pth"
+        save_int8_checkpoint(trained_model, int8_filename, model_config, training_config)
+
+    except Exception as e:
+        print(f"Error saving models: {e}")
+
+    return trained_model
 
 if __name__ == "__main__":
     main()

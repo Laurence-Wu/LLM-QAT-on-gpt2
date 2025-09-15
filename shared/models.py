@@ -9,10 +9,10 @@ from torch.utils.checkpoint import checkpoint
 # Try relative imports first, fall back to direct imports
 try:
     from .quantization import LearnableFakeQuantize
-    from .lora import QATLinearWithLoRA
+    from .lora import QATLinearWithLoRA, SwitchableQATLinearWithLoRA
 except ImportError:
     from quantization import LearnableFakeQuantize
-    from lora import QATLinearWithLoRA
+    from lora import QATLinearWithLoRA, SwitchableQATLinearWithLoRA
 
 class QATGPT2Attention(nn.Module):
     def __init__(self, config: GPT2Config, bits=8):
@@ -20,9 +20,11 @@ class QATGPT2Attention(nn.Module):
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.head_dim = self.n_embd // self.n_head
-        
-        self.c_attn = QATLinearWithLoRA(config.n_embd, 3 * config.n_embd, bits=bits)
-        self.c_proj = QATLinearWithLoRA(config.n_embd, config.n_embd, bits=bits)
+
+        self.c_attn = QATLinearWithLoRA(config.n_embd, 3 * config.n_embd, bits=bits,
+                                         lora_rank=config.lora_rank, lora_alpha=config.lora_alpha, lora_dropout=config.lora_dropout)
+        self.c_proj = QATLinearWithLoRA(config.n_embd, config.n_embd, bits=bits,
+                                         lora_rank=config.lora_rank, lora_alpha=config.lora_alpha, lora_dropout=config.lora_dropout)
         
         self.kv_quantizer = LearnableFakeQuantize(num_bits=8, symmetric=False)
         
@@ -49,9 +51,7 @@ class QATGPT2Attention(nn.Module):
         
         attn_output = attn_weights @ v
         attn_output = attn_output.transpose(1, 2).contiguous().view(B, T, C)
-        
         attn_output = self.c_proj(attn_output)
-        
         return attn_output
     
     def set_precision(self, weight_bits, activation_bits, kv_bits=8):
@@ -62,8 +62,10 @@ class QATGPT2Attention(nn.Module):
 class QATGPT2MLP(nn.Module):
     def __init__(self, config: GPT2Config, bits=8):
         super().__init__()
-        self.c_fc = QATLinearWithLoRA(config.n_embd, 4 * config.n_embd, bits=bits)
-        self.c_proj = QATLinearWithLoRA(4 * config.n_embd, config.n_embd, bits=bits)
+        self.c_fc = QATLinearWithLoRA(config.n_embd, 4 * config.n_embd, bits=bits,
+                                       lora_rank=config.lora_rank, lora_alpha=config.lora_alpha, lora_dropout=config.lora_dropout)
+        self.c_proj = QATLinearWithLoRA(4 * config.n_embd, config.n_embd, bits=bits,
+                                         lora_rank=config.lora_rank, lora_alpha=config.lora_alpha, lora_dropout=config.lora_dropout)
         self.act = nn.GELU()
         
     def forward(self, hidden_states):
@@ -103,7 +105,7 @@ class QATGPT2Block(nn.Module):
 
 class QATGPT2(nn.Module):
     """GPT-2 with QAT (single precision, fake quantization)."""
-    def __init__(self, config: GPT2Config):
+    def __init__(self, config: GPT2Config, quantization_bits):
         super().__init__()
         self.config = config
         self.use_gradient_checkpointing = True
@@ -112,9 +114,8 @@ class QATGPT2(nn.Module):
         self.wpe = nn.Embedding(config.n_positions, config.n_embd)
         self.drop = nn.Dropout(config.embd_pdrop)
         
-        bits = getattr(config, 'quantization_bits', 8)
         self.h = nn.ModuleList([
-            QATGPT2Block(config, bits) for _ in range(config.n_layer)
+            QATGPT2Block(config, quantization_bits) for _ in range(config.n_layer)
         ])
 
         self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
@@ -247,3 +248,226 @@ class QATGPT2(nn.Module):
         """
         for block in self.h:
             block.set_precision(bits, bits, bits, bits)
+
+
+class SwitchableQATGPT2Attention(nn.Module):
+    """Attention module with switchable precision."""
+    def __init__(self, config: GPT2Config, bit_widths=[4, 8, 16]):
+        super().__init__()
+        self.n_head = config.n_head
+        self.n_embd = config.n_embd
+        self.head_dim = self.n_embd // self.n_head
+        self.bit_widths = bit_widths
+
+        # Get LoRA configs from config
+        lora_rank_per_bit = {4: 32, 8: 16, 16: 8}
+        lora_alpha_per_bit = {4: 64, 8: 32, 16: 16}
+        lora_dropout = config.lora_dropout if hasattr(config, 'lora_dropout') else 0.1
+
+        # Switchable layers
+        self.c_attn = SwitchableQATLinearWithLoRA(
+            config.n_embd, 3 * config.n_embd,
+            bit_widths=bit_widths,
+            lora_rank_per_bit=lora_rank_per_bit,
+            lora_alpha_per_bit=lora_alpha_per_bit,
+            lora_dropout=lora_dropout
+        )
+        self.c_proj = SwitchableQATLinearWithLoRA(
+            config.n_embd, config.n_embd,
+            bit_widths=bit_widths,
+            lora_rank_per_bit=lora_rank_per_bit,
+            lora_alpha_per_bit=lora_alpha_per_bit,
+            lora_dropout=lora_dropout
+        )
+
+        self.kv_quantizer = LearnableFakeQuantize(num_bits=8, symmetric=False)
+        self.register_buffer("bias", torch.tril(torch.ones(config.n_positions, config.n_positions)))
+
+    def set_precision(self, bits):
+        """Set precision for all layers."""
+        self.c_attn.set_precision(bits)
+        self.c_proj.set_precision(bits)
+
+    def forward(self, hidden_states, attention_mask=None):
+        B, T, C = hidden_states.shape
+
+        qkv = self.c_attn(hidden_states)
+        q, k, v = qkv.split(self.n_embd, dim=2)
+
+        q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
+        k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
+        v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
+
+        k = self.kv_quantizer(k)
+        v = self.kv_quantizer(v)
+
+        attn_weights = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)
+        bias_mask = self.bias[:T, :T].to(attn_weights.device)
+        attn_weights = attn_weights.masked_fill(bias_mask == 0, float('-inf'))
+        attn_weights = F.softmax(attn_weights, dim=-1)
+
+        attn_output = attn_weights @ v
+        attn_output = attn_output.transpose(1, 2).contiguous().view(B, T, C)
+        attn_output = self.c_proj(attn_output)
+
+        return attn_output
+
+
+class SwitchableQATGPT2MLP(nn.Module):
+    """MLP module with switchable precision."""
+    def __init__(self, config: GPT2Config, bit_widths=[4, 8, 16]):
+        super().__init__()
+        self.bit_widths = bit_widths
+
+        # Get LoRA configs
+        lora_rank_per_bit = {4: 32, 8: 16, 16: 8}
+        lora_alpha_per_bit = {4: 64, 8: 32, 16: 16}
+        lora_dropout = config.lora_dropout if hasattr(config, 'lora_dropout') else 0.1
+
+        self.c_fc = SwitchableQATLinearWithLoRA(
+            config.n_embd, 4 * config.n_embd,
+            bit_widths=bit_widths,
+            lora_rank_per_bit=lora_rank_per_bit,
+            lora_alpha_per_bit=lora_alpha_per_bit,
+            lora_dropout=lora_dropout
+        )
+        self.c_proj = SwitchableQATLinearWithLoRA(
+            4 * config.n_embd, config.n_embd,
+            bit_widths=bit_widths,
+            lora_rank_per_bit=lora_rank_per_bit,
+            lora_alpha_per_bit=lora_alpha_per_bit,
+            lora_dropout=lora_dropout
+        )
+        self.act = nn.GELU()
+
+    def set_precision(self, bits):
+        """Set precision for all layers."""
+        self.c_fc.set_precision(bits)
+        self.c_proj.set_precision(bits)
+
+    def forward(self, hidden_states):
+        hidden_states = self.c_fc(hidden_states)
+        hidden_states = self.act(hidden_states)
+        hidden_states = self.c_proj(hidden_states)
+        return hidden_states
+
+
+class SwitchableQATGPT2Block(nn.Module):
+    """Transformer block with switchable precision."""
+    def __init__(self, config: GPT2Config, bit_widths=[4, 8, 16]):
+        super().__init__()
+        self.ln_1 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
+        self.attn = SwitchableQATGPT2Attention(config, bit_widths)
+        self.ln_2 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
+        self.mlp = SwitchableQATGPT2MLP(config, bit_widths)
+
+    def set_precision(self, bits):
+        """Set precision for attention and MLP."""
+        self.attn.set_precision(bits)
+        self.mlp.set_precision(bits)
+
+    def forward(self, hidden_states, attention_mask=None):
+        residual = hidden_states
+        hidden_states = self.ln_1(hidden_states)
+        attn_output = self.attn(hidden_states, attention_mask)
+        hidden_states = residual + attn_output
+
+        residual = hidden_states
+        hidden_states = self.ln_2(hidden_states)
+        mlp_output = self.mlp(hidden_states)
+        hidden_states = residual + mlp_output
+
+        return hidden_states
+
+
+class SwitchableQATGPT2(nn.Module):
+    """GPT-2 with switchable precision QAT."""
+    def __init__(self, config: GPT2Config, bit_widths=[4, 8, 16]):
+        super().__init__()
+        self.config = config
+        self.bit_widths = bit_widths
+        self.current_bits = 8  # Default
+        self.n_layer = config.n_layer
+        self.use_gradient_checkpointing = True
+
+        self.wte = nn.Embedding(config.vocab_size, config.n_embd)
+        self.wpe = nn.Embedding(config.n_positions, config.n_embd)
+        self.drop = nn.Dropout(config.embd_pdrop)
+
+        self.h = nn.ModuleList([
+            SwitchableQATGPT2Block(config, bit_widths) for _ in range(config.n_layer)
+        ])
+
+        self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.lm_head.weight = self.wte.weight
+
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        elif isinstance(module, nn.LayerNorm):
+            torch.nn.init.ones_(module.weight)
+            torch.nn.init.zeros_(module.bias)
+
+    def set_precision(self, bits):
+        """Set precision for all blocks."""
+        if bits not in self.bit_widths:
+            raise ValueError(f"Bit-width {bits} not supported. Choose from {self.bit_widths}")
+        self.current_bits = bits
+        for block in self.h:
+            block.set_precision(bits)
+
+    def set_layer_precision(self, layer_configs):
+        """Set per-layer bit-widths"""
+        for i, bits in enumerate(layer_configs):
+            if i < self.n_layer:
+                self.h[i].set_precision(bits)
+
+    def set_global_precision(self, bits):
+        """Set same bit-width for all layers"""
+        for block in self.h:
+            block.set_precision(bits)
+
+    def forward(self, input_ids, attention_mask=None, labels=None):
+        batch_size, seq_length = input_ids.shape
+        position_ids = torch.arange(seq_length, device=input_ids.device).unsqueeze(0)
+        inputs_embeds = self.wte(input_ids)
+        position_embeds = self.wpe(position_ids)
+        hidden_states = self.drop(inputs_embeds + position_embeds)
+
+        for i, block in enumerate(self.h):
+            if self.use_gradient_checkpointing and self.training:
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        return module(*inputs)
+                    return custom_forward
+
+                hidden_states = checkpoint(
+                    create_custom_forward(block),
+                    hidden_states,
+                    attention_mask,
+                    use_reentrant=False,
+                    preserve_rng_state=False
+                )
+            else:
+                hidden_states = block(hidden_states, attention_mask)
+
+            if i % 4 == 3 and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        hidden_states = self.ln_f(hidden_states)
+        logits = self.lm_head(hidden_states)
+
+        loss = None
+        if labels is not None:
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            loss = F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)),
+                                  shift_labels.view(-1))
+        return {'loss': loss, 'logits': logits}

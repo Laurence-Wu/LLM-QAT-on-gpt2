@@ -10,13 +10,34 @@ from tqdm import tqdm
 import gc
 import json
 import time
+import random
+
+
+def get_next_bitwidth(iteration, model_config):
+    """Determine next bit-width based on switching strategy."""
+    if model_config.switch_strategy == 'cyclic':
+        # Cycle through bit-widths
+        cycle_position = (iteration // model_config.switch_interval) % len(model_config.bit_widths)
+        return model_config.bit_widths[cycle_position]
+    elif model_config.switch_strategy == 'random':
+        # Random selection
+        return random.choice(model_config.bit_widths)
+    elif model_config.switch_strategy == 'curriculum':
+        # Curriculum learning - start high, go low
+        schedule_idx = min(iteration // 50, len(model_config.curriculum_schedule) - 1)
+        return model_config.curriculum_schedule[schedule_idx]
+    else:
+        return 8  # Default
 
 
 def train_qat(model, train_loader, val_loader, config, model_config):
-    """QAT training with single precision and fake quantization - memory optimized."""
+    """QAT training with switchable precision support."""
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model = model.to(device)
+
+    # Check if using switchable model
+    is_switchable = hasattr(model, 'set_precision') and model_config.use_switchable
 
     # Clear cache before starting
     if torch.cuda.is_available():
@@ -53,7 +74,8 @@ def train_qat(model, train_loader, val_loader, config, model_config):
         'validation_losses': [],
         'bit_width_usage': [],
         'learning_rates': [],
-        'memory_usage': []
+        'memory_usage': [],
+        'losses_per_bit': {4: [], 8: [], 16: []} if is_switchable else {}
     }
 
     # Create data iterator
@@ -64,6 +86,12 @@ def train_qat(model, train_loader, val_loader, config, model_config):
 
     for iteration in progress_bar:
         model.train()
+
+        # Switch bit-width if using switchable model
+        current_bits = model_config.quantization_bits  # Default
+        if is_switchable:
+            current_bits = get_next_bitwidth(iteration, model_config)
+            model.set_precision(current_bits)
 
         # Clear gradients only at the start of accumulation
         optimizer.zero_grad(set_to_none=True)
@@ -121,12 +149,16 @@ def train_qat(model, train_loader, val_loader, config, model_config):
 
         # Store training statistics
         training_stats['iteration_losses'].append(total_loss)
-        training_stats['bit_width_usage'].append(model_config.quantization_bits)
+        training_stats['bit_width_usage'].append(current_bits)  # Track actual bit-width used
         training_stats['learning_rates'].append(optimizer.param_groups[0]['lr'])
         if torch.cuda.is_available():
             training_stats['memory_usage'].append(torch.cuda.memory_allocated() / 1024**2)  # MB
         else:
             training_stats['memory_usage'].append(0)
+
+        # Track loss per bit-width if switchable
+        if is_switchable:
+            training_stats['losses_per_bit'][current_bits].append(total_loss)
 
         # Periodic memory cleanup to prevent accumulation
         if iteration % 10 == 0:
@@ -139,11 +171,14 @@ def train_qat(model, train_loader, val_loader, config, model_config):
             if torch.cuda.is_available():
                 allocated = torch.cuda.memory_allocated() / 1024**3
                 reserved = torch.cuda.memory_reserved() / 1024**3
-                progress_bar.set_postfix({
+                postfix_dict = {
                     'loss': f'{total_loss:.4f}',
                     'gpu_alloc': f'{allocated:.1f}GB',
                     'gpu_res': f'{reserved:.1f}GB'
-                })
+                }
+                if is_switchable:
+                    postfix_dict['bits'] = current_bits
+                progress_bar.set_postfix(postfix_dict)
 
         # Evaluation with memory cleanup
         if iteration % config.eval_interval == 0 and iteration > 0:

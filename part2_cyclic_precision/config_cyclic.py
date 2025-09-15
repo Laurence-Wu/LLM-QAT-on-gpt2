@@ -19,6 +19,11 @@ class ModelConfig:
         self.use_gradient_checkpointing = False
         self.default_bit_width = 8
 
+        # LoRA settings
+        self.lora_rank = 8
+        self.lora_alpha = 16
+        self.lora_dropout = 0.1
+
 
 class CyclicTrainingConfig:
     """Training configuration for CPT - Step 3 & 5 of Algorithm Test 2."""

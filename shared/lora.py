@@ -47,7 +47,8 @@ class QATLoRALayer(nn.Module):
 
 class QATLinearWithLoRA(nn.Module):
     """QAT Linear layer: FP32 weights, fake quantization, LoRA adaptation."""
-    def __init__(self, in_features, out_features, bias=True, bits=8):
+    def __init__(self, in_features, out_features, bias=True, bits=8,
+                 lora_rank=8, lora_alpha=16, lora_dropout=0.1):
         super().__init__()
         self.bits = bits
         self.in_features = in_features
@@ -60,9 +61,10 @@ class QATLinearWithLoRA(nn.Module):
         self.quantize_weight = LearnableFakeQuantize(num_bits=bits, symmetric=True)
         self.quantize_input = LearnableFakeQuantize(num_bits=bits, symmetric=False)
 
-        # LoRA adapter
-        rank = max(4, min(16, in_features // 64))
-        self.lora = QATLoRALayer(in_features, out_features, rank=rank, alpha=rank*2, bits=bits)
+        # LoRA adapter with config parameters
+        self.lora = QATLoRALayer(in_features, out_features,
+                                 rank=lora_rank, alpha=lora_alpha,
+                                 dropout=lora_dropout, bits=bits)
 
         # Pre-allocate buffers for quantized tensors
         self.register_buffer('weight_quantized', torch.empty(out_features, in_features))
@@ -103,12 +105,104 @@ class QATLinearWithLoRA(nn.Module):
                 self.quantize_input.quant_max = 2 ** activation_bits - 1
 
         # Update LoRA quantizers if they exist
-        if hasattr(self.lora, 'quantize_A'):
+        try:
             self.lora.quantize_A.set_num_bits(weight_bits)
             self.lora.quantize_B.set_num_bits(weight_bits)
+        except AttributeError:
+            pass  # LoRA quantizers not present
 
-# Alias for compatibility
-QuantizedLinearWithLoRA = QATLinearWithLoRA
+
+class SwitchableQATLinearWithLoRA(nn.Module):
+    """Switchable QAT Linear layer with multiple LoRA adapters for different bit-widths."""
+
+    def __init__(self, in_features, out_features, bias=True,
+                 bit_widths=[4, 8, 16],
+                 lora_rank_per_bit={4: 32, 8: 16, 16: 8},
+                 lora_alpha_per_bit={4: 64, 8: 32, 16: 16},
+                 lora_dropout=0.1):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.bit_widths = bit_widths
+        self.current_bits = bit_widths[1]  # Default to 8-bit
+
+        # FP32 base layer (shared across all bit-widths)
+        self.linear = nn.Linear(in_features, out_features, bias=bias)
+
+        # Create separate quantizers for each bit-width
+        self.quantizers_weight = nn.ModuleDict({
+            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True)
+            for bits in bit_widths
+        })
+        self.quantizers_input = nn.ModuleDict({
+            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=False)
+            for bits in bit_widths
+        })
+
+        # Create separate LoRA adapters for each bit-width
+        self.lora_adapters = nn.ModuleDict({
+            f'{bits}bit': QATLoRALayer(
+                in_features, out_features,
+                rank=lora_rank_per_bit.get(bits, 16),
+                alpha=lora_alpha_per_bit.get(bits, 32),
+                dropout=lora_dropout,
+                bits=bits
+            )
+            for bits in bit_widths
+        })
+
+        # Pre-allocate buffers for quantized tensors
+        self.register_buffer('weight_quantized', torch.empty(out_features, in_features))
+        self.register_buffer('input_quantized', None)
+
+    def set_precision(self, bits):
+        """Switch to specified bit-width."""
+        if bits not in self.bit_widths:
+            raise ValueError(f"Bit-width {bits} not supported. Choose from {self.bit_widths}")
+        self.current_bits = bits
+
+    def get_active_lora(self):
+        """Get the currently active LoRA adapter."""
+        return self.lora_adapters[f'{self.current_bits}bit']
+
+    def forward(self, x):
+        # Get current bit-width quantizers and LoRA
+        bits_key = f'{self.current_bits}bit'
+        weight_quantizer = self.quantizers_weight[bits_key]
+        input_quantizer = self.quantizers_input[bits_key]
+        active_lora = self.lora_adapters[bits_key]
+
+        # Quantize inputs and weights for current bit-width
+        x_quantized = input_quantizer(x)
+        weight_quantized = weight_quantizer(self.linear.weight)
+
+        # Base computation with quantized values
+        base_output = F.linear(x_quantized, weight_quantized, self.linear.bias)
+
+        # Add only the active LoRA adapter
+        lora_output = active_lora(x)
+
+        return base_output + lora_output
+
+    def get_all_parameters(self):
+        """Get all parameters (base + all LoRAs) for optimizer."""
+        params = list(self.linear.parameters())
+        for lora in self.lora_adapters.values():
+            params.extend(lora.parameters())
+        for quantizer in self.quantizers_weight.values():
+            params.extend(quantizer.parameters())
+        for quantizer in self.quantizers_input.values():
+            params.extend(quantizer.parameters())
+        return params
+
+    def get_active_parameters(self):
+        """Get only parameters for current bit-width (for selective updates)."""
+        bits_key = f'{self.current_bits}bit'
+        params = list(self.linear.parameters())
+        params.extend(self.lora_adapters[bits_key].parameters())
+        params.extend(self.quantizers_weight[bits_key].parameters())
+        params.extend(self.quantizers_input[bits_key].parameters())
+        return params
 
 
 

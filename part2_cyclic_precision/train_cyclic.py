@@ -155,6 +155,11 @@ def create_layer_config_from_bit_width(bit_width: Union[int, List[int]],
         raise ValueError(f"Unknown bit width configuration: {bit_width}")
 
 
+def train_cyclic_precision(model, train_loader, val_loader, training_config,
+                          cyclic_config, n_layers: int = 12) -> Tuple[nn.Module, Dict]:
+    return train_with_cpt(model, train_loader, val_loader, training_config, cyclic_config, n_layers)
+
+
 def train_with_cpt(model, train_loader, val_loader, training_config,
                    cyclic_config, n_layers: int = 12) -> Tuple[nn.Module, Dict]:
     """

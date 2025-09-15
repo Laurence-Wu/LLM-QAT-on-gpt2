@@ -21,6 +21,20 @@ class ModelConfig:
         self.quantization_bits = 8
         self.use_gradient_checkpointing = True
 
+        # LoRA settings
+        self.lora_rank = 8
+        self.lora_alpha = 16
+        self.lora_dropout = 0.1
+
+        # Switchable precision settings
+        self.use_switchable = True  # Enable switchable precision
+        self.bit_widths = [4, 8, 16]  # Supported bit-widths
+        self.lora_rank_per_bit = {4: 32, 8: 16, 16: 8}  # Different ranks per bit-width
+        self.lora_alpha_per_bit = {4: 64, 8: 32, 16: 16}  # Different alphas per bit-width
+        self.switch_strategy = 'cyclic'  # Options: 'cyclic', 'random', 'curriculum'
+        self.switch_interval = 10  # Switch every N iterations (for cyclic)
+        self.curriculum_schedule = [16, 16, 8, 8, 4]  # For curriculum strategy
+
 
 class TrainingConfig:
     """Training configuration for QAT."""
