@@ -15,7 +15,7 @@ class BaseDataset(Dataset, ABC):
 
     @abstractmethod
     def preprocess_dataset(self):
-        """Preprocess the dataset - to be implemented by subclasses."""
+        """To be implemented by subclasses."""
         pass
 
     def __len__(self):
@@ -39,8 +39,7 @@ class SQuADDataset(BaseDataset):
         processed = []
         for example in tqdm(self.dataset, desc="Preprocessing SQuAD"):
             processed_example = self._process_example(example)
-            if processed_example is not None:
-                processed.append(processed_example)
+            processed.append(processed_example)
         return processed
 
     def _process_example(self, example):
@@ -139,19 +138,24 @@ class WikiTextDataset(BaseDataset):
                 if len(chunk_ids) < 50:
                     continue
 
+                # Track original length before padding
+                original_length = len(chunk_ids)
+
                 # Pad if necessary
                 if len(chunk_ids) < self.max_length:
                     padding_length = self.max_length - len(chunk_ids)
+                    pad_id = self.tokenizer.pad_token_id
                     chunk_ids = torch.cat([
                         chunk_ids,
-                        torch.full((padding_length,), self.tokenizer.pad_token_id)
+                        torch.full((padding_length,), pad_id)
                     ])
 
-                # Create attention mask
-                attention_mask = (chunk_ids != self.tokenizer.pad_token_id).long()
+                # Create attention mask based on original length
+                attention_mask = torch.zeros(self.max_length, dtype=torch.long)
+                attention_mask[:original_length] = 1
 
-                # For language modeling, labels are the same as input_ids
-                # but we mask out padding tokens
+                # Labels are same as input_ids for language modeling
+                # but mask out padding positions
                 labels = chunk_ids.clone()
                 labels[attention_mask == 0] = -100
 
@@ -160,10 +164,6 @@ class WikiTextDataset(BaseDataset):
                     'attention_mask': attention_mask,
                     'labels': labels
                 })
-
-                # Stop if we've processed enough chunks (for memory efficiency)
-                if len(processed) >= 50000:  # Limit dataset size
-                    return processed
 
         return processed
 

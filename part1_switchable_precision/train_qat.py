@@ -33,7 +33,11 @@ def train_qat(model, train_loader, val_loader, config, model_config):
     )
 
     # Scheduler
-    scheduler = CosineAnnealingLR(optimizer, T_max=config.num_iterations)
+    scheduler = CosineAnnealingLR(
+        optimizer,
+        T_max=config.num_iterations,  # Maximum number of iterations
+        eta_min=0  # Minimum learning rate
+    )
 
     # Mixed precision
     scaler = torch.amp.GradScaler('cuda') if config.use_amp else None
