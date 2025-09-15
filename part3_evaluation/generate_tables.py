@@ -1,8 +1,36 @@
-import pandas as pd
-from tabulate import tabulate
 from typing import Dict, List
 import numpy as np
 from pathlib import Path
+
+try:
+    import pandas as pd
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
+
+try:
+    from tabulate import tabulate
+    HAS_TABULATE = True
+except ImportError:
+    HAS_TABULATE = False
+
+    def tabulate(data, headers='keys', tablefmt='grid', floatfmt='.1f'):
+        """Fallback tabulate function when tabulate is not installed"""
+        if HAS_PANDAS and isinstance(data, pd.DataFrame):
+            return data.to_string()
+        elif isinstance(data, list) and data and isinstance(data[0], dict):
+            # Handle list of dictionaries
+            if headers == 'keys' and data:
+                headers = list(data[0].keys())
+            header_str = " | ".join(str(h) for h in headers)
+            separator = "-" * len(header_str)
+            rows = []
+            for row in data:
+                row_values = [str(row.get(h, '')) for h in headers]
+                rows.append(" | ".join(row_values))
+            return f"{header_str}\n{separator}\n" + "\n".join(rows)
+        else:
+            return str(data)
 
 class ResultTableGenerator:
     def __init__(self, results: Dict):
@@ -39,9 +67,12 @@ class ResultTableGenerator:
         if not rows:
             return "No zero-shot results available"
 
-        df = pd.DataFrame(rows)
-
-        df = df.sort_values('Avg', ascending=False)
+        if HAS_PANDAS:
+            df = pd.DataFrame(rows)
+            df = df.sort_values('Avg', ascending=False)
+        else:
+            # Simple sort for non-pandas case
+            df = sorted(rows, key=lambda x: x.get('Avg', 0), reverse=True)
 
         table_str = "Table 1: Zero-shot Common Sense Performance (↑)\n"
         table_str += "=" * 100 + "\n"
@@ -76,9 +107,12 @@ class ResultTableGenerator:
         if not rows:
             return "No perplexity results available"
 
-        df = pd.DataFrame(rows)
-
-        df = df.sort_values('WikiText2↓', ascending=True)
+        if HAS_PANDAS:
+            df = pd.DataFrame(rows)
+            df = df.sort_values('WikiText2↓', ascending=True)
+        else:
+            # Simple sort for non-pandas case
+            df = sorted(rows, key=lambda x: x.get('WikiText2↓', float('inf')))
 
         table_str = "Table 2: Perplexity Results (↓)\n"
         table_str += "=" * 50 + "\n"
@@ -118,9 +152,12 @@ class ResultTableGenerator:
         if not rows:
             return "No few-shot results available"
 
-        df = pd.DataFrame(rows)
-
-        df = df.sort_values('MMLU-Avg', ascending=False)
+        if HAS_PANDAS:
+            df = pd.DataFrame(rows)
+            df = df.sort_values('MMLU-Avg', ascending=False)
+        else:
+            # Simple sort for non-pandas case
+            df = sorted(rows, key=lambda x: x.get('MMLU-Avg', 0), reverse=True)
 
         table_str = "Table 7: Few-shot Performance (↑)\n"
         table_str += "=" * 80 + "\n"

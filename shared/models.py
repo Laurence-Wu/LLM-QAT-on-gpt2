@@ -220,6 +220,56 @@ class QATGPT2(nn.Module):
 
         return {'loss': loss, 'logits': logits}
 
+    def generate(self, input_ids=None, max_new_tokens=50, temperature=1.0,
+                 do_sample=False, top_k=50, top_p=0.95, pad_token_id=None,
+                 eos_token_id=None, **kwargs):
+        """Generate text using the model."""
+        self.eval()
+        device = input_ids.device if input_ids is not None else next(self.parameters()).device
+
+        if input_ids is None:
+            input_ids = torch.zeros((1, 1), dtype=torch.long, device=device)
+
+        batch_size = input_ids.shape[0]
+
+        for _ in range(max_new_tokens):
+            with torch.no_grad():
+                outputs = self.forward(input_ids=input_ids)
+                logits = outputs['logits']
+
+                next_token_logits = logits[:, -1, :] / temperature
+
+                if do_sample:
+                    if top_k > 0:
+                        indices_to_remove = next_token_logits < torch.topk(next_token_logits, top_k)[0][..., -1, None]
+                        next_token_logits[indices_to_remove] = float('-inf')
+
+                    if top_p < 1.0:
+                        sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
+                        cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+
+                        sorted_indices_to_remove = cumulative_probs > top_p
+                        sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                        sorted_indices_to_remove[..., 0] = 0
+
+                        indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
+                        next_token_logits[indices_to_remove] = float('-inf')
+
+                    probs = F.softmax(next_token_logits, dim=-1)
+                    next_tokens = torch.multinomial(probs, num_samples=1)
+                else:
+                    next_tokens = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+
+                input_ids = torch.cat([input_ids, next_tokens], dim=1)
+
+                if eos_token_id is not None and (next_tokens == eos_token_id).all():
+                    break
+
+                if input_ids.shape[1] >= self.config.n_positions:
+                    break
+
+        return input_ids
+
     def set_layer_precision(self, layer_config):
         """
         Set precision for each layer - used for cyclic precision training.

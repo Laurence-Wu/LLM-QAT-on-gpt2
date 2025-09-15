@@ -1,7 +1,17 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from typing import Dict, List
-import pandas as pd
+
+try:
+    import matplotlib.pyplot as plt
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
+
+try:
+    import pandas as pd
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
 
 class BaselineComparison:
     def __init__(self, your_results: Dict):
@@ -85,8 +95,14 @@ class BaselineComparison:
                 ]
                 rows.append(row)
 
-            df = pd.DataFrame(rows, columns=headers)
-            print(df.to_string(index=False))
+            if HAS_PANDAS:
+                df = pd.DataFrame(rows, columns=headers)
+                print(df.to_string(index=False))
+            else:
+                print("\t".join(headers))
+                print("-" * 60)
+                for row in rows:
+                    print("\t".join(str(cell) for cell in row))
 
             your_score = methods.get('Your Method', {}).get('zero_shot', 0)
             if 'LLM-QAT (Paper)' in methods:
@@ -97,6 +113,10 @@ class BaselineComparison:
 
     def plot_accuracy_vs_bits(self):
         """Plot accuracy vs model size for all methods"""
+        if not HAS_MATPLOTLIB:
+            print("Warning: matplotlib not installed, skipping plots")
+            return
+
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
         bit_configs = {
