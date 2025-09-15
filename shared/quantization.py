@@ -7,7 +7,7 @@ from typing import Optional
 class QuantizationFunction(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, scale, zero_point, num_bits, symmetric):
-        ctx.save_for_backward(input, scale, zero_point)
+        ctx.save_for_backward(input, scale.clone(), zero_point.clone())
         ctx.num_bits = num_bits
         ctx.symmetric = symmetric
         
