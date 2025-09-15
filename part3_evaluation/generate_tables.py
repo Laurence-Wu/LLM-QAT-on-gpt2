@@ -1,0 +1,269 @@
+import pandas as pd
+from tabulate import tabulate
+from typing import Dict, List
+import numpy as np
+from pathlib import Path
+
+class ResultTableGenerator:
+    def __init__(self, results: Dict):
+        self.results = results
+
+    def generate_table_1_zero_shot(self) -> str:
+        """
+        Generate Table 1 from paper: Zero-shot common sense results
+        Columns: Method | #Bits | Size(GB) | BoolQ | PIQA | SIQA | HellaSwag | WinoGrande | ARC-e | ARC-c | OBQA | Avg
+        """
+        rows = []
+
+        for config_name, result in self.results.items():
+            if 'zero_shot' not in result or not result['zero_shot']:
+                continue
+
+            zero_shot = result['zero_shot']
+            row = {
+                'Method': config_name,
+                '#Bits': result.get('bits', 'N/A'),
+                'Size(GB)': result.get('model_size_gb', 0),
+                'BoolQ': zero_shot.get('BoolQ', 0),
+                'PIQA': zero_shot.get('PIQA', 0),
+                'SIQA': zero_shot.get('SIQA', 0),
+                'HellaSwag': zero_shot.get('HellaSwag', 0),
+                'WinoGrande': zero_shot.get('WinoGrande', 0),
+                'ARC-e': zero_shot.get('ARC-e', 0),
+                'ARC-c': zero_shot.get('ARC-c', 0),
+                'OBQA': zero_shot.get('OBQA', 0),
+                'Avg': zero_shot.get('Average', 0)
+            }
+            rows.append(row)
+
+        if not rows:
+            return "No zero-shot results available"
+
+        df = pd.DataFrame(rows)
+
+        df = df.sort_values('Avg', ascending=False)
+
+        table_str = "Table 1: Zero-shot Common Sense Performance (↑)\n"
+        table_str += "=" * 100 + "\n"
+        table_str += tabulate(df, headers='keys', tablefmt='grid', floatfmt='.1f')
+
+        print("\n" + table_str)
+
+        self._save_to_file(table_str, 'table1_zero_shot.txt')
+
+        return table_str
+
+    def generate_table_2_perplexity(self) -> str:
+        """
+        Generate Table 2: Perplexity results
+        Columns: Method | #Bits | C4↓ | WikiText2↓
+        """
+        rows = []
+
+        for config_name, result in self.results.items():
+            if 'perplexity' not in result or not result['perplexity']:
+                continue
+
+            perplexity = result['perplexity']
+            row = {
+                'Method': config_name,
+                '#Bits': result.get('bits', 'N/A'),
+                'C4↓': perplexity.get('C4', float('inf')),
+                'WikiText2↓': perplexity.get('WikiText2', float('inf'))
+            }
+            rows.append(row)
+
+        if not rows:
+            return "No perplexity results available"
+
+        df = pd.DataFrame(rows)
+
+        df = df.sort_values('WikiText2↓', ascending=True)
+
+        table_str = "Table 2: Perplexity Results (↓)\n"
+        table_str += "=" * 50 + "\n"
+        table_str += tabulate(df, headers='keys', tablefmt='grid', floatfmt='.1f')
+
+        print("\n" + table_str)
+
+        self._save_to_file(table_str, 'table2_perplexity.txt')
+
+        return table_str
+
+    def generate_table_7_few_shot(self) -> str:
+        """
+        Generate Table 7: Few-shot results
+        Columns: Method | MMLU-Hum | MMLU-STEM | MMLU-Social | MMLU-Other | MMLU-Avg | TriviaQA
+        """
+        rows = []
+
+        for config_name, result in self.results.items():
+            if 'few_shot' not in result or not result['few_shot']:
+                continue
+
+            few_shot = result['few_shot']
+            mmlu = few_shot.get('MMLU', {})
+
+            row = {
+                'Method': config_name,
+                'MMLU-Hum': mmlu.get('Humanities', 0),
+                'MMLU-STEM': mmlu.get('STEM', 0),
+                'MMLU-Social': mmlu.get('Social Sciences', 0),
+                'MMLU-Other': mmlu.get('Other', 0),
+                'MMLU-Avg': mmlu.get('Average', 0),
+                'TriviaQA': few_shot.get('TriviaQA', 0)
+            }
+            rows.append(row)
+
+        if not rows:
+            return "No few-shot results available"
+
+        df = pd.DataFrame(rows)
+
+        df = df.sort_values('MMLU-Avg', ascending=False)
+
+        table_str = "Table 7: Few-shot Performance (↑)\n"
+        table_str += "=" * 80 + "\n"
+        table_str += tabulate(df, headers='keys', tablefmt='grid', floatfmt='.1f')
+
+        print("\n" + table_str)
+
+        self._save_to_file(table_str, 'table7_few_shot.txt')
+
+        return table_str
+
+    def export_to_latex(self) -> Dict[str, str]:
+        """Export tables in LaTeX format for paper"""
+        latex_tables = {}
+
+        latex_tables['zero_shot'] = self._generate_latex_table_1()
+        latex_tables['perplexity'] = self._generate_latex_table_2()
+
+        output_dir = Path('part3_evaluation/results')
+        output_dir.mkdir(exist_ok=True, parents=True)
+
+        for name, latex in latex_tables.items():
+            with open(output_dir / f'{name}_table.tex', 'w') as f:
+                f.write(latex)
+
+        return latex_tables
+
+    def export_to_markdown(self) -> Dict[str, str]:
+        """Export tables in Markdown format for README"""
+        markdown_tables = {}
+
+        markdown_tables['zero_shot'] = self._generate_markdown_table_1()
+        markdown_tables['perplexity'] = self._generate_markdown_table_2()
+
+        output_dir = Path('part3_evaluation/results')
+        output_dir.mkdir(exist_ok=True, parents=True)
+
+        combined_markdown = "# LLM-QAT Evaluation Results\n\n"
+
+        for name, md in markdown_tables.items():
+            combined_markdown += md + "\n\n"
+
+        with open(output_dir / 'results_tables.md', 'w') as f:
+            f.write(combined_markdown)
+
+        print(f"\nMarkdown tables saved to {output_dir / 'results_tables.md'}")
+
+        return markdown_tables
+
+    def _generate_latex_table_1(self) -> str:
+        """Generate LaTeX for zero-shot table"""
+        latex = r"\begin{table}[h]" + "\n"
+        latex += r"\centering" + "\n"
+        latex += r"\caption{Zero-shot Common Sense Performance}" + "\n"
+        latex += r"\begin{tabular}{l|c|c|cccccccc|c}" + "\n"
+        latex += r"\hline" + "\n"
+        latex += r"Method & \#Bits & Size(GB) & BoolQ & PIQA & SIQA & HellaSwag & WinoGrande & ARC-e & ARC-c & OBQA & Avg \\" + "\n"
+        latex += r"\hline" + "\n"
+
+        for config_name, result in self.results.items():
+            if 'zero_shot' not in result:
+                continue
+
+            zero_shot = result['zero_shot']
+            latex += f"{config_name} & {result.get('bits', 'N/A')} & {result.get('model_size_gb', 0):.1f}"
+
+            for task in ['BoolQ', 'PIQA', 'SIQA', 'HellaSwag', 'WinoGrande', 'ARC-e', 'ARC-c', 'OBQA']:
+                latex += f" & {zero_shot.get(task, 0):.1f}"
+
+            latex += f" & {zero_shot.get('Average', 0):.1f} \\\\\n"
+
+        latex += r"\hline" + "\n"
+        latex += r"\end{tabular}" + "\n"
+        latex += r"\end{table}" + "\n"
+
+        return latex
+
+    def _generate_latex_table_2(self) -> str:
+        """Generate LaTeX for perplexity table"""
+        latex = r"\begin{table}[h]" + "\n"
+        latex += r"\centering" + "\n"
+        latex += r"\caption{Perplexity Results}" + "\n"
+        latex += r"\begin{tabular}{l|c|cc}" + "\n"
+        latex += r"\hline" + "\n"
+        latex += r"Method & \#Bits & C4$\downarrow$ & WikiText2$\downarrow$ \\" + "\n"
+        latex += r"\hline" + "\n"
+
+        for config_name, result in self.results.items():
+            if 'perplexity' not in result:
+                continue
+
+            perplexity = result['perplexity']
+            latex += f"{config_name} & {result.get('bits', 'N/A')}"
+            latex += f" & {perplexity.get('C4', float('inf')):.1f}"
+            latex += f" & {perplexity.get('WikiText2', float('inf')):.1f} \\\\\n"
+
+        latex += r"\hline" + "\n"
+        latex += r"\end{tabular}" + "\n"
+        latex += r"\end{table}" + "\n"
+
+        return latex
+
+    def _generate_markdown_table_1(self) -> str:
+        """Generate Markdown for zero-shot table"""
+        md = "## Table 1: Zero-shot Common Sense Performance (↑)\n\n"
+        md += "| Method | #Bits | Size(GB) | BoolQ | PIQA | SIQA | HellaSwag | WinoGrande | ARC-e | ARC-c | OBQA | Avg |\n"
+        md += "|--------|-------|----------|-------|------|------|-----------|------------|-------|-------|------|-----|\n"
+
+        for config_name, result in self.results.items():
+            if 'zero_shot' not in result or not result['zero_shot']:
+                continue
+
+            zero_shot = result['zero_shot']
+            md += f"| {config_name} | {result.get('bits', 'N/A')} | {result.get('model_size_gb', 0):.1f}"
+
+            for task in ['BoolQ', 'PIQA', 'SIQA', 'HellaSwag', 'WinoGrande', 'ARC-e', 'ARC-c', 'OBQA']:
+                md += f" | {zero_shot.get(task, 0):.1f}"
+
+            md += f" | **{zero_shot.get('Average', 0):.1f}** |\n"
+
+        return md
+
+    def _generate_markdown_table_2(self) -> str:
+        """Generate Markdown for perplexity table"""
+        md = "## Table 2: Perplexity Results (↓)\n\n"
+        md += "| Method | #Bits | C4↓ | WikiText2↓ |\n"
+        md += "|--------|-------|-----|------------|\n"
+
+        for config_name, result in self.results.items():
+            if 'perplexity' not in result or not result['perplexity']:
+                continue
+
+            perplexity = result['perplexity']
+            md += f"| {config_name} | {result.get('bits', 'N/A')}"
+            md += f" | {perplexity.get('C4', float('inf')):.1f}"
+            md += f" | {perplexity.get('WikiText2', float('inf')):.1f} |\n"
+
+        return md
+
+    def _save_to_file(self, content: str, filename: str):
+        """Save content to file"""
+        output_dir = Path('part3_evaluation/results')
+        output_dir.mkdir(exist_ok=True, parents=True)
+
+        with open(output_dir / filename, 'w') as f:
+            f.write(content)
