@@ -38,29 +38,30 @@ class CyclicPrecisionScheduler:
     def get_current_bit_width(self, iteration: int) -> int:
         """
         Get the current bit width for the given iteration.
-        
+        Implements dynamic bit-width switching for Step 5 of Algorithm Test 2.
+
         Args:
             iteration: Current training iteration
-        
+
         Returns:
             Bit width for the current iteration
         """
         # Calculate position in cycle
         position_in_cycle = iteration % self.cycle_length
-        
-        # Determine which bit width to use
-        pattern_index = position_in_cycle // self.steps_per_bit
+
+        # Smooth transition between bit-widths
+        pattern_index = int(position_in_cycle * len(self.bit_width_pattern) / self.cycle_length)
         pattern_index = min(pattern_index, len(self.bit_width_pattern) - 1)
-        
+
         # Get bit width
         bit_width = self.bit_width_pattern[pattern_index]
-        
+
         # Apply progressive cycling if enabled
         if self.config.progressive_cycles and self.current_cycle > 0:
-            # Reduce bit width over cycles
-            reduction = self.current_cycle * self.config.progression_rate
+            # Gradually reduce max bit width over cycles
+            reduction = min(self.current_cycle * self.config.progression_rate, 4)
             bit_width = max(2, int(bit_width - reduction))
-        
+
         return bit_width
     
     def get_layer_bit_widths(self, iteration: int, n_layers: int) -> List[int]:
@@ -154,23 +155,26 @@ def create_layer_config_from_bit_width(bit_width: Union[int, List[int]],
         raise ValueError(f"Unknown bit width configuration: {bit_width}")
 
 
-def train_with_cpt(model, train_loader, val_loader, training_config, 
+def train_with_cpt(model, train_loader, val_loader, training_config,
                    cyclic_config, n_layers: int = 12) -> Tuple[nn.Module, Dict]:
     """
     Train model with Cyclic Precision Training.
-    
+    Implements Step 5 of Algorithm Test 2: Dynamic bit-width changes during training.
+
     Args:
-        model: SwitchableQuantizedGPT2 model
-        train_loader: Training data loader
+        model: QATGPT2 model with switchable quantization
+        train_loader: Training data loader (SQuAD dataset)
         val_loader: Validation data loader
         training_config: Training configuration
         cyclic_config: Cyclic precision configuration
         n_layers: Number of layers in model
-    
+
     Returns:
         Tuple of (trained model, training statistics)
     """
-    print("\nStarting Cyclic Precision Training...")
+    print("\n" + "="*60)
+    print("Starting Cyclic Precision Training (Algorithm Test 2 - Step 5)")
+    print("="*60)
     
     # Clear GPU cache before training
     if torch.cuda.is_available():
@@ -293,7 +297,7 @@ def train_with_cpt(model, train_loader, val_loader, training_config,
                 torch.cuda.empty_cache()
             gc.collect()
         
-        # Logging
+        # Logging with bit-width change tracking
         if iteration % training_config.log_interval == 0:
             if not cyclic_config.layer_wise_cycling:
                 print(f"\nIteration {iteration}/{training_config.num_cpt_iterations}")
@@ -301,6 +305,12 @@ def train_with_cpt(model, train_loader, val_loader, training_config,
                 print(f"  Bit width: {current_bit_width}")
                 print(f"  Loss: {avg_loss:.4f}")
                 print(f"  LR: {optimizer.param_groups[0]['lr']:.6f}")
+
+                # Track bit-width transitions
+                if hasattr(training_config, 'log_bit_width_changes') and training_config.log_bit_width_changes:
+                    if iteration > 0 and len(stats['bit_width_history']) > 1:
+                        if stats['bit_width_history'][-1] != stats['bit_width_history'][-2]:
+                            print(f"  [BIT TRANSITION] {stats['bit_width_history'][-2]} -> {stats['bit_width_history'][-1]}")
         
         # Track cycle metrics
         if cyclic_config.track_cycle_metrics:
@@ -357,6 +367,52 @@ def train_with_cpt(model, train_loader, val_loader, training_config,
             gc.collect()
     
     return model, stats
+
+
+def explore_bit_width_configurations(model, train_loader, val_loader, training_config,
+                                    cyclic_config, n_layers: int = 12) -> Dict:
+    """
+    Explore different bit-width configurations for Step 5.
+    Tests multiple cyclic patterns to find optimal configuration.
+
+    Args:
+        model: QATGPT2 model
+        train_loader: Training data loader
+        val_loader: Validation data loader
+        training_config: Training configuration
+        cyclic_config: Cyclic precision configuration
+        n_layers: Number of layers
+
+    Returns:
+        Dictionary with results for each configuration
+    """
+    results = {}
+
+    for idx, bit_pattern in enumerate(cyclic_config.bit_width_configs):
+        print(f"\n\nTesting bit-width pattern {idx}: {bit_pattern}")
+
+        # Update pattern
+        cyclic_config.bit_width_pattern = bit_pattern
+        cyclic_config.current_config_idx = idx
+
+        # Train with this pattern
+        _, stats = train_with_cpt(
+            model.clone() if hasattr(model, 'clone') else model,
+            train_loader,
+            val_loader,
+            training_config,
+            cyclic_config,
+            n_layers
+        )
+
+        results[f"pattern_{idx}"] = {
+            'pattern': bit_pattern,
+            'final_loss': stats['final_loss'],
+            'best_val_loss': stats.get('best_val_loss', float('inf')),
+            'stats': stats
+        }
+
+    return results
 
 
 def train_with_static_precision(model, train_loader, val_loader, training_config,
