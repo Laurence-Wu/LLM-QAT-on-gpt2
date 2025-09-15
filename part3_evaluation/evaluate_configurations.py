@@ -60,6 +60,7 @@ class ConfigurationEvaluator:
 
     def _evaluate_single_config(self, config):
         self.model.eval()
+        self.model = self.model.to(self.device)  # Ensure model is on device
         self.model.set_layer_precision(config)
 
         total_loss = 0

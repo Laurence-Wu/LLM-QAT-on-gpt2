@@ -203,7 +203,8 @@ def test_requirement_4_configuration_evaluation():
         embd_pdrop=0.1
     )
 
-    model = SwitchableQATGPT2(config, bit_widths=[4, 8, 16])
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model = SwitchableQATGPT2(config, bit_widths=[4, 8, 16]).to(device)
 
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     tokenizer.pad_token = tokenizer.eos_token
@@ -272,7 +273,8 @@ def test_requirement_6_adversarial_robustness():
         embd_pdrop=0.1
     )
 
-    model = SwitchableQATGPT2(config, bit_widths=[4, 8, 16])
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model = SwitchableQATGPT2(config, bit_widths=[4, 8, 16]).to(device)
 
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     tokenizer.pad_token = tokenizer.eos_token
@@ -291,7 +293,7 @@ def test_requirement_6_adversarial_robustness():
 
     print("\nTesting FGSM attack...")
     test_batch = next(iter(test_loader))
-    input_ids = test_batch['input_ids']
+    input_ids = test_batch['input_ids'].to(device)
     labels = input_ids
 
     perturbed = adv_evaluator._fgsm_attack(input_ids, labels, epsilon=0.01)

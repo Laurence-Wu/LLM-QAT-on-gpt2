@@ -20,7 +20,7 @@ class AdversarialEvaluator:
         }
 
     def _fgsm_attack(self, input_ids, labels, epsilon=0.01):
-        input_embeds = self.model.wte(input_ids)
+        input_embeds = self.model.wte(input_ids).detach()
         input_embeds.requires_grad = True
 
         outputs = self.model.forward_from_embeddings(input_embeds, labels=labels)
@@ -35,10 +35,11 @@ class AdversarialEvaluator:
         return perturbed_embeds
 
     def _pgd_attack(self, input_ids, labels, epsilon=0.01, alpha=0.002, num_iter=10):
-        input_embeds = self.model.wte(input_ids)
-        ori_embeds = input_embeds.clone().detach()
+        input_embeds = self.model.wte(input_ids).detach()
+        ori_embeds = input_embeds.clone()
 
         for _ in range(num_iter):
+            input_embeds = input_embeds.detach()
             input_embeds.requires_grad = True
 
             outputs = self.model.forward_from_embeddings(input_embeds, labels=labels)
@@ -58,7 +59,7 @@ class AdversarialEvaluator:
         batch_size, seq_len = input_ids.shape
         vocab_size = self.model.config.vocab_size
 
-        input_embeds = self.model.wte(input_ids)
+        input_embeds = self.model.wte(input_ids).detach()
         input_embeds.requires_grad = True
 
         outputs = self.model.forward_from_embeddings(input_embeds, labels=labels)
