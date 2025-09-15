@@ -68,3 +68,6 @@ Thumbs.db
 # Environment variables
 .env
 .env.local
+
+# Results folder
+results/

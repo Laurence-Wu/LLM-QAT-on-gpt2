@@ -24,9 +24,15 @@ class FewShotEvaluator:
         """
         try:
             dataset = load_dataset('cais/mmlu', 'all', split='test[:500]')
-        except:
-            print("Warning: Could not load MMLU dataset")
-            return {'Average': 0.0}
+        except Exception as e:
+            print(f"Warning: Could not load MMLU dataset: {e}")
+            return {
+                'Humanities': 0.0,
+                'STEM': 0.0,
+                'Social Sciences': 0.0,
+                'Other': 0.0,
+                'Average': 0.0
+            }
 
         categories = {
             'Humanities': ['history', 'philosophy', 'law'],
@@ -65,7 +71,8 @@ class FewShotEvaluator:
             else:
                 scores[category] = 0.0
 
-        scores['Average'] = round(np.mean([s for s in scores.values() if s > 0]), 1)
+        valid_scores = [s for s in scores.values() if s > 0]
+        scores['Average'] = round(np.mean(valid_scores), 1) if valid_scores else 0.0
 
         return scores
 
@@ -75,9 +82,9 @@ class FewShotEvaluator:
         Return exact match score
         """
         try:
-            dataset = load_dataset('trivia_qa', 'rc', split='validation[:200]')
-        except:
-            print("Warning: Could not load TriviaQA dataset")
+            dataset = load_dataset('trivia_qa', 'rc.nocontext', split='validation[:200]')
+        except Exception as e:
+            print(f"Warning: Could not load TriviaQA dataset: {e}")
             return 0.0
 
         correct = 0

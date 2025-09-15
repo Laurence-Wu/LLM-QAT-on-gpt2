@@ -38,10 +38,19 @@ class ResultTableGenerator:
 
     def generate_table_1_zero_shot(self) -> str:
         """
-        Generate Table 1 from paper: Zero-shot common sense results
-        Columns: Method | #Bits | Size(GB) | BoolQ | PIQA | SIQA | HellaSwag | WinoGrande | ARC-e | ARC-c | OBQA | Avg
+        Generate Table 1: Zero-shot common sense results
+        Columns: Method | #Bits | Size(GB) | [Available Tasks] | Avg
         """
         rows = []
+
+        # Get all unique task names from results
+        all_tasks = set()
+        for config_name, result in self.results.items():
+            if 'zero_shot' in result and result['zero_shot']:
+                all_tasks.update([k for k in result['zero_shot'].keys() if k != 'Average'])
+
+        # Sort task names for consistent ordering
+        task_names = sorted(list(all_tasks))
 
         for config_name, result in self.results.items():
             if 'zero_shot' not in result or not result['zero_shot']:
@@ -52,16 +61,13 @@ class ResultTableGenerator:
                 'Method': config_name,
                 '#Bits': result.get('bits', 'N/A'),
                 'Size(GB)': result.get('model_size_gb', 0),
-                'BoolQ': zero_shot.get('BoolQ', 0),
-                'PIQA': zero_shot.get('PIQA', 0),
-                'SIQA': zero_shot.get('SIQA', 0),
-                'HellaSwag': zero_shot.get('HellaSwag', 0),
-                'WinoGrande': zero_shot.get('WinoGrande', 0),
-                'ARC-e': zero_shot.get('ARC-e', 0),
-                'ARC-c': zero_shot.get('ARC-c', 0),
-                'OBQA': zero_shot.get('OBQA', 0),
-                'Avg': zero_shot.get('Average', 0)
             }
+
+            # Add scores for each available task
+            for task in task_names:
+                row[task] = zero_shot.get(task, 0)
+
+            row['Avg'] = zero_shot.get('Average', 0)
             rows.append(row)
 
         if not rows:
@@ -224,7 +230,9 @@ class ResultTableGenerator:
             zero_shot = result['zero_shot']
             latex += f"{config_name} & {result.get('bits', 'N/A')} & {result.get('model_size_gb', 0):.1f}"
 
-            for task in ['BoolQ', 'PIQA', 'SIQA', 'HellaSwag', 'WinoGrande', 'ARC-e', 'ARC-c', 'OBQA']:
+            # Only include tasks that exist in the results
+            available_tasks = [k for k in zero_shot.keys() if k != 'Average']
+            for task in sorted(available_tasks):
                 latex += f" & {zero_shot.get(task, 0):.1f}"
 
             latex += f" & {zero_shot.get('Average', 0):.1f} \\\\\n"
@@ -262,9 +270,17 @@ class ResultTableGenerator:
 
     def _generate_markdown_table_1(self) -> str:
         """Generate Markdown for zero-shot table"""
+        # Get all unique task names from results
+        all_tasks = set()
+        for config_name, result in self.results.items():
+            if 'zero_shot' in result and result['zero_shot']:
+                all_tasks.update([k for k in result['zero_shot'].keys() if k != 'Average'])
+
+        task_names = sorted(list(all_tasks))
+
         md = "## Table 1: Zero-shot Common Sense Performance (↑)\n\n"
-        md += "| Method | #Bits | Size(GB) | BoolQ | PIQA | SIQA | HellaSwag | WinoGrande | ARC-e | ARC-c | OBQA | Avg |\n"
-        md += "|--------|-------|----------|-------|------|------|-----------|------------|-------|-------|------|-----|\n"
+        md += "| Method | #Bits | Size(GB) | " + " | ".join(task_names) + " | Avg |\n"
+        md += "|--------|-------|----------|" + "|".join(["-" * 7 for _ in task_names]) + "|-----|\n"
 
         for config_name, result in self.results.items():
             if 'zero_shot' not in result or not result['zero_shot']:
@@ -273,7 +289,9 @@ class ResultTableGenerator:
             zero_shot = result['zero_shot']
             md += f"| {config_name} | {result.get('bits', 'N/A')} | {result.get('model_size_gb', 0):.1f}"
 
-            for task in ['BoolQ', 'PIQA', 'SIQA', 'HellaSwag', 'WinoGrande', 'ARC-e', 'ARC-c', 'OBQA']:
+            # Only include tasks that exist in the results
+            available_tasks = [k for k in zero_shot.keys() if k != 'Average']
+            for task in sorted(available_tasks):
                 md += f" | {zero_shot.get(task, 0):.1f}"
 
             md += f" | **{zero_shot.get('Average', 0):.1f}** |\n"

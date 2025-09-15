@@ -15,10 +15,8 @@ class ZeroShotEvaluator:
 
     def load_all_tasks(self) -> Dict:
         """
-        Load all 8 datasets:
+        Load available datasets:
         - BoolQ: Boolean yes/no questions
-        - PIQA: Physical interaction QA
-        - SIQA: Social interaction QA
         - HellaSwag: Sentence completion
         - WinoGrande: Pronoun resolution
         - ARC-easy: Science questions (easy)
@@ -31,17 +29,6 @@ class ZeroShotEvaluator:
             tasks['BoolQ'] = load_dataset('boolq', split='validation[:500]')
         except Exception as e:
             print(f"Warning: Could not load BoolQ dataset: {e}")
-            # Create mock BoolQ data for testing
-            tasks['BoolQ'] = [
-                {'question': f'Is statement {i} true?', 'passage': f'Context for statement {i}.', 'answer': i % 2 == 0}
-                for i in range(50)
-            ]
-
-        # PIQA dataset not available - skip
-        print("Skipping PIQA dataset (not available)")
-
-        # SIQA dataset not available - skip
-        print("Skipping SIQA dataset (not available)")
 
         try:
             tasks['HellaSwag'] = load_dataset('hellaswag', split='validation[:500]')
@@ -117,38 +104,6 @@ class ZeroShotEvaluator:
 
             predicted_bool = 'true' in predicted.lower()
             return float(predicted_bool == answer)
-
-        elif task_name == 'PIQA':
-            goal = example['goal']
-            sol1 = example['sol1']
-            sol2 = example['sol2']
-            label = example['label']
-
-            prompt = f"Goal: {goal}\nSolution A: {sol1}\nSolution B: {sol2}\nWhich solution is better (A or B)?"
-            predicted = self._generate_answer(prompt, max_length=5)
-
-            predicted_label = 0 if 'a' in predicted.lower() else 1
-            return float(predicted_label == label)
-
-        elif task_name == 'SIQA':
-            context = example['context']
-            question = example['question']
-            answerA = example['answerA']
-            answerB = example['answerB']
-            answerC = example['answerC']
-            label = int(example['label']) - 1
-
-            prompt = f"Context: {context}\nQuestion: {question}\nA: {answerA}\nB: {answerB}\nC: {answerC}\nAnswer (A, B, or C):"
-            predicted = self._generate_answer(prompt, max_length=5)
-
-            if 'a' in predicted.lower():
-                predicted_label = 0
-            elif 'b' in predicted.lower():
-                predicted_label = 1
-            else:
-                predicted_label = 2
-
-            return float(predicted_label == label)
 
         elif task_name == 'HellaSwag':
             context = example['ctx']

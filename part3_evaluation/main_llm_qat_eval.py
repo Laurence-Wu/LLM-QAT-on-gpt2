@@ -229,9 +229,10 @@ def main():
                 results[config_name]['zero_shot'] = zero_shot_results
                 print(f"   Average score: {zero_shot_results['Average']:.1f}%")
 
-                for task in ['BoolQ', 'PIQA', 'SIQA', 'HellaSwag', 'WinoGrande', 'ARC-e', 'ARC-c', 'OBQA']:
-                    if task in zero_shot_results:
-                        print(f"   {task}: {zero_shot_results[task]:.1f}%")
+                # Print only the tasks that were actually evaluated
+                for task, score in zero_shot_results.items():
+                    if task != 'Average':
+                        print(f"   {task}: {score:.1f}%")
             except Exception as e:
                 print(f"   Error in zero-shot evaluation: {e}")
                 results[config_name]['zero_shot'] = {}
@@ -253,13 +254,21 @@ def main():
                 few_shot_results = evaluator.evaluate_few_shot(config)
                 results[config_name]['few_shot'] = few_shot_results
 
-                if 'MMLU' in few_shot_results:
+                if 'MMLU' in few_shot_results and isinstance(few_shot_results['MMLU'], dict):
                     mmlu = few_shot_results['MMLU']
                     print(f"   MMLU:")
                     for category in ['Humanities', 'STEM', 'Social Sciences', 'Other']:
                         if category in mmlu:
-                            print(f"     {category}: {mmlu[category]:.1f}%")
-                    print(f"     Average: {mmlu.get('Average', 0):.1f}%")
+                            score = mmlu[category]
+                            if isinstance(score, (int, float)) and not np.isnan(score):
+                                print(f"     {category}: {score:.1f}%")
+                            else:
+                                print(f"     {category}: 0.0%")
+                    avg_score = mmlu.get('Average', 0)
+                    if isinstance(avg_score, (int, float)) and not np.isnan(avg_score):
+                        print(f"     Average: {avg_score:.1f}%")
+                    else:
+                        print(f"     Average: 0.0%")
 
                 if 'TriviaQA' in few_shot_results:
                     print(f"   TriviaQA: {few_shot_results['TriviaQA']:.1f}%")

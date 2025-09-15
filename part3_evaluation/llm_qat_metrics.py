@@ -23,7 +23,7 @@ class LLMQATEvaluation:
 
     def evaluate_zero_shot_common_sense(self, bit_config: Dict) -> Dict:
         """
-        Evaluate on 8 tasks: BoolQ, PIQA, SIQA, HellaSwag,
+        Evaluate on available tasks: BoolQ, HellaSwag,
         WinoGrande, ARC-e, ARC-c, OBQA
         Return individual scores and average
         """
@@ -34,11 +34,8 @@ class LLMQATEvaluation:
         evaluator = ZeroShotEvaluator(self.model, self.tokenizer)
         results = evaluator.evaluate_all_tasks(bit_config)
 
-        tasks = ['BoolQ', 'PIQA', 'SIQA', 'HellaSwag', 'WinoGrande', 'ARC-e', 'ARC-c', 'OBQA']
-        scores = {task: results.get(task, 0.0) for task in tasks}
-        scores['Average'] = np.mean([scores[task] for task in tasks])
-
-        return scores
+        # Return the results as-is from the evaluator
+        return results
 
     def evaluate_perplexity(self, bit_config: Dict) -> Dict:
         """
