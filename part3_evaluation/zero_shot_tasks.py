@@ -37,29 +37,11 @@ class ZeroShotEvaluator:
                 for i in range(50)
             ]
 
-        try:
-            # Try newer format for PIQA
-            tasks['PIQA'] = load_dataset('ybisk/piqa', split='validation[:500]')
-        except Exception as e:
-            print(f"Warning: Could not load PIQA dataset: {e}")
-            # Create mock PIQA data for testing
-            tasks['PIQA'] = [
-                {'goal': f'Goal {i}', 'sol1': f'Solution A for {i}', 'sol2': f'Solution B for {i}', 'label': i % 2}
-                for i in range(50)
-            ]
+        # PIQA dataset not available - skip
+        print("Skipping PIQA dataset (not available)")
 
-        try:
-            # Try newer format for SIQA
-            tasks['SIQA'] = load_dataset('allenai/social_i_qa', split='validation[:500]')
-        except Exception as e:
-            print(f"Warning: Could not load SIQA dataset: {e}")
-            # Create mock SIQA data for testing
-            tasks['SIQA'] = [
-                {'context': f'Context {i}', 'question': f'Question {i}?',
-                 'answerA': f'Answer A {i}', 'answerB': f'Answer B {i}', 'answerC': f'Answer C {i}',
-                 'label': str((i % 3) + 1)}
-                for i in range(50)
-            ]
+        # SIQA dataset not available - skip
+        print("Skipping SIQA dataset (not available)")
 
         try:
             tasks['HellaSwag'] = load_dataset('hellaswag', split='validation[:500]')
@@ -246,30 +228,28 @@ class ZeroShotEvaluator:
 
     def evaluate_all_tasks(self, bit_config: Dict) -> Dict:
         """
-        Run all 8 tasks and return results in paper format:
-        {
-            'BoolQ': 72.4,
-            'PIQA': 79.1,
-            ...
-            'Average': 71.2
-        }
+        Run available tasks and return results in paper format:
+        Only evaluate datasets that successfully loaded
         """
         if self.tasks is None:
             print("Loading datasets...")
             self.tasks = self.load_all_tasks()
 
         results = {}
-        task_names = ['BoolQ', 'PIQA', 'SIQA', 'HellaSwag', 'WinoGrande', 'ARC-e', 'ARC-c', 'OBQA']
+        # Only use task names that actually loaded
+        available_tasks = [name for name in self.tasks.keys() if self.tasks[name] is not None]
 
-        for task_name in task_names:
-            if task_name in self.tasks:
-                print(f"  Evaluating {task_name}...")
-                score = self.evaluate_task(task_name, self.tasks[task_name], bit_config)
-                results[task_name] = round(score, 1)
-            else:
-                results[task_name] = 0.0
+        print(f"Available tasks: {', '.join(available_tasks)}")
 
-        valid_scores = [v for v in results.values() if v > 0]
-        results['Average'] = round(np.mean(valid_scores) if valid_scores else 0, 1)
+        for task_name in available_tasks:
+            print(f"  Evaluating {task_name}...")
+            score = self.evaluate_task(task_name, self.tasks[task_name], bit_config)
+            results[task_name] = round(score, 1)
+
+        # Calculate average only from evaluated tasks
+        if results:
+            results['Average'] = round(np.mean(list(results.values())), 1)
+        else:
+            results['Average'] = 0.0
 
         return results
