@@ -36,9 +36,10 @@ def load_switchable_model(model_path: str = None):
             model_config = checkpoint['model_config']
             bit_widths = model_config.get('bit_widths', default_bit_widths)
 
+            # Use exact configuration from checkpoint
             config = GPT2Config(
                 vocab_size=model_config.get('vocab_size', 50257),
-                n_positions=model_config.get('n_positions', 256),
+                n_positions=model_config.get('n_positions', 1024),  # Default to 1024 if not specified
                 n_embd=model_config.get('n_embd', 768),
                 n_layer=model_config.get('n_layer', 6),
                 n_head=model_config.get('n_head', 12),
@@ -48,6 +49,7 @@ def load_switchable_model(model_path: str = None):
                 lora_alpha=model_config.get('lora_alpha', 32),
                 lora_dropout=model_config.get('lora_dropout', 0.1)
             )
+            print(f"Model configuration: n_positions={config.n_positions}, n_layer={config.n_layer}, n_embd={config.n_embd}")
         else:
             # Use default configuration
             bit_widths = default_bit_widths
@@ -120,6 +122,26 @@ def main():
     tokenizer = load_tokenizer()
 
     evaluator = LLMQATEvaluation(model, tokenizer)
+
+    # Automatically determine configurations based on model's supported bit-widths
+    if hasattr(model, 'bit_widths'):
+        # Model supports switchable precision
+        supported_bit_widths = model.bit_widths
+        print(f"Model supports bit-widths: {supported_bit_widths}")
+
+        # Map bit-widths to configuration names
+        bit_to_config = {
+            2: 'INT2',
+            4: 'INT4',
+            8: 'INT8',
+            16: 'FP16'
+        }
+
+        # Override args.configs with supported configurations
+        if not args.configs or args.configs == ['INT4', 'INT8', 'FP16']:
+            # Use default or auto-detect
+            args.configs = [bit_to_config.get(b, f'INT{b}') for b in supported_bit_widths if b in bit_to_config]
+            print(f"Auto-detected configurations to evaluate: {args.configs}")
 
     print("="*70)
     print("Running LLM-QAT Paper Evaluation Suite")

@@ -19,6 +19,11 @@ class BitConfigurations:
             "name": "4-4-4",
             "description": "4-bit integer quantization"
         },
+        "INT2": {
+            "W": 2, "A": 2, "KV": 2,
+            "name": "2-2-2",
+            "description": "2-bit integer quantization (extreme)"
+        },
         "W4A8KV8": {
             "W": 4, "A": 8, "KV": 8,
             "name": "4-8-8",
