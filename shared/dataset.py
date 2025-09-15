@@ -22,6 +22,7 @@ class SQuADDataset(Dataset):
     def preprocess_dataset(self):
         """Legacy preprocessing - loads all data into memory."""
         processed = []
+        ##show the progress bar
         for example in tqdm(self.dataset, desc="Preprocessing SQuAD"):
             processed_example = self._process_example(example)
             if processed_example is not None:
@@ -99,10 +100,10 @@ def create_dataloaders(tokenizer, train_split, val_split,
     # Create datasets with on-demand processing to save memory
     train_dataset = SQuADDataset(tokenizer, split=train_split,
                                  max_length=max_length, doc_stride=doc_stride,
-                                 preprocess_all=False)  # Process on-demand
+                                 preprocess_all=True)
     val_dataset = SQuADDataset(tokenizer, split=val_split,
                                max_length=max_length, doc_stride=doc_stride,
-                               preprocess_all=False)  # Process on-demand
+                               preprocess_all=True)
 
     # Use pin_memory for faster GPU transfer and num_workers for parallel loading
     train_loader = DataLoader(

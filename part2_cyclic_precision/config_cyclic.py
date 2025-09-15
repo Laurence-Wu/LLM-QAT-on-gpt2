@@ -35,7 +35,7 @@ class CyclicTrainingConfig:
         self.adam_betas = (0.9, 0.999)
         self.max_grad_norm = 1.0
 
-        self.num_cpt_iterations = 3000
+        self.num_cpt_iterations = 1000
         self.warmup_steps = 500
         self.gradient_accumulation_steps = 1
 
