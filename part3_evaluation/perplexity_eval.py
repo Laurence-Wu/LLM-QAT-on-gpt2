@@ -44,7 +44,7 @@ class PerplexityEvaluator:
             return float('inf')
 
         # Process text in chunks to avoid memory issues
-        texts = [item[text_field] for item in dataset if item[text_field].strip()][:100]  # Limit samples
+        texts = [item[text_field] for item in dataset if item[text_field].strip()]  # No limit
         text = '\n'.join(texts)
 
         if not text:
@@ -88,8 +88,9 @@ class PerplexityEvaluator:
                     print(f"Error processing batch: {e}")
                     continue
 
-            if len(nlls) >= max_samples:
-                break
+            # No limit on samples
+            # if len(nlls) >= max_samples:
+            #     break
 
             torch.cuda.empty_cache()
 
@@ -112,11 +113,11 @@ class PerplexityEvaluator:
         results = {}
 
         print("  Calculating WikiText2 perplexity...")
-        wikitext2_ppl = self.calculate_perplexity('wikitext2', bit_config, max_samples=500)
+        wikitext2_ppl = self.calculate_perplexity('wikitext2', bit_config, max_samples=10000)
         results['WikiText2'] = round(wikitext2_ppl, 1)
 
         print("  Calculating C4 perplexity...")
-        c4_ppl = self.calculate_perplexity('c4', bit_config, max_samples=200)
+        c4_ppl = self.calculate_perplexity('c4', bit_config, max_samples=10000)
         results['C4'] = round(c4_ppl, 1)
 
         return results

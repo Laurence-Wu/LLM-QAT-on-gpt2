@@ -26,12 +26,12 @@ class ZeroShotEvaluator:
         tasks = {}
 
         try:
-            tasks['BoolQ'] = load_dataset('boolq', split='validation[:500]')
+            tasks['BoolQ'] = load_dataset('boolq', split='validation')
         except Exception as e:
             print(f"Warning: Could not load BoolQ dataset: {e}")
 
         try:
-            tasks['HellaSwag'] = load_dataset('hellaswag', split='validation[:500]')
+            tasks['HellaSwag'] = load_dataset('hellaswag', split='validation')
         except Exception as e:
             print(f"Warning: Could not load HellaSwag dataset: {e}")
             # Create mock HellaSwag data for testing
@@ -41,24 +41,24 @@ class ZeroShotEvaluator:
             ]
 
         try:
-            tasks['WinoGrande'] = load_dataset('winogrande', 'winogrande_m', split='validation[:500]')
+            tasks['WinoGrande'] = load_dataset('winogrande', 'winogrande_m', split='validation')
         except:
             print("Warning: Could not load WinoGrande dataset")
 
         try:
             arc = load_dataset('ai2_arc', 'ARC-Easy')
-            tasks['ARC-e'] = arc['validation'][:500]
+            tasks['ARC-e'] = arc['validation']
         except:
             print("Warning: Could not load ARC-Easy dataset")
 
         try:
             arc = load_dataset('ai2_arc', 'ARC-Challenge')
-            tasks['ARC-c'] = arc['validation'][:500]
+            tasks['ARC-c'] = arc['validation']
         except:
             print("Warning: Could not load ARC-Challenge dataset")
 
         try:
-            tasks['OBQA'] = load_dataset('openbookqa', 'main', split='validation[:500]')
+            tasks['OBQA'] = load_dataset('openbookqa', 'main', split='validation')
         except:
             print("Warning: Could not load OBQA dataset")
 
@@ -74,19 +74,29 @@ class ZeroShotEvaluator:
 
         correct = 0
         total = 0
+        errors = 0
 
         self.model.eval()
         with torch.no_grad():
-            for example in tqdm(dataset, desc=f"Evaluating {task_name}", leave=False):
+            dataset_iter = tqdm(dataset, desc=f"Evaluating {task_name}", leave=False)
+            for example in dataset_iter:
                 try:
                     score = self._evaluate_single_example(task_name, example)
                     correct += score
                     total += 1
+                except KeyboardInterrupt:
+                    print(f"\nEvaluation interrupted for {task_name}")
+                    break
                 except Exception as e:
+                    errors += 1
+                    if errors > 10:
+                        print(f"\nToo many errors in {task_name}, stopping evaluation")
+                        break
                     continue
 
-                if total >= 100:
-                    break
+                # No limit - evaluate all examples
+                # if total >= 100:
+                #     break
 
         accuracy = (correct / max(total, 1)) * 100
         return accuracy
