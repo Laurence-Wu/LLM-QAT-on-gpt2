@@ -55,12 +55,12 @@ def test_requirement_1_switchable_lora():
 
     for bits in [4, 8, 16]:
         model.set_global_precision(bits)
-        output = model(test_input)
+        output = model(test_input, labels=test_input)  # Add labels
         print(f"✓ Forward pass with {bits}-bit precision: loss={output['loss'].item():.4f}")
 
     layer_config = [4, 8]
     model.set_layer_precision(layer_config)
-    output = model(test_input)
+    output = model(test_input, labels=test_input)  # Add labels
     print(f"✓ Per-layer precision [4, 8]: loss={output['loss'].item():.4f}")
 
     print("\n✓ Requirement 1 PASSED: Switchable LoRA working correctly")
@@ -102,7 +102,8 @@ def test_requirement_2_training_strategies():
         val_split='validation[:10]',
         test_split='validation[10:20]',
         batch_size=2,
-        max_seq_length=128
+        max_length=128,
+        doc_stride=64
     )
 
     print("\nTesting Cyclic Strategy...")
@@ -142,6 +143,10 @@ def test_requirement_3_cyclic_precision():
         layer_norm_epsilon=1e-5,
         embd_pdrop=0.1
     )
+    # Add LoRA parameters
+    config.lora_rank = 8
+    config.lora_alpha = 16
+    config.lora_dropout = 0.1
 
     model = QATGPT2(config, quantization_bits=8)
 
@@ -166,7 +171,8 @@ def test_requirement_3_cyclic_precision():
         val_split='validation[:10]',
         test_split='validation[10:20]',
         batch_size=2,
-        max_seq_length=128
+        max_length=128,
+        doc_stride=64
     )
 
     model, stats = train_cyclic_precision(
@@ -208,7 +214,8 @@ def test_requirement_4_configuration_evaluation():
         val_split='validation[:10]',
         test_split='validation[10:30]',
         batch_size=2,
-        max_seq_length=128
+        max_length=128,
+        doc_stride=64
     )
 
     evaluator = ConfigurationEvaluator(model, test_loader)
@@ -276,7 +283,8 @@ def test_requirement_6_adversarial_robustness():
         val_split='validation[:10]',
         test_split='validation[10:20]',
         batch_size=2,
-        max_seq_length=128
+        max_length=128,
+        doc_stride=64
     )
 
     adv_evaluator = AdversarialEvaluator(model, tokenizer)
@@ -365,18 +373,18 @@ def quick_smoke_test():
 
         print("\n2. Testing forward pass...")
         test_input = torch.randint(0, 50257, (1, 64))
-        output = model(test_input)
+        output = model(test_input, labels=test_input)
         print(f"✓ Forward pass successful, loss: {output['loss'].item():.4f}")
 
         print("\n3. Testing precision switching...")
         for bits in [4, 8, 16]:
             model.set_global_precision(bits)
-            output = model(test_input)
+            output = model(test_input, labels=test_input)
             print(f"✓ {bits}-bit precision: loss={output['loss'].item():.4f}")
 
         print("\n4. Testing per-layer precision...")
         model.set_layer_precision([4, 8])
-        output = model(test_input)
+        output = model(test_input, labels=test_input)
         print(f"✓ Per-layer [4,8] precision: loss={output['loss'].item():.4f}")
 
         print("\n✓ SMOKE TEST PASSED! Basic functionality verified.")
