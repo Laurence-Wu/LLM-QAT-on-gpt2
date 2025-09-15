@@ -29,9 +29,9 @@ class CyclicTrainingConfig:
         # Dataset - Using SQuAD as specified in Step 3
         self.train_split = 'train[:20000]'  # SQuAD training data
         self.val_split = 'validation[:2000]'  # SQuAD validation data
-        self.batch_size = 2
-        self.max_seq_length = 256
-        self.doc_stride = 128
+        self.batch_size = 8
+        self.max_seq_length = 512
+        self.doc_stride = 256
 
         # Optimization
         self.learning_rate = 1e-4
@@ -41,18 +41,18 @@ class CyclicTrainingConfig:
         self.max_grad_norm = 1.0
 
         # Training schedule - Step 3 specifies 1000 iterations
-        self.num_cpt_iterations = 1000  # As per Step 3 requirement
-        self.warmup_steps = 50
+        self.num_cpt_iterations = 5000  # As per Step 3 requirement
+        self.warmup_steps = 200
         self.gradient_accumulation_steps = 4
 
         # Evaluation
         self.eval_interval = 100  # Evaluate every 100 iterations
-        self.save_interval = 200  # Save checkpoint every 200 iterations
-        self.log_interval = 10    # Log metrics every 10 iterations
+        self.save_interval = 10  # Save checkpoint every 10 iterations
+        self.log_interval = 100  # Log metrics every 100 iterations
 
         # Memory optimization
         self.use_amp = True
-        self.empty_cache_interval = 10
+        self.empty_cache_interval = 100
 
         # Logging
         self.verbose = True
@@ -63,7 +63,7 @@ class CyclicPrecisionConfig:
     """Cyclic precision specific configuration for Step 5 of Algorithm Test 2."""
     def __init__(self):
         # Cycling pattern - dynamic bit-width changes during training
-        self.cycle_length = 30  # Length of each cycle
+        self.cycle_length = 50  # Length of each cycle
         self.bit_width_pattern = [8, 6, 4, 2, 4, 6, 8]  # Pattern to cycle through
 
         # Different configurations to explore
