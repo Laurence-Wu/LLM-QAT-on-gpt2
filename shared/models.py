@@ -218,7 +218,36 @@ class QATGPT2(nn.Module):
                                   shift_labels.view(-1))
 
         return {'loss': loss, 'logits': logits}
-    
+
+    def set_layer_precision(self, layer_config):
+        """
+        Set precision for each layer - used for cyclic precision training.
+
+        Args:
+            layer_config: List of dicts with 'attn_bits' and 'mlp_bits' for each layer
+        """
+        if not isinstance(layer_config, list):
+            raise ValueError("layer_config must be a list of dictionaries")
+
+        for i, config in enumerate(layer_config):
+            if i < len(self.h):
+                attn_bits = config.get('attn_bits', 8)
+                mlp_bits = config.get('mlp_bits', 8)
+                activation_bits = config.get('activation_bits', 8)
+                kv_bits = config.get('kv_bits', 8)
+
+                self.h[i].set_precision(attn_bits, mlp_bits, activation_bits, kv_bits)
+
+    def set_global_precision(self, bits):
+        """
+        Set the same precision for all layers - used for QAT training.
+
+        Args:
+            bits: Number of bits to use for quantization
+        """
+        for block in self.h:
+            block.set_precision(bits, bits, bits, bits)
+
 # Alias for compatibility
 SwitchableQuantizedGPT2 = QATGPT2
 QuantizedGPT2Attention = QATGPT2Attention  

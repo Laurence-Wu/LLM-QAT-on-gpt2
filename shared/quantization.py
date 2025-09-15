@@ -33,18 +33,14 @@ class QuantizationFunction(torch.autograd.Function):
 class LearnableFakeQuantize(nn.Module):
     def __init__(self, num_bits=8, symmetric=True, per_channel=False, channel_dim=0):
         super().__init__()
-        self.num_bits = max(1, min(num_bits, 32))  # Clamp to valid range
+        self._num_bits = max(1, min(num_bits, 32))  # Clamp to valid range
         self.symmetric = symmetric
         self.per_channel = per_channel
         self.channel_dim = channel_dim
         self.eps = 1e-7
 
-        self.quant_min = 0
-        self.quant_max = 2 ** self.num_bits - 1
-
-        if symmetric:
-            self.quant_min = -(2 ** (self.num_bits - 1))
-            self.quant_max = 2 ** (self.num_bits - 1) - 1
+        # Initialize quantization ranges
+        self._update_quant_range()
 
         # Register buffers for proper memory management and persistence
         # Buffers are automatically moved with model.to(device) and saved with state_dict
@@ -54,6 +50,25 @@ class LearnableFakeQuantize(nn.Module):
         self.register_buffer('running_max', torch.zeros(1))
 
         self.calibrated = False
+
+    @property
+    def num_bits(self):
+        return self._num_bits
+
+    @num_bits.setter
+    def num_bits(self, value):
+        """Update num_bits and recalculate quantization ranges."""
+        self._num_bits = max(1, min(value, 32))
+        self._update_quant_range()
+
+    def _update_quant_range(self):
+        """Update quantization range based on current num_bits."""
+        self.quant_min = 0
+        self.quant_max = 2 ** self._num_bits - 1
+
+        if self.symmetric:
+            self.quant_min = -(2 ** (self._num_bits - 1))
+            self.quant_max = 2 ** (self._num_bits - 1) - 1
     
     def forward(self, x):
         # Pass through for FP32 mode
@@ -108,7 +123,7 @@ class LearnableFakeQuantize(nn.Module):
                 max_val = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
                 max_val = torch.clamp(max_val, min=self.eps)
                 # In-place update of scale
-                self.scale.copy_(max_val / (2**(self.num_bits-1) - 1))
+                self.scale.copy_(max_val / (2**(self._num_bits-1) - 1))
                 self.zero_point.zero_()  # In-place zero
             else:
                 range_val = torch.clamp(self.running_max - self.running_min, min=self.eps)
@@ -128,7 +143,7 @@ class LearnableFakeQuantize(nn.Module):
         # Scale and zero_point are already registered buffers, so they're on the right device
         # Just use them directly without creating new tensors
         return QuantizationFunction.apply(x, self.scale, self.zero_point,
-                                         self.num_bits, self.symmetric)
+                                         self._num_bits, self.symmetric)
 
 class QuantizedLinear(nn.Module):
     def __init__(self, in_features, out_features, bias=True, 
