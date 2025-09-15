@@ -21,9 +21,17 @@ def convert_to_int8(model):
 
     with torch.no_grad():
         for name, module in model.named_modules():
-            # Process QATLinearWithLoRA layers
-            if isinstance(module, nn.Module) and 'Linear' in module.__class__.__name__:
-                weight = module.linear.weight.data
+            # Skip regular nn.Linear layers that are not QAT layers
+            if module.__class__.__name__ == 'Linear':
+                continue
+
+            # Process QATLinearWithLoRA and SwitchableQATLinearWithLoRA layers
+            if 'QATLinear' in module.__class__.__name__ or 'SwitchableQATLinear' in module.__class__.__name__:
+                # Get weight from the appropriate location
+                if hasattr(module, 'linear'):
+                    weight = module.linear.weight.data
+                else:
+                    continue
 
                 # Handle both regular QAT and Switchable QAT layers
                 if hasattr(module, 'quantize_weight'):
@@ -57,7 +65,7 @@ def convert_to_int8(model):
                 # Store quantized weights and parameters
                 prefix = f"{name}." if name else ""
                 int8_state_dict[f"{prefix}weight_int8"] = weight_int8.cpu()
-                int8_state_dict[f"{prefix}scale"] = torch.tensor(scale, dtype=torch.float32).cpu()
+                int8_state_dict[f"{prefix}scale"] = torch.scalar_tensor(scale, dtype=torch.float32).cpu()
                 int8_state_dict[f"{prefix}zero_point"] = zero_point.cpu()
 
                 # Store bias if present
@@ -68,14 +76,14 @@ def convert_to_int8(model):
                 if hasattr(module, 'lora') and module.lora is not None:
                     int8_state_dict[f"{prefix}lora.A"] = module.lora.lora_A.data.cpu()
                     int8_state_dict[f"{prefix}lora.B"] = module.lora.lora_B.data.cpu()
-                    int8_state_dict[f"{prefix}lora.scaling"] = torch.tensor(module.lora.scaling).cpu()
+                    int8_state_dict[f"{prefix}lora.scaling"] = torch.scalar_tensor(module.lora.scaling, dtype=torch.float32).cpu()
                 elif hasattr(module, 'loras'):
                     # For SwitchableQATLinearWithLoRA, store current LoRA adapter
                     current_bits = module.current_bits if hasattr(module, 'current_bits') else 8
                     lora = module.loras[f'{current_bits}bit']
                     int8_state_dict[f"{prefix}lora.A"] = lora.lora_A.data.cpu()
                     int8_state_dict[f"{prefix}lora.B"] = lora.lora_B.data.cpu()
-                    int8_state_dict[f"{prefix}lora.scaling"] = torch.tensor(lora.scaling).cpu()
+                    int8_state_dict[f"{prefix}lora.scaling"] = torch.scalar_tensor(lora.scaling, dtype=torch.float32).cpu()
 
     return int8_state_dict
 
