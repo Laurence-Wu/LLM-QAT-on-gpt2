@@ -9,7 +9,7 @@ class PerplexityEvaluator:
     def __init__(self, model, tokenizer, device='cuda'):
         self.model = model
         self.tokenizer = tokenizer
-        self.device = 'cuda'
+        self.device = device
         self.model = self.model.to(self.device)
 
     def calculate_perplexity(self, dataset_name: str, bit_config: Dict,

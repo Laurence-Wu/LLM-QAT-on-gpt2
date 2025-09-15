@@ -29,8 +29,7 @@ def load_switchable_model(model_path: str = None):
 
     if model_path and os.path.exists(model_path):
         print(f"Loading model from {model_path}")
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        checkpoint = torch.load(model_path, map_location=device)
+        checkpoint = torch.load(model_path, map_location='cuda')
 
         # Extract model configuration from checkpoint if available
         if isinstance(checkpoint, dict) and 'model_config' in checkpoint:
@@ -133,10 +132,9 @@ def load_switchable_model(model_path: str = None):
         )
         model = SwitchableQATGPT2(config, bit_widths=default_bit_widths)
 
-    # Move model to appropriate device
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = model.to(device)
-    print(f"Model moved to {device}")
+    # Move model to CUDA
+    model = model.to('cuda')
+    print(f"Model moved to cuda")
     return model
 
 
