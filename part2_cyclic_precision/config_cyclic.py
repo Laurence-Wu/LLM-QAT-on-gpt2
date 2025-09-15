@@ -41,7 +41,7 @@ class CyclicTrainingConfig:
         self.max_grad_norm = 1.0
 
         # Training schedule - Step 3 specifies 1000 iterations
-        self.num_cpt_iterations = 5000  # As per Step 3 requirement
+        self.num_cpt_iterations = 3000  # As per Step 3 requirement
         self.warmup_steps = 200
         self.gradient_accumulation_steps = 4
 
