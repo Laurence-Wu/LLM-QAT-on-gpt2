@@ -36,10 +36,18 @@ def load_switchable_model(model_path: str = None):
             model_config = checkpoint['model_config']
             bit_widths = model_config.get('bit_widths', default_bit_widths)
 
+            # Check actual n_positions from state_dict if available
+            actual_n_positions = model_config.get('n_positions', 256)
+            if 'model_state_dict' in checkpoint and 'wpe.weight' in checkpoint['model_state_dict']:
+                # Get actual n_positions from the weight shape
+                wpe_shape = checkpoint['model_state_dict']['wpe.weight'].shape
+                actual_n_positions = wpe_shape[0]
+                print(f"Detected actual n_positions from weights: {actual_n_positions}")
+
             # Use exact configuration from checkpoint
             config = GPT2Config(
                 vocab_size=model_config.get('vocab_size', 50257),
-                n_positions=model_config.get('n_positions', 1024),  # Default to 1024 if not specified
+                n_positions=actual_n_positions,  # Use detected n_positions
                 n_embd=model_config.get('n_embd', 768),
                 n_layer=model_config.get('n_layer', 6),
                 n_head=model_config.get('n_head', 12),

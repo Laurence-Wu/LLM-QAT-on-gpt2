@@ -41,10 +41,8 @@ def initialize_model(model_config, device):
     )
 
     # Use switchable model if configured
-    if model_config.use_switchable:
-        model = SwitchableQATGPT2(gpt2_config, bit_widths=model_config.bit_widths)
-    else:
-        model = QATGPT2(gpt2_config)
+    model = SwitchableQATGPT2(gpt2_config, bit_widths=model_config.bit_widths)
+
 
     # Explicitly enable gradient checkpointing
     model.use_gradient_checkpointing = True

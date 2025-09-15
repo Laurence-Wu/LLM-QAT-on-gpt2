@@ -36,9 +36,6 @@ def train_qat(model, train_loader, val_loader, config, model_config):
     device = 'cuda'
     model = model.to(device)
 
-    # Check if using switchable model
-    is_switchable = model_config.use_switchable
-
     # Clear cache before starting
     torch.cuda.empty_cache()
     gc.collect()
@@ -74,7 +71,7 @@ def train_qat(model, train_loader, val_loader, config, model_config):
         'bit_width_usage': [],
         'learning_rates': [],
         'memory_usage': [],
-        'losses_per_bit': {4: [], 8: [], 16: []} if is_switchable else {}
+        'losses_per_bit': {4: [], 8: [], 16: []}
     }
 
     # Create data iterator
@@ -88,9 +85,9 @@ def train_qat(model, train_loader, val_loader, config, model_config):
 
         # Switch bit-width if using switchable model
         current_bits = model_config.quantization_bits  # Default
-        if is_switchable:
-            current_bits = get_next_bitwidth(iteration, model_config)
-            model.set_precision(current_bits)
+
+        current_bits = get_next_bitwidth(iteration, model_config)
+        model.set_precision(current_bits)
 
         # Clear gradients only at the start of accumulation
         optimizer.zero_grad(set_to_none=True)
@@ -153,8 +150,8 @@ def train_qat(model, train_loader, val_loader, config, model_config):
         training_stats['memory_usage'].append(torch.cuda.memory_allocated() / 1024**2)  # MB
 
         # Track loss per bit-width if switchable
-        if is_switchable:
-            training_stats['losses_per_bit'][current_bits].append(total_loss)
+
+        training_stats['losses_per_bit'][current_bits].append(total_loss)
 
         # Periodic memory cleanup to prevent accumulation
         if iteration % 10 == 0:
@@ -170,9 +167,8 @@ def train_qat(model, train_loader, val_loader, config, model_config):
                 'gpu_alloc': f'{allocated:.1f}GB',
                 'gpu_res': f'{reserved:.1f}GB'
             }
-            if is_switchable:
-                postfix_dict['bits'] = current_bits
-                progress_bar.set_postfix(postfix_dict)
+            postfix_dict['bits'] = current_bits
+            progress_bar.set_postfix(postfix_dict)
 
         # Evaluation with memory cleanup
         if iteration % config.eval_interval == 0 and iteration > 0:
