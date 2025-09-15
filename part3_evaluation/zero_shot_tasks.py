@@ -6,10 +6,13 @@ from tqdm import tqdm
 import torch.nn.functional as F
 
 class ZeroShotEvaluator:
-    def __init__(self, model, tokenizer, device='cuda'):
+    def __init__(self, model, tokenizer, device=None):
         self.model = model
         self.tokenizer = tokenizer
-        self.device = 'cuda'
+        if device is None:
+            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        else:
+            self.device = device
         self.model = self.model.to(self.device)
         self.tasks = None
 

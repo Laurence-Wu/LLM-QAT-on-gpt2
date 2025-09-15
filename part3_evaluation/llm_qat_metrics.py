@@ -8,11 +8,14 @@ from pathlib import Path
 class LLMQATEvaluation:
     """Evaluation suite following LLM-QAT paper metrics"""
 
-    def __init__(self, model, tokenizer, model_size='GPT2', device='cuda'):
+    def __init__(self, model, tokenizer, model_size='GPT2', device=None):
         self.model = model
         self.tokenizer = tokenizer
         self.model_size = model_size
-        self.device = 'cuda'
+        if device is None:
+            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        else:
+            self.device = device
         self.model = self.model.to(self.device)
 
         self.model_params = self._count_parameters()
