@@ -13,95 +13,129 @@ class PerplexityEvaluator:
         self.model = self.model.to(self.device)
 
     def calculate_perplexity(self, dataset_name: str, bit_config: Dict,
-                            stride: int = 128, max_samples: int = 100) -> float:
+                            stride: int = 512, max_length: int = 1024) -> float:
         """
         Calculate perplexity on WikiText2 or C4
-        Use sliding window with specified stride
+        Using proper sliding window approach
         """
         self.model.eval()
 
+        # Load dataset
         if dataset_name == 'wikitext2':
             try:
                 dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test')
-                text_field = 'text'
-            except:
-                print(f"Warning: Could not load {dataset_name} dataset")
+                texts = [item['text'] for item in dataset if item['text'].strip()]
+            except Exception as e:
+                print(f"Warning: Could not load {dataset_name} dataset: {e}")
                 return float('inf')
         elif dataset_name == 'c4':
             try:
-                # Try loading C4 dataset
-                dataset = load_dataset('c4', 'en', split='validation[:100]', streaming=True)
-                # Convert streaming dataset to list
-                dataset = list(dataset)
-                text_field = 'text'
-            except:
-                print(f"Warning: Could not load {dataset_name} dataset, using placeholder")
-                # Use a simple placeholder text for testing
-                dataset = [{'text': f"Sample text {i} for perplexity evaluation." * 10} for i in range(50)]
-                text_field = 'text'
+                # Load a smaller subset of C4 for evaluation
+                dataset = load_dataset('allenai/c4', 'en', split='validation', streaming=True)
+                texts = []
+                for i, item in enumerate(dataset):
+                    if i >= 100:  # Use first 100 documents
+                        break
+                    texts.append(item['text'])
+            except Exception as e:
+                print(f"Warning: Could not load C4 dataset: {e}")
+                # Fallback to WikiText2 if C4 fails
+                try:
+                    dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split='validation')
+                    texts = [item['text'] for item in dataset if item['text'].strip()][:50]
+                except:
+                    return float('inf')
         else:
             print(f"Unknown dataset: {dataset_name}")
             return float('inf')
 
-        # Process text in chunks to avoid memory issues
-        texts = [item[text_field] for item in dataset if item[text_field].strip()]  # No limit
-        text = '\n'.join(texts)
-
-        if not text:
+        if not texts:
             return float('inf')
 
-        # Tokenize with truncation to avoid exceeding max length
-        encodings = self.tokenizer(text, return_tensors='pt', truncation=True, max_length=50000)
+        # Join texts with proper spacing
+        text = ' '.join(texts)
 
-        # Use actual model's context length
-        max_length = self.model.config.n_positions if hasattr(self.model.config, 'n_positions') else 256
+        # Tokenize the entire text
+        encodings = self.tokenizer(text, return_tensors='pt', truncation=False)
 
-        # Adjust stride to be smaller than max_length
+        # Get model's actual context length
+        model_max_length = self.model.config.n_positions if hasattr(self.model.config, 'n_positions') else 1024
+        max_length = min(max_length, model_max_length)
+
+        # Calculate stride (50% overlap)
         stride = min(stride, max_length // 2)
 
-        nlls = []
+        total_loss = 0.0
+        total_tokens = 0
+
+        # Process text in sliding windows
+        seq_len = encodings.input_ids.size(1)
+
         prev_end_loc = 0
+        for begin_loc in tqdm(range(0, seq_len, stride),
+                              desc=f"Calculating perplexity on {dataset_name}",
+                              disable=False):
+            end_loc = min(begin_loc + max_length, seq_len)
 
-        for begin_loc in tqdm(range(0, min(len(encodings.input_ids[0]), max_samples * stride), stride),
-                              desc=f"Calculating perplexity on {dataset_name}"):
-            end_loc = min(begin_loc + max_length, len(encodings.input_ids[0]))
-
-            if end_loc <= begin_loc:
+            # Skip if window is too small
+            if end_loc - begin_loc < 10:
                 break
 
+            trg_len = end_loc - prev_end_loc  # How many tokens we're actually evaluating
             input_ids = encodings.input_ids[:, begin_loc:end_loc].to(self.device)
 
-            if input_ids.shape[1] < 2:
-                continue
+            # Create attention mask
+            attention_mask = torch.ones_like(input_ids)
 
             with torch.no_grad():
                 try:
-                    outputs = self.model(input_ids, labels=input_ids)
-                    loss = outputs['loss']  # This is already averaged per token
+                    outputs = self.model(
+                        input_ids,
+                        attention_mask=attention_mask,
+                        labels=input_ids
+                    )
 
-                    # Just accumulate the losses - they're already averaged
-                    # We'll compute the mean of means later
-                    nlls.append(loss.item())
+                    # Get the loss (cross-entropy, already normalized per token)
+                    loss = outputs.loss
+
+                    # Accumulate loss weighted by number of tokens
+                    # Only count tokens from prev_end_loc to end_loc to avoid double counting
+                    if prev_end_loc < begin_loc:
+                        # We have overlap, only count new tokens
+                        trg_len = end_loc - begin_loc
+
+                    total_loss += loss.item() * trg_len
+                    total_tokens += trg_len
 
                     prev_end_loc = end_loc
-                except Exception as e:
-                    print(f"Error processing batch: {e}")
-                    continue
 
-            # No limit on samples
-            # if len(nlls) >= max_samples:
-            #     break
+                except RuntimeError as e:
+                    if "out of memory" in str(e):
+                        torch.cuda.empty_cache()
+                        continue
+                    else:
+                        print(f"Error processing batch: {e}")
+                        continue
 
-            torch.cuda.empty_cache()
+            # Clear cache periodically
+            if begin_loc % (stride * 10) == 0:
+                torch.cuda.empty_cache()
 
-        if not nlls:
+            # Stop if we've processed enough tokens
+            if total_tokens > 50000:  # Process at least 50k tokens
+                break
+
+        if total_tokens == 0:
             return float('inf')
 
-        # Calculate average loss across all segments
-        avg_loss = sum(nlls) / len(nlls)
+        # Calculate average loss
+        avg_loss = total_loss / total_tokens
 
         # Perplexity is exp(average_loss)
-        ppl = math.exp(avg_loss)
+        try:
+            ppl = math.exp(avg_loss)
+        except OverflowError:
+            ppl = float('inf')
 
         return ppl
 
@@ -113,11 +147,11 @@ class PerplexityEvaluator:
         results = {}
 
         print("  Calculating WikiText2 perplexity...")
-        wikitext2_ppl = self.calculate_perplexity('wikitext2', bit_config, max_samples=10000)
+        wikitext2_ppl = self.calculate_perplexity('wikitext2', bit_config)
         results['WikiText2'] = round(wikitext2_ppl, 1)
 
         print("  Calculating C4 perplexity...")
-        c4_ppl = self.calculate_perplexity('c4', bit_config, max_samples=10000)
+        c4_ppl = self.calculate_perplexity('c4', bit_config)
         results['C4'] = round(c4_ppl, 1)
 
         return results
