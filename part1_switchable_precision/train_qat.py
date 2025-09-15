@@ -230,7 +230,7 @@ def train_qat(model, train_loader, val_loader, config, model_config):
 
     print(f"Training statistics saved to {stats_path}")
 
-    return model
+    return model, training_stats
 
 
 def evaluate(model, val_loader, device, use_amp):
