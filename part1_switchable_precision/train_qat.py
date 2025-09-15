@@ -8,6 +8,8 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 import gc
+import json
+import time
 
 
 def train_qat(model, train_loader, val_loader, config, model_config):
@@ -38,9 +40,21 @@ def train_qat(model, train_loader, val_loader, config, model_config):
 
     # Training metrics
     best_val_loss = float('inf')
+    best_iteration = 0
     print(f"\nStarting QAT training ({model_config.quantization_bits}-bit)")
     print(f"Iterations: {config.num_iterations}, Batch size: {config.batch_size}")
     print(f"Gradient accumulation: {config.gradient_accumulation_steps}")
+
+    # Initialize training statistics dictionary
+    training_stats = {
+        'iteration_losses': [],
+        'validation_losses': [],
+        'bit_width_usage': [],
+        'learning_rates': [],
+        'memory_usage': [],
+        'best_val_loss': None,
+        'best_iteration': None
+    }
 
     # Create data iterator
     train_iter = iter(train_loader)
@@ -105,6 +119,15 @@ def train_qat(model, train_loader, val_loader, config, model_config):
         # Clear gradients after optimizer step to free memory
         optimizer.zero_grad(set_to_none=True)
 
+        # Store training statistics
+        training_stats['iteration_losses'].append(total_loss)
+        training_stats['bit_width_usage'].append(model_config.quantization_bits)
+        training_stats['learning_rates'].append(optimizer.param_groups[0]['lr'])
+        if torch.cuda.is_available():
+            training_stats['memory_usage'].append(torch.cuda.memory_allocated() / 1024**2)  # MB
+        else:
+            training_stats['memory_usage'].append(0)
+
         # Periodic memory cleanup to prevent accumulation
         if iteration % 10 == 0:
             if torch.cuda.is_available():
@@ -127,8 +150,14 @@ def train_qat(model, train_loader, val_loader, config, model_config):
             val_loss = evaluate(model, val_loader, device, config.use_amp)
             print(f"\n[Iter {iteration}] Train: {total_loss:.4f}, Val: {val_loss:.4f}")
 
+            # Store validation loss
+            training_stats['validation_losses'].append(val_loss)
+
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
+                best_iteration = iteration
+                training_stats['best_val_loss'] = best_val_loss
+                training_stats['best_iteration'] = best_iteration
 
             # Force cleanup after eval
             if torch.cuda.is_available():
@@ -136,6 +165,25 @@ def train_qat(model, train_loader, val_loader, config, model_config):
             gc.collect()
 
     print(f"\nTraining complete. Best val loss: {best_val_loss:.4f}")
+
+    # Save training statistics to JSON file
+    timestamp = time.strftime('%Y%m%d_%H%M%S')
+    stats_path = f'qat_training_stats_{timestamp}.json'
+
+    with open(stats_path, 'w') as f:
+        # Convert numpy arrays to lists for JSON serialization
+        stats_to_save = {}
+        for key, value in training_stats.items():
+            if hasattr(value, 'tolist'):
+                stats_to_save[key] = value.tolist()
+            elif isinstance(value, list) and len(value) > 0 and hasattr(value[0], 'tolist'):
+                stats_to_save[key] = [v.tolist() if hasattr(v, 'tolist') else v for v in value]
+            else:
+                stats_to_save[key] = value
+        json.dump(stats_to_save, f, indent=2)
+
+    print(f"Training statistics saved to {stats_path}")
+
     return model
 
 
