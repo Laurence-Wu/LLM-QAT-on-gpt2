@@ -63,8 +63,7 @@ class QATLinearWithLoRA(nn.Module):
 
         # LoRA adapter with config parameters
         self.lora = QATLoRALayer(in_features, out_features,
-                                 rank=lora_rank, alpha=lora_alpha,
-                                 dropout=lora_dropout, bits=bits)
+                                 rank=lora_rank, alpha=lora_alpha, bits=bits)
 
         # Pre-allocate buffers for quantized tensors
         self.register_buffer('weight_quantized', torch.empty(out_features, in_features))
@@ -145,7 +144,6 @@ class SwitchableQATLinearWithLoRA(nn.Module):
                 in_features, out_features,
                 rank=lora_rank_per_bit.get(bits, 16),
                 alpha=lora_alpha_per_bit.get(bits, 32),
-                dropout=lora_dropout,
                 bits=bits
             )
             for bits in bit_widths

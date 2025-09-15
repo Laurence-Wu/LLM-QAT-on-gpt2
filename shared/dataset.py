@@ -182,7 +182,7 @@ def collate_fn(batch):
 
 
 def create_dataloaders(tokenizer, dataset_type='squad', train_split='train',
-                      val_split='validation', batch_size=8, max_length=384,
+                      val_split='validation', test_split=None, batch_size=8, max_length=384,
                       doc_stride=128, num_workers=0):
     """
     Create dataloaders for different dataset types.
@@ -249,6 +249,43 @@ def create_dataloaders(tokenizer, dataset_type='squad', train_split='train',
         raise ValueError(f"Unsupported dataset type: {dataset_type}. "
                         f"Choose from: 'squad', 'wikitext', 'wikitext-103', 'wikitext-2'")
 
+    # Create test dataset if test_split is provided
+    test_loader = None
+    if test_split:
+        if dataset_type == 'squad':
+            test_dataset = SQuADDataset(
+                tokenizer,
+                split=test_split,
+                max_length=max_length,
+                doc_stride=doc_stride
+            )
+        elif dataset_type == 'wikitext' or dataset_type == 'wikitext-103':
+            test_dataset = WikiTextDataset(
+                tokenizer,
+                split=test_split,
+                max_length=max_length,
+                stride=doc_stride,
+                dataset_name='wikitext-103-raw-v1'
+            )
+        elif dataset_type == 'wikitext-2':
+            test_dataset = WikiTextDataset(
+                tokenizer,
+                split=test_split,
+                max_length=max_length,
+                stride=doc_stride,
+                dataset_name='wikitext-2-raw-v1'
+            )
+
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=torch.cuda.is_available(),
+            persistent_workers=(num_workers > 0),
+            collate_fn=collate_fn
+        )
+
     # Create dataloaders
     train_loader = DataLoader(
         train_dataset,
@@ -269,4 +306,6 @@ def create_dataloaders(tokenizer, dataset_type='squad', train_split='train',
         collate_fn=collate_fn
     )
 
+    if test_loader is not None:
+        return train_loader, val_loader, test_loader
     return train_loader, val_loader

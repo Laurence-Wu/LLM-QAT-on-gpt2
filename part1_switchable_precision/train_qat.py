@@ -212,10 +212,10 @@ def train_qat(model, train_loader, val_loader, config, model_config):
 
         # Add configuration information
         stats_to_save['model_config'] = {
-            'model_name': model_config.model_name,
-            'output_model_path': model_config.output_model_path,
             'quantization_bits': model_config.quantization_bits,
-            'use_gradient_checkpointing': model_config.use_gradient_checkpointing
+            'n_layer': model_config.n_layer,
+            'n_embd': model_config.n_embd,
+            'n_head': model_config.n_head
         }
 
         stats_to_save['training_config'] = {

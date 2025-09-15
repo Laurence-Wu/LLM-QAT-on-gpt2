@@ -471,3 +471,40 @@ class SwitchableQATGPT2(nn.Module):
             loss = F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)),
                                   shift_labels.view(-1))
         return {'loss': loss, 'logits': logits}
+
+    def forward_from_embeddings(self, inputs_embeds, attention_mask=None, labels=None):
+        batch_size, seq_length = inputs_embeds.shape[:2]
+        position_ids = torch.arange(seq_length, device=inputs_embeds.device).unsqueeze(0)
+        position_embeds = self.wpe(position_ids)
+        hidden_states = self.drop(inputs_embeds + position_embeds)
+
+        for i, block in enumerate(self.h):
+            if self.use_gradient_checkpointing and self.training:
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        return module(*inputs)
+                    return custom_forward
+
+                hidden_states = checkpoint(
+                    create_custom_forward(block),
+                    hidden_states,
+                    attention_mask,
+                    use_reentrant=False,
+                    preserve_rng_state=False
+                )
+            else:
+                hidden_states = block(hidden_states, attention_mask)
+
+            if i % 4 == 3 and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        hidden_states = self.ln_f(hidden_states)
+        logits = self.lm_head(hidden_states)
+
+        loss = None
+        if labels is not None:
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            loss = F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)),
+                                  shift_labels.view(-1))
+        return {'loss': loss, 'logits': logits}

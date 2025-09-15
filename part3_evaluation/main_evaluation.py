@@ -10,9 +10,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared.models import SwitchableQATGPT2
 from shared.dataset import create_dataloaders
 from transformers import GPT2Config, GPT2Tokenizer
-from evaluate_configurations import ConfigurationEvaluator
-from compare_strategies import compare_training_strategies, save_comparison_results, print_comparison_summary
-from adversarial_attacks import AdversarialEvaluator, analyze_robustness_results
+from .evaluate_configurations import ConfigurationEvaluator
+from .compare_strategies import compare_training_strategies, save_comparison_results, print_comparison_summary
+from .adversarial_attacks import AdversarialEvaluator, analyze_robustness_results
 
 
 def load_model(model_path=None, config=None):

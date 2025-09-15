@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared.models import SwitchableQATGPT2
 from part1_switchable_precision.train_qat import train_qat
 from part2_cyclic_precision.train_cyclic import train_cyclic_precision
-from evaluate_configurations import ConfigurationEvaluator
+from .evaluate_configurations import ConfigurationEvaluator
 
 
 def compare_training_strategies(train_loader, val_loader, test_loader, model_config, training_config):

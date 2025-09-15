@@ -64,3 +64,4 @@ class TrainingConfig:
         # Memory optimization
         self.use_amp = True
         self.empty_cache_interval = 25
+        self.num_workers = 0  # For DataLoader
