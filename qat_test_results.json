@@ -1,0 +1,143 @@
+{
+  "quantization_accuracy": {
+    "16": {
+      "perplexity": 626368.6640676662,
+      "mse_from_fp16": 0.0,
+      "cosine_similarity": 0.9999999403953552
+    },
+    "8": {
+      "perplexity": 626368.6640676662,
+      "mse_from_fp16": 0.0,
+      "cosine_similarity": 0.9999999403953552
+    },
+    "4": {
+      "perplexity": 626368.6640676662,
+      "mse_from_fp16": 0.0,
+      "cosine_similarity": 0.9999999403953552
+    }
+  },
+  "precision_switching": true,
+  "gradient_flow": {
+    "16": {
+      "loss": 9.368608474731445,
+      "params_with_gradients": 100,
+      "total_params": 124,
+      "params_with_nan": 0,
+      "params_with_inf": 0
+    },
+    "8": {
+      "loss": 9.844612121582031,
+      "params_with_gradients": 100,
+      "total_params": 124,
+      "params_with_nan": 0,
+      "params_with_inf": 0
+    },
+    "4": {
+      "loss": 8.727560043334961,
+      "params_with_gradients": 100,
+      "total_params": 124,
+      "params_with_nan": 0,
+      "params_with_inf": 0
+    }
+  },
+  "lora_adaptation": true,
+  "memory_efficiency": {
+    "16": {
+      "allocated_mb": 585.3271484375,
+      "reserved_mb": 602.0,
+      "peak_mb": 591.123046875
+    },
+    "8": {
+      "allocated_mb": 585.3271484375,
+      "reserved_mb": 622.0,
+      "peak_mb": 606.65234375
+    },
+    "4": {
+      "allocated_mb": 585.3271484375,
+      "reserved_mb": 622.0,
+      "peak_mb": 606.65234375
+    }
+  },
+  "training_stability": {
+    "16": [
+      6.977365851402283,
+      5.815023899078369,
+      5.065694153308868,
+      4.263786196708679,
+      3.676040470600128
+    ],
+    "8": [
+      4.381748676300049,
+      3.51063472032547,
+      2.9075448513031006,
+      2.6300030648708344,
+      2.0913203060626984
+    ],
+    "4": [
+      8.039061546325684,
+      8.028503894805908,
+      8.44686472415924,
+      7.959870100021362,
+      8.041212916374207
+    ]
+  },
+  "inference_speed": {
+    "16": {
+      "avg_time_ms": 16.50977611541748,
+      "throughput": 60.570173272438296
+    },
+    "8": {
+      "avg_time_ms": 16.65928840637207,
+      "throughput": 60.026573501033
+    },
+    "4": {
+      "avg_time_ms": 16.855812072753906,
+      "throughput": 59.32671743632105
+    }
+  },
+  "checkpoint_operations": false,
+  "output_consistency": {
+    "16": {
+      "The weather is": {
+        "avg_diff": 0.0,
+        "max_diff": 0.0
+      },
+      "Machine learning": {
+        "avg_diff": 0.0,
+        "max_diff": 0.0
+      },
+      "In the future": {
+        "avg_diff": 0.0,
+        "max_diff": 0.0
+      }
+    },
+    "8": {
+      "The weather is": {
+        "avg_diff": 0.0,
+        "max_diff": 0.0
+      },
+      "Machine learning": {
+        "avg_diff": 0.0,
+        "max_diff": 0.0
+      },
+      "In the future": {
+        "avg_diff": 0.0,
+        "max_diff": 0.0
+      }
+    },
+    "4": {
+      "The weather is": {
+        "avg_diff": 0.0,
+        "max_diff": 0.0
+      },
+      "Machine learning": {
+        "avg_diff": 0.0,
+        "max_diff": 0.0
+      },
+      "In the future": {
+        "avg_diff": 0.0,
+        "max_diff": 0.0
+      }
+    }
+  }
+}
