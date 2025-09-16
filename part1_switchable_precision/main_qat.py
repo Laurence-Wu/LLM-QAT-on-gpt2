@@ -8,6 +8,7 @@ import os
 import sys
 import torch
 import gc
+import json
 from transformers import GPT2Config, GPT2TokenizerFast, GPT2Model
 
 # Add shared folder to path for imports
@@ -106,12 +107,22 @@ def load_pretrained_weights(model):
     print("pretrained weights loaded successfully.")
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description='QAT Training Script')
+    parser.add_argument('--checkpoint', type=str, default=None,
+                       help='Path to checkpoint to resume from')
+    args = parser.parse_args()
+
+    # Check CUDA availability
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is not available. Training requires CUDA.")
+
     device = torch.device('cuda')
-    print(f" {device}")
+    print(f"Using device: {device}")
     torch.cuda.empty_cache()
     gc.collect()
-    
-    # Load configurations to cpu
+
+    # Use configuration from config_qat.py
     model_config = ModelConfig()
     training_config = TrainingConfig()
     
@@ -167,7 +178,9 @@ def main():
         save_int8_checkpoint(trained_model, int8_filename, model_config, training_config)
 
     except Exception as e:
+        # Don't silently catch - re-raise the error
         print(f"Error saving models: {e}")
+        raise
 
     return trained_model
 

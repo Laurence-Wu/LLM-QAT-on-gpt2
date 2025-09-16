@@ -105,7 +105,7 @@ class QATGPT2Block(nn.Module):
 
 class QATGPT2(nn.Module):
     """GPT-2 with QAT (single precision, fake quantization)."""
-    def __init__(self, config: GPT2Config, quantization_bits, initialize_weights=True):
+    def __init__(self, config: GPT2Config, quantization_bits, initialize_weights=False):
         super().__init__()
         self.config = config
         self.use_gradient_checkpointing = True
@@ -434,7 +434,7 @@ class SwitchableQATGPT2Block(nn.Module):
 
 class SwitchableQATGPT2(nn.Module):
     """GPT-2 with switchable precision QAT."""
-    def __init__(self, config: GPT2Config, bit_widths=[4, 8, 16], initialize_weights=True):
+    def __init__(self, config: GPT2Config, bit_widths=[4, 8, 16], initialize_weights=False):
         super().__init__()
         self.config = config
         self.bit_widths = bit_widths

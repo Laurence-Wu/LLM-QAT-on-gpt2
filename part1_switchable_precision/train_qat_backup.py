@@ -27,17 +27,13 @@ def get_next_bitwidth(iteration, model_config):
         schedule_idx = min(iteration // 50, len(model_config.curriculum_schedule) - 1)
         return model_config.curriculum_schedule[schedule_idx]
     else:
-        raise ValueError(f"Unknown switch_strategy: {model_config.switch_strategy}")
+        return 8  # Default
 
 
 def train_qat(model, train_loader, val_loader, config, model_config):
     """QAT training with switchable precision support."""
 
-    # Force CUDA - no fallback
-    if not torch.cuda.is_available():
-        raise RuntimeError('CUDA is not available. Training requires CUDA.')
-
-    device = torch.device('cuda')
+    device = 'cuda'
     model = model.to(device)
 
     # Clear cache before starting
