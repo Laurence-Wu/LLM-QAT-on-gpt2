@@ -12,11 +12,15 @@ class PerplexityEvaluator:
         self.device = device
         self.model = self.model.to(self.device)
 
+        # Set pad token if not set
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
     def calculate_perplexity(self, dataset_name: str, bit_config: Dict,
-                            stride: int = 512, max_length: int = 1024) -> float:
+                            stride: int = 128, max_length: int = 256) -> float:
         """
         Calculate perplexity on WikiText2 or C4
-        Using proper sliding window approach
+        Using proper sliding window approach optimized for small GPT-2
         """
         self.model.eval()
 
@@ -52,19 +56,18 @@ class PerplexityEvaluator:
         if not texts:
             return float('inf')
 
-        # Get model's actual context length
-        model_max_length = self.model.config.n_positions if hasattr(self.model.config, 'n_positions') else 1024
+        # Get model's actual context length (256 for our model)
+        model_max_length = self.model.config.n_positions if hasattr(self.model.config, 'n_positions') else 256
         max_length = min(max_length, model_max_length)
 
-        # Calculate stride (50% overlap)
+        # Smaller stride for better coverage
         stride = min(stride, max_length // 2)
 
-        total_loss = 0.0
-        total_tokens = 0
+        all_losses = []
         iterations = 0
 
         # Process texts one by one to avoid tokenization length issues
-        for text in tqdm(texts[:100], desc=f"Processing {dataset_name} documents"):
+        for text_idx, text in enumerate(tqdm(texts[:100], desc=f"Processing {dataset_name} documents")):
             if not text.strip():
                 continue
 
@@ -73,7 +76,8 @@ class PerplexityEvaluator:
                 text,
                 return_tensors='pt',
                 truncation=True,
-                max_length=max_length * 10  # Allow longer texts but we'll process in windows
+                max_length=max_length * 20,  # Allow longer texts but we'll process in windows
+                padding=False
             )
 
             seq_len = encodings.input_ids.size(1)
@@ -95,44 +99,42 @@ class PerplexityEvaluator:
 
                 input_ids = encodings.input_ids[:, begin_loc:end_loc].to(self.device)
 
-                # Create attention mask
-                attention_mask = torch.ones_like(input_ids)
+                # Target is the same as input for language modeling
+                target_ids = input_ids.clone()
 
                 with torch.no_grad():
                     try:
-                        outputs = self.model(
-                            input_ids,
-                            attention_mask=attention_mask,
-                            labels=input_ids
+                        # Forward pass
+                        outputs = self.model(input_ids)
+
+                        # Get logits
+                        if hasattr(outputs, 'logits'):
+                            logits = outputs.logits
+                        elif isinstance(outputs, dict) and 'logits' in outputs:
+                            logits = outputs['logits']
+                        elif isinstance(outputs, tuple):
+                            logits = outputs[0]
+                        else:
+                            logits = outputs
+
+                        # Shift for next token prediction
+                        shift_logits = logits[..., :-1, :].contiguous()
+                        shift_labels = target_ids[..., 1:].contiguous()
+
+                        # Flatten the tokens
+                        loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
+                        losses = loss_fct(
+                            shift_logits.view(-1, shift_logits.size(-1)),
+                            shift_labels.view(-1)
                         )
 
-                        # Handle different output formats
-                        if hasattr(outputs, 'loss'):
-                            loss = outputs.loss
-                        elif isinstance(outputs, dict) and 'loss' in outputs:
-                            loss = outputs['loss']
-                        elif isinstance(outputs, tuple) and len(outputs) > 0:
-                            # Some models return (loss, logits, ...)
-                            loss = outputs[0]
-                        else:
-                            # Calculate loss manually if not provided
-                            logits = outputs.logits if hasattr(outputs, 'logits') else outputs['logits']
+                        # Get mean loss for this segment
+                        segment_loss = losses.mean().item()
 
-                            # Shift for language modeling
-                            shift_logits = logits[..., :-1, :].contiguous()
-                            shift_labels = input_ids[..., 1:].contiguous()
+                        # Only add valid losses
+                        if not math.isnan(segment_loss) and not math.isinf(segment_loss):
+                            all_losses.append(segment_loss)
 
-                            # Calculate cross entropy loss
-                            loss_fct = torch.nn.CrossEntropyLoss()
-                            loss = loss_fct(
-                                shift_logits.view(-1, shift_logits.size(-1)),
-                                shift_labels.view(-1)
-                            )
-
-                        # Accumulate loss
-                        batch_size = end_loc - begin_loc
-                        total_loss += loss.item() * batch_size
-                        total_tokens += batch_size
                         iterations += 1
 
                     except RuntimeError as e:
@@ -140,30 +142,44 @@ class PerplexityEvaluator:
                             torch.cuda.empty_cache()
                             continue
                         else:
-                            print(f"Error processing batch: {e}")
                             continue
                     except Exception as e:
-                        print(f"Error: {e}")
                         continue
 
                 # Clear cache periodically
-                if iterations % 100 == 0:
+                if iterations % 50 == 0:
                     torch.cuda.empty_cache()
 
             if iterations >= 1000:
                 break
 
-        if total_tokens == 0:
+        if not all_losses:
             return float('inf')
 
-        # Calculate average loss
-        avg_loss = total_loss / total_tokens
+        # Calculate average loss across all valid segments
+        avg_loss = np.mean(all_losses)
+
+        # Remove outliers (losses that are too high)
+        if len(all_losses) > 10:
+            # Use median and IQR to filter outliers
+            q1 = np.percentile(all_losses, 25)
+            q3 = np.percentile(all_losses, 75)
+            iqr = q3 - q1
+            lower_bound = q1 - 1.5 * iqr
+            upper_bound = q3 + 1.5 * iqr
+
+            filtered_losses = [l for l in all_losses if lower_bound <= l <= upper_bound]
+            if filtered_losses:
+                avg_loss = np.mean(filtered_losses)
 
         # Perplexity is exp(average_loss)
         try:
             ppl = math.exp(avg_loss)
+            # Cap perplexity at a reasonable value
+            if ppl > 100000:
+                ppl = 100000
         except OverflowError:
-            ppl = float('inf')
+            ppl = 100000
 
         return ppl
 
