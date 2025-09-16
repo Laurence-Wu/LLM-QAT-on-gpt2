@@ -355,6 +355,13 @@ def main():
         print(f"Model size: {results[config_name]['model_size_gb']} GB")
         print(f"Applying bit configuration W={config['W']}, A={config['A']}, KV={config['KV']}")
 
+        if not args.skip_perplexity:
+            print("\n2. Perplexity evaluation...")
+            perplexity_results = evaluator.evaluate_perplexity(config)
+            results[config_name]['perplexity'] = perplexity_results
+            print(f"   WikiText2: {perplexity_results['WikiText2']:.1f}")
+            print(f"   C4: {perplexity_results['C4']:.1f}")
+
         if not args.skip_zero_shot:
             print("\n1. Zero-shot common sense evaluation...")
             zero_shot_results = evaluator.evaluate_zero_shot_common_sense(config)
@@ -366,12 +373,7 @@ def main():
                 if task != 'Average':
                     print(f"   {task}: {score:.1f}%")
 
-        if not args.skip_perplexity:
-            print("\n2. Perplexity evaluation...")
-            perplexity_results = evaluator.evaluate_perplexity(config)
-            results[config_name]['perplexity'] = perplexity_results
-            print(f"   WikiText2: {perplexity_results['WikiText2']:.1f}")
-            print(f"   C4: {perplexity_results['C4']:.1f}")
+
 
         if not args.skip_few_shot:
             print("\n3. Few-shot evaluation...")
