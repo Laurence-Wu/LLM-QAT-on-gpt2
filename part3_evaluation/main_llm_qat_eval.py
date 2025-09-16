@@ -153,71 +153,77 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
             model_config = checkpoint.get('model_config', {})
             training_config = checkpoint.get('training_config', {})
 
-        if model_config:
-            # Extract bit widths - handle both old and new format
-            bit_widths = model_config.get('bit_widths', default_bit_widths)
-            quantization_bits = model_config.get('quantization_bits', 8)
+        if not model_config:
+            raise ValueError("No model configuration found! Please provide a valid checkpoint with model_config or specify --config_path")
 
-            # If bit_widths not specified but quantization_bits is, use standard set
-            if bit_widths == default_bit_widths and quantization_bits:
-                print(f"Model trained with quantization_bits={quantization_bits}, using standard bit widths")
-                bit_widths = [4, 8, 16]  # Standard switchable widths
+        # STRICT CONFIG USAGE - Use exactly what's in the config, no defaults
+        print("\n" + "="*50)
+        print("USING STRICT CONFIGURATION FROM CHECKPOINT/JSON")
+        print("="*50)
 
-            # Use training config's max_seq_length as n_positions if available
-            actual_n_positions = 256  # Default
-            if training_config and 'max_seq_length' in training_config:
-                actual_n_positions = training_config['max_seq_length']
-                print(f"Using max_seq_length from training config: {actual_n_positions}")
-            elif 'model_state_dict' in checkpoint and 'wpe.weight' in checkpoint['model_state_dict']:
-                # Get actual n_positions from the weight shape
-                wpe_shape = checkpoint['model_state_dict']['wpe.weight'].shape
-                actual_n_positions = wpe_shape[0]
-                print(f"Detected actual n_positions from weights: {actual_n_positions}")
+        # Extract required values from model_config
+        n_layer = model_config.get('n_layer')
+        n_embd = model_config.get('n_embd')
+        n_head = model_config.get('n_head')
+        quantization_bits = model_config.get('quantization_bits')
 
-            # Use exact configuration from model_config
-            config = GPT2Config(
-                vocab_size=model_config.get('vocab_size', 50257),
-                n_positions=actual_n_positions,
-                n_embd=model_config.get('n_embd', 768),
-                n_layer=model_config.get('n_layer', 6),
-                n_head=model_config.get('n_head', 12),
-                layer_norm_epsilon=model_config.get('layer_norm_epsilon', 1e-5),
-                embd_pdrop=model_config.get('embd_pdrop', 0.1),
-                lora_rank=model_config.get('lora_rank', 16),
-                lora_alpha=model_config.get('lora_alpha', 32),
-                lora_dropout=model_config.get('lora_dropout', 0.1)
-            )
+        # Validate required fields
+        if n_layer is None or n_embd is None or n_head is None:
+            raise ValueError(f"Missing required model config fields. Got: n_layer={n_layer}, n_embd={n_embd}, n_head={n_head}")
 
-            print(f"\nLoaded Model Configuration:")
-            print(f"  - n_layer: {config.n_layer}")
-            print(f"  - n_embd: {config.n_embd}")
-            print(f"  - n_head: {config.n_head}")
-            print(f"  - n_positions: {config.n_positions}")
-            print(f"  - vocab_size: {config.vocab_size}")
-            print(f"  - quantization_bits (training): {quantization_bits}")
-            print(f"  - bit_widths (switchable): {bit_widths}")
+        # Determine bit widths from config or use switchable defaults only if not specified
+        bit_widths = model_config.get('bit_widths')
+        if bit_widths is None:
+            # Only use defaults if bit_widths not explicitly set
+            if quantization_bits:
+                print(f"Model trained with quantization_bits={quantization_bits}, using switchable bit widths [4, 8, 16]")
+                bit_widths = [4, 8, 16]
+            else:
+                raise ValueError("No bit_widths or quantization_bits specified in model config")
 
-            if training_config:
-                print(f"\nTraining Configuration:")
-                print(f"  - batch_size: {training_config.get('batch_size', 'N/A')}")
-                print(f"  - max_seq_length: {training_config.get('max_seq_length', 'N/A')}")
-                print(f"  - learning_rate: {training_config.get('learning_rate', 'N/A')}")
-                print(f"  - num_iterations: {training_config.get('num_iterations', 'N/A')}")
+        # Get n_positions strictly from config or weights
+        actual_n_positions = None
+        if training_config and 'max_seq_length' in training_config:
+            actual_n_positions = training_config['max_seq_length']
+            print(f"Using max_seq_length from training config: {actual_n_positions}")
+        elif 'model_state_dict' in checkpoint and 'wpe.weight' in checkpoint['model_state_dict']:
+            wpe_shape = checkpoint['model_state_dict']['wpe.weight'].shape
+            actual_n_positions = wpe_shape[0]
+            print(f"Detected n_positions from weight shape: {actual_n_positions}")
         else:
-            # Use default configuration
-            bit_widths = default_bit_widths
-            config = GPT2Config(
-                vocab_size=50257,
-                n_positions=256,
-                n_embd=768,
-                n_layer=6,
-                n_head=12,
-                layer_norm_epsilon=1e-5,
-                embd_pdrop=0.1,
-                lora_rank=16,
-                lora_alpha=32,
-                lora_dropout=0.1
-            )
+            # Only use default if absolutely necessary
+            print("WARNING: Could not determine n_positions from config or weights, using 256")
+            actual_n_positions = 256
+
+        # Build config with ONLY values from the loaded configuration
+        config = GPT2Config(
+            vocab_size=model_config.get('vocab_size', 50257),  # GPT-2 standard
+            n_positions=actual_n_positions,
+            n_embd=n_embd,  # From config, no default
+            n_layer=n_layer,  # From config, no default
+            n_head=n_head,  # From config, no default
+            layer_norm_epsilon=model_config.get('layer_norm_epsilon', 1e-5),
+            embd_pdrop=model_config.get('embd_pdrop', 0.1),
+            lora_rank=model_config.get('lora_rank', 16),
+            lora_alpha=model_config.get('lora_alpha', 32),
+            lora_dropout=model_config.get('lora_dropout', 0.1)
+        )
+
+        print(f"\nLoaded Model Configuration:")
+        print(f"  - n_layer: {config.n_layer}")
+        print(f"  - n_embd: {config.n_embd}")
+        print(f"  - n_head: {config.n_head}")
+        print(f"  - n_positions: {config.n_positions}")
+        print(f"  - vocab_size: {config.vocab_size}")
+        print(f"  - quantization_bits (training): {quantization_bits}")
+        print(f"  - bit_widths (switchable): {bit_widths}")
+
+        if training_config:
+            print(f"\nTraining Configuration:")
+            print(f"  - batch_size: {training_config.get('batch_size', 'N/A')}")
+            print(f"  - max_seq_length: {training_config.get('max_seq_length', 'N/A')}")
+            print(f"  - learning_rate: {training_config.get('learning_rate', 'N/A')}")
+            print(f"  - num_iterations: {training_config.get('num_iterations', 'N/A')}")
 
         print(f"Creating model with bit-widths: {bit_widths}")
         # Create model WITHOUT random initialization
@@ -267,30 +273,7 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
         elif not isinstance(checkpoint, dict):
             model = checkpoint
     else:
-        print(f"Creating new model with pre-trained weights")
-        config = GPT2Config(
-            vocab_size=50257,
-            n_positions=256,
-            n_embd=768,
-            n_layer=6,
-            n_head=12,
-            layer_norm_epsilon=1e-5,
-            embd_pdrop=0.1,
-            lora_rank=16,
-            lora_alpha=32,
-            lora_dropout=0.1
-        )
-        # Create model WITHOUT random initialization
-        model = SwitchableQATGPT2(config, bit_widths=default_bit_widths, initialize_weights=False)
-
-        # Load pre-trained GPT-2 weights
-        if use_pretrained:
-            model = load_pretrained_weights_into_qat(model, 'gpt2')
-            print("Using GPT-2 pre-trained weights")
-        else:
-            # Apply random initialization for backward compatibility
-            model.apply(model._init_weights)
-            print("Using random initialization (not recommended for evaluation)")
+        raise ValueError("No model path provided! Please specify --model_path with a trained checkpoint file.")
 
     # Force model to CUDA
     device = torch.device('cuda:0')
