@@ -28,8 +28,8 @@ class ModelConfig:
 class CyclicTrainingConfig:
     """Training configuration for CPT - Step 3 & 5 of Algorithm Test 2."""
     def __init__(self):
-        self.train_split = 'train[:40000]'
-        self.val_split = 'validation[:4000]'
+        self.train_split = 'train[:3000]'
+        self.val_split = 'validation[:100]'
         self.batch_size = 32
         self.max_seq_length = 1024
         self.doc_stride = 512
@@ -42,7 +42,7 @@ class CyclicTrainingConfig:
 
         self.num_cpt_iterations = 1000
         self.warmup_steps = 500
-        self.gradient_accumulation_steps = 1
+        self.gradient_accumulation_steps = 2
 
         self.eval_interval = 250
         self.save_interval = 500

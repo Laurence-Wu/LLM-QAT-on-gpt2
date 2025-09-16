@@ -60,6 +60,8 @@ class PerplexityEvaluator:
         model_max_length = self.model.config.n_positions if hasattr(self.model.config, 'n_positions') else 256
         max_length = min(max_length, model_max_length)
 
+        print(f"Model max position: {model_max_length}, using max_length: {max_length}")
+
         # Smaller stride for better coverage
         stride = min(stride, max_length // 2)
 
@@ -97,14 +99,17 @@ class PerplexityEvaluator:
                 if end_loc - begin_loc < 10:
                     break
 
-                input_ids = encodings.input_ids[:, begin_loc:end_loc].to(self.device)
+                # Extract window and ensure it doesn't exceed model's max positions
+                window_size = min(end_loc - begin_loc, model_max_length)
+                input_ids = encodings.input_ids[:, begin_loc:begin_loc + window_size].to(self.device)
 
                 # Target is the same as input for language modeling
                 target_ids = input_ids.clone()
 
                 with torch.no_grad():
                     try:
-                        # Forward pass
+                        # Forward pass - each window is treated as a new sequence starting from position 0
+                        # This is implicit in how transformers handles position_ids when not provided
                         outputs = self.model(input_ids)
 
                         # Get logits
