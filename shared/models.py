@@ -105,26 +105,28 @@ class QATGPT2Block(nn.Module):
 
 class QATGPT2(nn.Module):
     """GPT-2 with QAT (single precision, fake quantization)."""
-    def __init__(self, config: GPT2Config, quantization_bits):
+    def __init__(self, config: GPT2Config, quantization_bits, initialize_weights=True):
         super().__init__()
         self.config = config
         self.use_gradient_checkpointing = True
-        
+
         self.wte = nn.Embedding(config.vocab_size, config.n_embd)
         self.wpe = nn.Embedding(config.n_positions, config.n_embd)
         self.drop = nn.Dropout(config.embd_pdrop)
-        
+
         self.h = nn.ModuleList([
             QATGPT2Block(config, quantization_bits) for _ in range(config.n_layer)
         ])
 
         self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
-        
+
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        
+
         self.lm_head.weight = self.wte.weight
-        
-        self.apply(self._init_weights) ## handy trick learned from gemini
+
+        # Only apply random init if explicitly requested (for backward compatibility)
+        if initialize_weights:
+            self.apply(self._init_weights)
         
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -432,7 +434,7 @@ class SwitchableQATGPT2Block(nn.Module):
 
 class SwitchableQATGPT2(nn.Module):
     """GPT-2 with switchable precision QAT."""
-    def __init__(self, config: GPT2Config, bit_widths=[4, 8, 16]):
+    def __init__(self, config: GPT2Config, bit_widths=[4, 8, 16], initialize_weights=True):
         super().__init__()
         self.config = config
         self.bit_widths = bit_widths
@@ -452,7 +454,9 @@ class SwitchableQATGPT2(nn.Module):
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.lm_head.weight = self.wte.weight
 
-        self.apply(self._init_weights)
+        # Only apply random init if explicitly requested (for backward compatibility)
+        if initialize_weights:
+            self.apply(self._init_weights)
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):

@@ -7,6 +7,7 @@ import json
 import argparse
 from pathlib import Path
 import torch
+import torch.nn as nn
 import sys
 import os
 import numpy as np
@@ -14,7 +15,7 @@ import numpy as np
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.models import SwitchableQATGPT2
-from transformers import GPT2Config, GPT2Tokenizer
+from transformers import GPT2Config, GPT2Tokenizer, GPT2LMHeadModel
 
 from part3_evaluation.llm_qat_metrics import LLMQATEvaluation
 from part3_evaluation.bit_configurations import BitConfigurations
@@ -22,7 +23,78 @@ from part3_evaluation.generate_tables import ResultTableGenerator
 from part3_evaluation.baseline_comparison import BaselineComparison
 
 
-def load_switchable_model(model_path: str = None):
+def load_pretrained_weights_into_qat(qat_model, model_name='gpt2'):
+    """Load pre-trained GPT-2 weights into QAT model"""
+    print(f"Loading pre-trained weights from {model_name}...")
+
+    # Load pre-trained GPT-2
+    pretrained_model = GPT2LMHeadModel.from_pretrained(model_name)
+    pretrained_state = pretrained_model.state_dict()
+
+    # Copy embeddings
+    qat_model.wte.weight.data = pretrained_state['transformer.wte.weight']
+
+    # Handle position embeddings size mismatch
+    pretrained_wpe = pretrained_state['transformer.wpe.weight']
+    if pretrained_wpe.shape[0] != qat_model.wpe.weight.shape[0]:
+        min_pos = min(pretrained_wpe.shape[0], qat_model.wpe.weight.shape[0])
+        qat_model.wpe.weight.data[:min_pos] = pretrained_wpe[:min_pos]
+        print(f"Adjusted position embeddings from {pretrained_wpe.shape[0]} to {qat_model.wpe.weight.shape[0]}")
+    else:
+        qat_model.wpe.weight.data = pretrained_wpe
+
+    # Copy transformer blocks
+    for i in range(len(qat_model.h)):
+        # Layer norms
+        qat_model.h[i].ln_1.weight.data = pretrained_state[f'transformer.h.{i}.ln_1.weight']
+        qat_model.h[i].ln_1.bias.data = pretrained_state[f'transformer.h.{i}.ln_1.bias']
+        qat_model.h[i].ln_2.weight.data = pretrained_state[f'transformer.h.{i}.ln_2.weight']
+        qat_model.h[i].ln_2.bias.data = pretrained_state[f'transformer.h.{i}.ln_2.bias']
+
+        # Attention weights (transpose from conv1d to linear)
+        qat_model.h[i].attn.c_attn.linear.weight.data = pretrained_state[f'transformer.h.{i}.attn.c_attn.weight'].t()
+        qat_model.h[i].attn.c_attn.linear.bias.data = pretrained_state[f'transformer.h.{i}.attn.c_attn.bias']
+        qat_model.h[i].attn.c_proj.linear.weight.data = pretrained_state[f'transformer.h.{i}.attn.c_proj.weight'].t()
+        qat_model.h[i].attn.c_proj.linear.bias.data = pretrained_state[f'transformer.h.{i}.attn.c_proj.bias']
+
+        # MLP weights (transpose from conv1d to linear)
+        qat_model.h[i].mlp.c_fc.linear.weight.data = pretrained_state[f'transformer.h.{i}.mlp.c_fc.weight'].t()
+        qat_model.h[i].mlp.c_fc.linear.bias.data = pretrained_state[f'transformer.h.{i}.mlp.c_fc.bias']
+        qat_model.h[i].mlp.c_proj.linear.weight.data = pretrained_state[f'transformer.h.{i}.mlp.c_proj.weight'].t()
+        qat_model.h[i].mlp.c_proj.linear.bias.data = pretrained_state[f'transformer.h.{i}.mlp.c_proj.bias']
+
+        # Handle attention bias if exists
+        if f'transformer.h.{i}.attn.bias' in pretrained_state:
+            pretrained_bias = pretrained_state[f'transformer.h.{i}.attn.bias']
+            model_bias_shape = qat_model.h[i].attn.bias.shape
+            if pretrained_bias.shape != model_bias_shape:
+                min_size = min(pretrained_bias.shape[0], model_bias_shape[0])
+                qat_model.h[i].attn.bias.data[:min_size, :min_size] = pretrained_bias[:min_size, :min_size]
+            else:
+                qat_model.h[i].attn.bias.data = pretrained_bias
+
+    # Final layer norm
+    qat_model.ln_f.weight.data = pretrained_state['transformer.ln_f.weight']
+    qat_model.ln_f.bias.data = pretrained_state['transformer.ln_f.bias']
+
+    # LM head shares weight with embeddings
+    qat_model.lm_head.weight = qat_model.wte.weight
+
+    # Initialize LoRA weights to small/zero values
+    with torch.no_grad():
+        for module in qat_model.modules():
+            if hasattr(module, 'lora_adapters'):
+                for lora in module.lora_adapters.values():
+                    if hasattr(lora, 'lora_B'):
+                        nn.init.zeros_(lora.lora_B)
+                    if hasattr(lora, 'lora_A'):
+                        nn.init.normal_(lora.lora_A, std=0.01)
+
+    print("Pre-trained weights loaded successfully!")
+    return qat_model
+
+
+def load_switchable_model(model_path: str = None, use_pretrained: bool = True):
     """Load switchable precision model"""
 
     # Default bit widths - will be overridden if loading from checkpoint
@@ -76,7 +148,12 @@ def load_switchable_model(model_path: str = None):
             )
 
         print(f"Creating model with bit-widths: {bit_widths}")
-        model = SwitchableQATGPT2(config, bit_widths=bit_widths)
+        # Create model WITHOUT random initialization
+        model = SwitchableQATGPT2(config, bit_widths=bit_widths, initialize_weights=False)
+
+        # Load pre-trained weights first if requested
+        if use_pretrained:
+            model = load_pretrained_weights_into_qat(model, 'gpt2')
 
         if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
             # Load state dict with size mismatch handling for attention bias
@@ -114,11 +191,11 @@ def load_switchable_model(model_path: str = None):
 
             # Load the modified state dict
             model.load_state_dict(state_dict, strict=False)
-            print("Model loaded successfully with resized biases")
-        else:
+            print("Model checkpoint loaded successfully")
+        elif not isinstance(checkpoint, dict):
             model = checkpoint
     else:
-        print("Using randomly initialized model with default bit-widths: [4, 8, 16]")
+        print(f"Creating new model with pre-trained weights")
         config = GPT2Config(
             vocab_size=50257,
             n_positions=256,
@@ -131,7 +208,17 @@ def load_switchable_model(model_path: str = None):
             lora_alpha=32,
             lora_dropout=0.1
         )
-        model = SwitchableQATGPT2(config, bit_widths=default_bit_widths)
+        # Create model WITHOUT random initialization
+        model = SwitchableQATGPT2(config, bit_widths=default_bit_widths, initialize_weights=False)
+
+        # Load pre-trained GPT-2 weights
+        if use_pretrained:
+            model = load_pretrained_weights_into_qat(model, 'gpt2')
+            print("Using GPT-2 pre-trained weights")
+        else:
+            # Apply random initialization for backward compatibility
+            model.apply(model._init_weights)
+            print("Using random initialization (not recommended for evaluation)")
 
     # Move model to CUDA
     model = model.to('cuda')
@@ -163,9 +250,16 @@ def main():
                        help='Skip perplexity evaluation')
     parser.add_argument('--compare_baselines', action='store_true',
                        help='Compare with baseline methods')
+    parser.add_argument('--use_pretrained', action='store_true', default=True,
+                       help='Use pre-trained GPT-2 weights (strongly recommended)')
+    parser.add_argument('--use_random_init', action='store_true',
+                       help='Use random initialization instead of pre-trained (for testing only)')
     args = parser.parse_args()
 
-    model = load_switchable_model(args.model_path)
+    # Determine whether to use pre-trained weights
+    use_pretrained = not args.use_random_init
+
+    model = load_switchable_model(args.model_path, use_pretrained=use_pretrained)
     tokenizer = load_tokenizer()
 
     evaluator = LLMQATEvaluation(model, tokenizer)
