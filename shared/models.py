@@ -26,8 +26,14 @@ class QATGPT2Attention(nn.Module):
         self.c_proj = QATLinearWithLoRA(config.n_embd, config.n_embd, bits=bits,
                                          lora_rank=config.lora_rank, lora_alpha=config.lora_alpha, lora_dropout=config.lora_dropout)
 
-        # Use config-specified KV cache bits, default to weight bits if not specified
-        kv_bits = getattr(config, 'kv_cache_bits', bits)
+        # Use config-specified KV cache bits, must be present in config
+        # If not present, it should raise an error to ensure proper configuration
+        try:
+            kv_bits = config.kv_cache_bits
+        except AttributeError:
+            # Fall back to using the same bits as weights for compatibility
+            print(f"Warning: config.kv_cache_bits not found, using weight bits ({bits}) for KV cache")
+            kv_bits = bits
         self.kv_quantizer = LearnableFakeQuantize(num_bits=kv_bits, symmetric=False)
         
         self.register_buffer("bias", torch.tril(torch.ones(config.n_positions, config.n_positions)))
@@ -334,7 +340,14 @@ class SwitchableQATGPT2Attention(nn.Module):
             lora_dropout=lora_dropout
         )
 
-        self.kv_quantizer = LearnableFakeQuantize(num_bits=8, symmetric=False)
+        # Use default bit width for KV cache, matching the median bit width
+        default_kv_bits = sorted(bit_widths)[len(bit_widths)//2]  # Use median bit width as default
+        try:
+            kv_bits = config.kv_cache_bits
+        except AttributeError:
+            print(f"Warning: config.kv_cache_bits not found, using default ({default_kv_bits}) for KV cache")
+            kv_bits = default_kv_bits
+        self.kv_quantizer = LearnableFakeQuantize(num_bits=kv_bits, symmetric=False)
         self.register_buffer("bias", torch.tril(torch.ones(config.n_positions, config.n_positions)))
 
     def set_precision(self, bits):
@@ -437,7 +450,13 @@ class SwitchableQATGPT2(nn.Module):
         super().__init__()
         self.config = config
         self.bit_widths = bit_widths
-        self.current_bits = 8  # Default
+        # Initialize with a sensible default from available bit widths
+        if 8 in bit_widths:
+            self.current_bits = 8  # Prefer 8-bit as standard default
+        else:
+            # Use median bit width if 8 is not available
+            self.current_bits = sorted(bit_widths)[len(bit_widths)//2]
+        print(f"Initialized SwitchableQATGPT2 with {self.current_bits}-bit precision")
         self.n_layer = config.n_layer
         self.use_gradient_checkpointing = True
 
