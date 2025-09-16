@@ -25,8 +25,9 @@ class QATGPT2Attention(nn.Module):
                                          lora_rank=config.lora_rank, lora_alpha=config.lora_alpha, lora_dropout=config.lora_dropout)
         self.c_proj = QATLinearWithLoRA(config.n_embd, config.n_embd, bits=bits,
                                          lora_rank=config.lora_rank, lora_alpha=config.lora_alpha, lora_dropout=config.lora_dropout)
-        
-        self.kv_quantizer = LearnableFakeQuantize(num_bits=8, symmetric=False)
+
+        # Use same bit width for KV cache as for weights/activations
+        self.kv_quantizer = LearnableFakeQuantize(num_bits=bits, symmetric=False)
         
         self.register_buffer("bias", torch.tril(torch.ones(config.n_positions, config.n_positions)))
         
