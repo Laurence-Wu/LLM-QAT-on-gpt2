@@ -85,23 +85,27 @@ class QATLinearWithLoRA(nn.Module):
         """Set the precision (bit-width) for quantization."""
         # Update weight quantizer
         self.quantize_weight.set_num_bits(weight_bits)
-        if hasattr(self.quantize_weight, 'quant_min'):
+        try:
             if self.quantize_weight.symmetric:
                 self.quantize_weight.quant_min = -(2 ** (weight_bits - 1))
                 self.quantize_weight.quant_max = 2 ** (weight_bits - 1) - 1
             else:
                 self.quantize_weight.quant_min = 0
                 self.quantize_weight.quant_max = 2 ** weight_bits - 1
+        except AttributeError:
+            pass  # quant_min/max attributes don't exist
 
         # Update activation quantizer
         self.quantize_input.set_num_bits(activation_bits)
-        if hasattr(self.quantize_input, 'quant_min'):
+        try:
             if self.quantize_input.symmetric:
                 self.quantize_input.quant_min = -(2 ** (activation_bits - 1))
                 self.quantize_input.quant_max = 2 ** (activation_bits - 1) - 1
             else:
                 self.quantize_input.quant_min = 0
                 self.quantize_input.quant_max = 2 ** activation_bits - 1
+        except AttributeError:
+            pass  # quant_min/max attributes don't exist
 
         # Update LoRA quantizers if they exist
         try:

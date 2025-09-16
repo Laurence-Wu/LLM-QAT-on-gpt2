@@ -83,12 +83,19 @@ def load_pretrained_weights_into_qat(qat_model, model_name='gpt2'):
     # Initialize LoRA weights to small/zero values
     with torch.no_grad():
         for module in qat_model.modules():
-            if hasattr(module, 'lora_adapters'):
-                for lora in module.lora_adapters.values():
-                    if hasattr(lora, 'lora_B'):
+            try:
+                lora_adapters = module.lora_adapters
+                for lora in lora_adapters.values():
+                    try:
                         nn.init.zeros_(lora.lora_B)
-                    if hasattr(lora, 'lora_A'):
+                    except AttributeError:
+                        pass  # lora_B doesn't exist
+                    try:
                         nn.init.normal_(lora.lora_A, std=0.01)
+                    except AttributeError:
+                        pass  # lora_A doesn't exist
+            except AttributeError:
+                pass  # module doesn't have lora_adapters
 
     print("Pre-trained weights loaded successfully!")
     return qat_model
@@ -265,7 +272,7 @@ def main():
     evaluator = LLMQATEvaluation(model, tokenizer)
 
     # Automatically determine configurations based on model's supported bit-widths
-    if hasattr(model, 'bit_widths'):
+    try:
         # Model supports switchable precision
         supported_bit_widths = model.bit_widths
         print(f"Model supports bit-widths: {supported_bit_widths}")
@@ -283,6 +290,9 @@ def main():
             # Use default or auto-detect
             args.configs = [bit_to_config.get(b, f'INT{b}') for b in supported_bit_widths if b in bit_to_config]
             print(f"Auto-detected configurations to evaluate: {args.configs}")
+    except AttributeError:
+        # Model doesn't have bit_widths attribute, use default configurations
+        print("Model doesn't specify supported bit-widths, using requested configurations")
 
     print("="*70)
     print("Running LLM-QAT Paper Evaluation Suite")

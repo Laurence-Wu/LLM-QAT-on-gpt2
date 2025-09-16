@@ -71,21 +71,27 @@ class BitConfigurations:
         weight_bits = config.get('W', 8)
 
         # For switchable models, we set the precision if it's supported
-        if hasattr(model, 'set_global_precision'):
-            # Check if the requested bit-width is supported
-            if hasattr(model, 'bit_widths') and weight_bits in model.bit_widths:
-                model.set_global_precision(weight_bits)
-            else:
-                # Find the closest supported bit-width
-                if hasattr(model, 'bit_widths'):
-                    supported = model.bit_widths
-                    closest = min(supported, key=lambda x: abs(x - weight_bits))
+        try:
+            # Try to set global precision
+            try:
+                # Check if the requested bit-width is supported
+                bit_widths = model.bit_widths
+                if weight_bits in bit_widths:
+                    model.set_global_precision(weight_bits)
+                else:
+                    # Find the closest supported bit-width
+                    closest = min(bit_widths, key=lambda x: abs(x - weight_bits))
                     print(f"Warning: {weight_bits}-bit not supported, using {closest}-bit instead")
                     model.set_global_precision(closest)
-                else:
-                    model.set_global_precision(weight_bits)
-        elif hasattr(model, 'set_precision'):
-            model.set_precision(weight_bits)
+            except AttributeError:
+                # No bit_widths attribute, try to set directly
+                model.set_global_precision(weight_bits)
+        except AttributeError:
+            # set_global_precision doesn't exist, try set_precision
+            try:
+                model.set_precision(weight_bits)
+            except AttributeError:
+                pass  # Model doesn't support precision setting
 
         return model
 
