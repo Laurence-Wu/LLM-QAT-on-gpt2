@@ -19,6 +19,8 @@ class ModelConfig:
 
         # Quantization settings
         self.quantization_bits = 8  # Default for single-precision mode
+        self.activation_bits = 8  # Bits for activation quantization
+        self.kv_cache_bits = 8  # Bits for KV cache quantization
         self.use_gradient_checkpointing = True
 
         # LoRA settings (used when not in switchable mode)
@@ -31,6 +33,9 @@ class ModelConfig:
         # Corrected: Lower precision should use lower rank for efficiency
         self.lora_rank_per_bit = {4: 8, 8: 16, 16: 32}  # Lower bits = lower rank
         self.lora_alpha_per_bit = {4: 16, 8: 32, 16: 64}  # Proportional alpha
+        # Activation and KV cache bits per weight precision
+        self.activation_bits_per_bit = {4: 4, 8: 8, 16: 16}  # Match weight precision
+        self.kv_cache_bits_per_bit = {4: 4, 8: 8, 16: 16}  # Match weight precision
         self.switch_strategy = 'cyclic'  # Options: 'cyclic', 'random', 'curriculum'
         self.switch_interval = 10  # Switch every N iterations (for cyclic)
         self.curriculum_schedule = [16, 16, 8, 8, 4]  # For curriculum strategy

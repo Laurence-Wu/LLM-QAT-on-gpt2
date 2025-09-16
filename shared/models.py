@@ -26,8 +26,9 @@ class QATGPT2Attention(nn.Module):
         self.c_proj = QATLinearWithLoRA(config.n_embd, config.n_embd, bits=bits,
                                          lora_rank=config.lora_rank, lora_alpha=config.lora_alpha, lora_dropout=config.lora_dropout)
 
-        # Use same bit width for KV cache as for weights/activations
-        self.kv_quantizer = LearnableFakeQuantize(num_bits=bits, symmetric=False)
+        # Use config-specified KV cache bits, default to weight bits if not specified
+        kv_bits = getattr(config, 'kv_cache_bits', bits)
+        self.kv_quantizer = LearnableFakeQuantize(num_bits=kv_bits, symmetric=False)
         
         self.register_buffer("bias", torch.tril(torch.ones(config.n_positions, config.n_positions)))
         
@@ -55,7 +56,7 @@ class QATGPT2Attention(nn.Module):
         attn_output = self.c_proj(attn_output)
         return attn_output
     
-    def set_precision(self, weight_bits, activation_bits, kv_bits=8):
+    def set_precision(self, weight_bits, activation_bits, kv_bits):
         self.c_attn.set_precision(weight_bits, activation_bits)
         self.c_proj.set_precision(weight_bits, activation_bits)
         self.kv_quantizer.set_num_bits(kv_bits)
@@ -100,7 +101,7 @@ class QATGPT2Block(nn.Module):
         
         return hidden_states
     
-    def set_precision(self, attn_bits, mlp_bits, activation_bits=8, kv_bits=8):
+    def set_precision(self, attn_bits, mlp_bits, activation_bits, kv_bits):
         self.attn.set_precision(attn_bits, activation_bits, kv_bits)
         self.mlp.set_precision(mlp_bits, activation_bits)
 
