@@ -101,8 +101,8 @@ def load_pretrained_weights_into_qat(qat_model, model_name='gpt2'):
     return qat_model
 
 
-def load_switchable_model(model_path: str = None, use_pretrained: bool = True):
-    """Load switchable precision model"""
+def load_switchable_model(model_path: str = None, config_path: str = None, use_pretrained: bool = True):
+    """Load switchable precision model with proper configuration"""
 
     # Force CUDA availability check
     if not torch.cuda.is_available():
@@ -116,25 +116,68 @@ def load_switchable_model(model_path: str = None, use_pretrained: bool = True):
 
     if model_path and os.path.exists(model_path):
         print(f"Loading model from {model_path}")
+
+        # Determine JSON config path
+        json_path = config_path  # Use provided config path if available
+
+        if not json_path and model_path.endswith('.pth'):
+            # Try to auto-detect matching JSON file
+            timestamp = model_path.split('_')[-1].replace('.pth', '')
+            possible_json = f"qat_training_stats_{timestamp}.json"
+            if os.path.exists(possible_json):
+                json_path = possible_json
+                print(f"Auto-detected matching JSON config: {json_path}")
+
+        if json_path and os.path.exists(json_path):
+            print(f"Using config from: {json_path}")
+
+        # Load checkpoint
         checkpoint = torch.load(model_path, map_location='cuda')
 
-        # Extract model configuration from checkpoint if available
-        if isinstance(checkpoint, dict) and 'model_config' in checkpoint:
-            model_config = checkpoint['model_config']
-            bit_widths = model_config.get('bit_widths', default_bit_widths)
+        # Try to get config from JSON file first (more complete), then fall back to checkpoint
+        model_config = None
+        training_config = None
 
-            # Check actual n_positions from state_dict if available
-            actual_n_positions = model_config.get('n_positions', 256)
-            if 'model_state_dict' in checkpoint and 'wpe.weight' in checkpoint['model_state_dict']:
+        if json_path:
+            try:
+                with open(json_path, 'r') as f:
+                    json_data = json.load(f)
+                    model_config = json_data.get('model_config', {})
+                    training_config = json_data.get('training_config', {})
+                    print(f"Loaded configuration from JSON file")
+            except Exception as e:
+                print(f"Warning: Could not load JSON config: {e}")
+
+        # Fall back to checkpoint config if JSON not available
+        if not model_config and isinstance(checkpoint, dict):
+            model_config = checkpoint.get('model_config', {})
+            training_config = checkpoint.get('training_config', {})
+
+        if model_config:
+            # Extract bit widths - handle both old and new format
+            bit_widths = model_config.get('bit_widths', default_bit_widths)
+            quantization_bits = model_config.get('quantization_bits', 8)
+
+            # If bit_widths not specified but quantization_bits is, use standard set
+            if bit_widths == default_bit_widths and quantization_bits:
+                print(f"Model trained with quantization_bits={quantization_bits}, using standard bit widths")
+                bit_widths = [4, 8, 16]  # Standard switchable widths
+
+            # Use training config's max_seq_length as n_positions if available
+            actual_n_positions = 256  # Default
+            if training_config and 'max_seq_length' in training_config:
+                actual_n_positions = training_config['max_seq_length']
+                print(f"Using max_seq_length from training config: {actual_n_positions}")
+            elif 'model_state_dict' in checkpoint and 'wpe.weight' in checkpoint['model_state_dict']:
                 # Get actual n_positions from the weight shape
                 wpe_shape = checkpoint['model_state_dict']['wpe.weight'].shape
                 actual_n_positions = wpe_shape[0]
                 print(f"Detected actual n_positions from weights: {actual_n_positions}")
 
-            # Use exact configuration from checkpoint
+            # Use exact configuration from model_config
             config = GPT2Config(
                 vocab_size=model_config.get('vocab_size', 50257),
-                n_positions=actual_n_positions,  # Use detected n_positions
+                n_positions=actual_n_positions,
                 n_embd=model_config.get('n_embd', 768),
                 n_layer=model_config.get('n_layer', 6),
                 n_head=model_config.get('n_head', 12),
@@ -144,7 +187,22 @@ def load_switchable_model(model_path: str = None, use_pretrained: bool = True):
                 lora_alpha=model_config.get('lora_alpha', 32),
                 lora_dropout=model_config.get('lora_dropout', 0.1)
             )
-            print(f"Model configuration: n_positions={config.n_positions}, n_layer={config.n_layer}, n_embd={config.n_embd}")
+
+            print(f"\nLoaded Model Configuration:")
+            print(f"  - n_layer: {config.n_layer}")
+            print(f"  - n_embd: {config.n_embd}")
+            print(f"  - n_head: {config.n_head}")
+            print(f"  - n_positions: {config.n_positions}")
+            print(f"  - vocab_size: {config.vocab_size}")
+            print(f"  - quantization_bits (training): {quantization_bits}")
+            print(f"  - bit_widths (switchable): {bit_widths}")
+
+            if training_config:
+                print(f"\nTraining Configuration:")
+                print(f"  - batch_size: {training_config.get('batch_size', 'N/A')}")
+                print(f"  - max_seq_length: {training_config.get('max_seq_length', 'N/A')}")
+                print(f"  - learning_rate: {training_config.get('learning_rate', 'N/A')}")
+                print(f"  - num_iterations: {training_config.get('num_iterations', 'N/A')}")
         else:
             # Use default configuration
             bit_widths = default_bit_widths
@@ -253,7 +311,9 @@ def load_tokenizer():
 def main():
     parser = argparse.ArgumentParser(description='LLM-QAT Paper Evaluation Suite')
     parser.add_argument('--model_path', type=str, default=None,
-                       help='Path to trained model checkpoint')
+                       help='Path to trained model checkpoint (.pth file)')
+    parser.add_argument('--config_path', type=str, default=None,
+                       help='Path to training config JSON file (optional, will auto-detect if not provided)')
     parser.add_argument('--output_dir', type=str, default='part3_evaluation/results',
                        help='Directory to save results')
     parser.add_argument('--configs', nargs='+',
@@ -284,7 +344,7 @@ def main():
     # Determine whether to use pre-trained weights
     use_pretrained = not args.use_random_init
 
-    model = load_switchable_model(args.model_path, use_pretrained=use_pretrained)
+    model = load_switchable_model(args.model_path, config_path=args.config_path, use_pretrained=use_pretrained)
     tokenizer = load_tokenizer()
 
     evaluator = LLMQATEvaluation(model, tokenizer)
