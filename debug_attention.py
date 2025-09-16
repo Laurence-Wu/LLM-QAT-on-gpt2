@@ -26,8 +26,8 @@ def debug_attention_forward():
     config = HFConfig()
     config.n_positions = 256
     config.n_layer = 12
-    config.lora_rank = 0
-    config.lora_alpha = 0
+    config.lora_rank = 8  # Use non-zero rank to avoid division by zero
+    config.lora_alpha = 16  # Standard alpha value
     config.lora_dropout = 0.0
 
     # Create QAT model
