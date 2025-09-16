@@ -103,13 +103,24 @@ class PerplexityEvaluator:
                 window_size = min(end_loc - begin_loc, model_max_length)
                 input_ids = encodings.input_ids[:, begin_loc:begin_loc + window_size].to(self.device)
 
+                # Critical: Ensure input size doesn't exceed model's position embeddings
+                if input_ids.size(1) > model_max_length:
+                    print(f"WARNING: Truncating input from {input_ids.size(1)} to {model_max_length}")
+                    input_ids = input_ids[:, :model_max_length]
+
+                # Check for invalid token IDs (exceeding vocabulary size)
+                vocab_size = self.model.config.vocab_size if hasattr(self.model.config, 'vocab_size') else 50257
+                if input_ids.max() >= vocab_size:
+                    print(f"ERROR: Token ID {input_ids.max().item()} exceeds vocab size {vocab_size}")
+                    # Clamp token IDs to valid range
+                    input_ids = torch.clamp(input_ids, 0, vocab_size - 1)
+
                 # Target is the same as input for language modeling
                 target_ids = input_ids.clone()
 
                 with torch.no_grad():
                     try:
-                        # Forward pass - each window is treated as a new sequence starting from position 0
-                        # This is implicit in how transformers handles position_ids when not provided
+                        # Forward pass - model handles position_ids internally
                         outputs = self.model(input_ids)
 
                         # Get logits
