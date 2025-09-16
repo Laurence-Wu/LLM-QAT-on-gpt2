@@ -298,7 +298,25 @@ def test_comprehensive_fix():
         with torch.no_grad():
             outputs = model(input_ids=inputs['input_ids'], labels=inputs['input_ids'])
 
-            if hasattr(outputs, 'loss'):
+            # Handle dictionary output from the model
+            if isinstance(outputs, dict) and 'loss' in outputs:
+                loss = outputs['loss']
+                if loss is not None:
+                    loss_value = loss.item()
+                    perplexity = math.exp(loss_value) if loss_value < 20 else float('inf')
+
+                    print(f"   Loss: {loss_value:.4f}")
+                    print(f"   Perplexity: {perplexity:.1f}")
+
+                    if perplexity < 100:
+                        print("   ✅ Model producing reasonable outputs!")
+                    elif perplexity < 1000:
+                        print("   ⚠️ Model perplexity higher than expected")
+                    else:
+                        print("   ❌ Model perplexity too high")
+                else:
+                    print("   ❌ Loss is None in model output")
+            elif hasattr(outputs, 'loss'):
                 loss = outputs.loss.item()
                 perplexity = math.exp(loss) if loss < 20 else float('inf')
 
@@ -313,6 +331,9 @@ def test_comprehensive_fix():
                     print("   ❌ Model perplexity too high")
             else:
                 print("   ❌ No loss in model output")
+                print(f"   Output type: {type(outputs)}")
+                if isinstance(outputs, dict):
+                    print(f"   Output keys: {outputs.keys()}")
 
         return True
 
