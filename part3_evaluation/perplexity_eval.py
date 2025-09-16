@@ -76,7 +76,7 @@ class PerplexityEvaluator:
         for begin_loc in tqdm(range(0, seq_len, stride),
                               desc=f"Calculating perplexity on {dataset_name}",
                               disable=False):
-            if iterations >= 100:  # Limit to 100 iterations
+            if iterations >= 1000:  # Limit to 1000 iterations
                 break
 
             end_loc = min(begin_loc + max_length, seq_len)
