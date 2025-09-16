@@ -104,6 +104,13 @@ def load_pretrained_weights_into_qat(qat_model, model_name='gpt2'):
 def load_switchable_model(model_path: str = None, use_pretrained: bool = True):
     """Load switchable precision model"""
 
+    # Force CUDA availability check
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is not available. This evaluation requires CUDA.")
+
+    print(f"CUDA device: {torch.cuda.get_device_name(0)}")
+    print(f"CUDA memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+
     # Default bit widths - will be overridden if loading from checkpoint
     default_bit_widths = [4, 8, 16]
 
@@ -227,9 +234,12 @@ def load_switchable_model(model_path: str = None, use_pretrained: bool = True):
             model.apply(model._init_weights)
             print("Using random initialization (not recommended for evaluation)")
 
-    # Move model to CUDA
-    model = model.to('cuda')
-    print(f"Model moved to cuda")
+    # Force model to CUDA
+    device = torch.device('cuda:0')
+    model = model.to(device)
+    model.eval()  # Set to evaluation mode
+    print(f"Model moved to {device}")
+    print(f"Model device check: {next(model.parameters()).device}")
     return model
 
 
@@ -329,57 +339,45 @@ def main():
 
         if not args.skip_zero_shot:
             print("\n1. Zero-shot common sense evaluation...")
-            try:
-                zero_shot_results = evaluator.evaluate_zero_shot_common_sense(config)
-                results[config_name]['zero_shot'] = zero_shot_results
-                print(f"   Average score: {zero_shot_results['Average']:.1f}%")
+            zero_shot_results = evaluator.evaluate_zero_shot_common_sense(config)
+            results[config_name]['zero_shot'] = zero_shot_results
+            print(f"   Average score: {zero_shot_results['Average']:.1f}%")
 
-                # Print only the tasks that were actually evaluated
-                for task, score in zero_shot_results.items():
-                    if task != 'Average':
-                        print(f"   {task}: {score:.1f}%")
-            except Exception as e:
-                print(f"   Error in zero-shot evaluation: {e}")
-                results[config_name]['zero_shot'] = {}
+            # Print only the tasks that were actually evaluated
+            for task, score in zero_shot_results.items():
+                if task != 'Average':
+                    print(f"   {task}: {score:.1f}%")
 
         if not args.skip_perplexity:
             print("\n2. Perplexity evaluation...")
-            try:
-                perplexity_results = evaluator.evaluate_perplexity(config)
-                results[config_name]['perplexity'] = perplexity_results
-                print(f"   WikiText2: {perplexity_results['WikiText2']:.1f}")
-                print(f"   C4: {perplexity_results['C4']:.1f}")
-            except Exception as e:
-                print(f"   Error in perplexity evaluation: {e}")
-                results[config_name]['perplexity'] = {}
+            perplexity_results = evaluator.evaluate_perplexity(config)
+            results[config_name]['perplexity'] = perplexity_results
+            print(f"   WikiText2: {perplexity_results['WikiText2']:.1f}")
+            print(f"   C4: {perplexity_results['C4']:.1f}")
 
         if not args.skip_few_shot:
             print("\n3. Few-shot evaluation...")
-            try:
-                few_shot_results = evaluator.evaluate_few_shot(config)
-                results[config_name]['few_shot'] = few_shot_results
+            few_shot_results = evaluator.evaluate_few_shot(config)
+            results[config_name]['few_shot'] = few_shot_results
 
-                if 'MMLU' in few_shot_results and isinstance(few_shot_results['MMLU'], dict):
-                    mmlu = few_shot_results['MMLU']
-                    print(f"   MMLU:")
-                    for category in ['Humanities', 'STEM', 'Social Sciences', 'Other']:
-                        if category in mmlu:
-                            score = mmlu[category]
-                            if isinstance(score, (int, float)) and not np.isnan(score):
-                                print(f"     {category}: {score:.1f}%")
-                            else:
-                                print(f"     {category}: 0.0%")
-                    avg_score = mmlu.get('Average', 0)
-                    if isinstance(avg_score, (int, float)) and not np.isnan(avg_score):
-                        print(f"     Average: {avg_score:.1f}%")
-                    else:
-                        print(f"     Average: 0.0%")
+            if 'MMLU' in few_shot_results and isinstance(few_shot_results['MMLU'], dict):
+                mmlu = few_shot_results['MMLU']
+                print(f"   MMLU:")
+                for category in ['Humanities', 'STEM', 'Social Sciences', 'Other']:
+                    if category in mmlu:
+                        score = mmlu[category]
+                        if isinstance(score, (int, float)) and not np.isnan(score):
+                            print(f"     {category}: {score:.1f}%")
+                        else:
+                            print(f"     {category}: 0.0%")
+                avg_score = mmlu.get('Average', 0)
+                if isinstance(avg_score, (int, float)) and not np.isnan(avg_score):
+                    print(f"     Average: {avg_score:.1f}%")
+                else:
+                    print(f"     Average: 0.0%")
 
-                if 'TriviaQA' in few_shot_results:
-                    print(f"   TriviaQA: {few_shot_results['TriviaQA']:.1f}%")
-            except Exception as e:
-                print(f"   Error in few-shot evaluation: {e}")
-                results[config_name]['few_shot'] = {}
+            if 'TriviaQA' in few_shot_results:
+                print(f"   TriviaQA: {few_shot_results['TriviaQA']:.1f}%")
 
     print("\n" + "="*70)
     print("Generating result tables...")

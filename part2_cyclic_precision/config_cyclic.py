@@ -17,7 +17,7 @@ class ModelConfig:
 
         self.use_pretrained = True
         self.use_gradient_checkpointing = False
-        self.default_bit_width = 8
+        self.default_bit_width = 32
 
         # LoRA settings
         self.lora_rank = 8
