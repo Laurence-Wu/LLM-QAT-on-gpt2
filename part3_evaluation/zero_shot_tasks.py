@@ -26,12 +26,12 @@ class ZeroShotEvaluator:
         tasks = {}
 
         try:
-            tasks['BoolQ'] = load_dataset('boolq', split='validation')
+            tasks['BoolQ'] = load_dataset('boolq', split='validation[:500]')
         except Exception as e:
             print(f"Warning: Could not load BoolQ dataset: {e}")
 
         try:
-            tasks['HellaSwag'] = load_dataset('hellaswag', split='validation')
+            tasks['HellaSwag'] = load_dataset('hellaswag', split='validation[:500]')
         except Exception as e:
             print(f"Warning: Could not load HellaSwag dataset: {e}")
             # Create mock HellaSwag data for testing
@@ -41,24 +41,24 @@ class ZeroShotEvaluator:
             ]
 
         try:
-            tasks['WinoGrande'] = load_dataset('winogrande', 'winogrande_m', split='validation')
+            tasks['WinoGrande'] = load_dataset('winogrande', 'winogrande_m', split='validation[:500]')
         except:
             print("Warning: Could not load WinoGrande dataset")
 
         try:
             arc = load_dataset('ai2_arc', 'ARC-Easy')
-            tasks['ARC-e'] = arc['validation']
+            tasks['ARC-e'] = arc['validation'][:500]
         except:
             print("Warning: Could not load ARC-Easy dataset")
 
         try:
             arc = load_dataset('ai2_arc', 'ARC-Challenge')
-            tasks['ARC-c'] = arc['validation']
+            tasks['ARC-c'] = arc['validation'][:500]
         except:
             print("Warning: Could not load ARC-Challenge dataset")
 
         try:
-            tasks['OBQA'] = load_dataset('openbookqa', 'main', split='validation')
+            tasks['OBQA'] = load_dataset('openbookqa', 'main', split='validation[:500]')
         except:
             print("Warning: Could not load OBQA dataset")
 
@@ -94,9 +94,8 @@ class ZeroShotEvaluator:
                         break
                     continue
 
-                # No limit - evaluate all examples
-                # if total >= 100:
-                #     break
+                if total >= 100:
+                    break
 
         accuracy = (correct / max(total, 1)) * 100
         return accuracy

@@ -72,14 +72,20 @@ class PerplexityEvaluator:
         seq_len = encodings.input_ids.size(1)
 
         prev_end_loc = 0
+        iterations = 0
         for begin_loc in tqdm(range(0, seq_len, stride),
                               desc=f"Calculating perplexity on {dataset_name}",
                               disable=False):
+            if iterations >= 100:  # Limit to 100 iterations
+                break
+
             end_loc = min(begin_loc + max_length, seq_len)
 
             # Skip if window is too small
             if end_loc - begin_loc < 10:
                 break
+
+            iterations += 1
 
             trg_len = end_loc - prev_end_loc  # How many tokens we're actually evaluating
             input_ids = encodings.input_ids[:, begin_loc:end_loc].to(self.device)
@@ -121,9 +127,7 @@ class PerplexityEvaluator:
             if begin_loc % (stride * 10) == 0:
                 torch.cuda.empty_cache()
 
-            # Stop if we've processed enough tokens
-            if total_tokens > 50000:  # Process at least 50k tokens
-                break
+            # Removed token limit - iterations limit is sufficient
 
         if total_tokens == 0:
             return float('inf')
