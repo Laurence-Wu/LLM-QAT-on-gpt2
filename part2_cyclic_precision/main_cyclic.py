@@ -43,11 +43,11 @@ def initialize_model(model_config, device):
         n_head=model_config.n_head,
         layer_norm_epsilon=model_config.layer_norm_epsilon,
         embd_pdrop=model_config.embd_pdrop,
-        quantization_bits=model_config.default_bit_width
+        
     )
 
     # Initialize model
-    model = QATGPT2(gpt2_config)
+    model = QATGPT2(gpt2_config,quantization_bits=model_config.default_bit_width)
 
     # Load pretrained weights if requested
     if model_config.use_pretrained:

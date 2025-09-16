@@ -9,11 +9,18 @@ class LLMQATEvaluation:
     """Evaluation suite following LLM-QAT paper metrics"""
 
     def __init__(self, model, tokenizer, model_size='GPT2', device='cuda'):
-        self.model = model
+        # Force CUDA
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA is not available. This evaluation requires CUDA.")
+
+        self.device = torch.device('cuda:0')
+        self.model = model.to(self.device)
         self.tokenizer = tokenizer
         self.model_size = model_size
-        self.device = device
-        self.model = self.model.to(self.device)
+
+        # Verify model is on CUDA
+        if not next(self.model.parameters()).is_cuda:
+            raise RuntimeError("Model failed to move to CUDA")
 
         self.model_params = self._count_parameters()
 
@@ -137,36 +144,24 @@ class LLMQATEvaluation:
             print(f"Model size: {results['model_size_gb']} GB")
 
             print("\n1. Zero-shot common sense evaluation...")
-            try:
-                zero_shot_results = self.evaluate_zero_shot_common_sense(config)
-                results['zero_shot'] = zero_shot_results
-                print(f"   Average score: {zero_shot_results['Average']:.1f}%")
-            except Exception as e:
-                print(f"   Error in zero-shot evaluation: {e}")
-                results['zero_shot'] = {}
+            zero_shot_results = self.evaluate_zero_shot_common_sense(config)
+            results['zero_shot'] = zero_shot_results
+            print(f"   Average score: {zero_shot_results['Average']:.1f}%")
 
             print("\n2. Perplexity evaluation...")
-            try:
-                perplexity_results = self.evaluate_perplexity(config)
-                results['perplexity'] = perplexity_results
-                print(f"   WikiText2: {perplexity_results['WikiText2']:.1f}")
-                print(f"   C4: {perplexity_results['C4']:.1f}")
-            except Exception as e:
-                print(f"   Error in perplexity evaluation: {e}")
-                results['perplexity'] = {}
+            perplexity_results = self.evaluate_perplexity(config)
+            results['perplexity'] = perplexity_results
+            print(f"   WikiText2: {perplexity_results['WikiText2']:.1f}")
+            print(f"   C4: {perplexity_results['C4']:.1f}")
 
             if not skip_few_shot:
                 print("\n3. Few-shot evaluation...")
-                try:
-                    few_shot_results = self.evaluate_few_shot(config)
-                    results['few_shot'] = few_shot_results
-                    if 'MMLU' in few_shot_results:
-                        print(f"   MMLU Average: {few_shot_results['MMLU'].get('Average', 0):.1f}%")
-                    if 'TriviaQA' in few_shot_results:
-                        print(f"   TriviaQA: {few_shot_results['TriviaQA']:.1f}%")
-                except Exception as e:
-                    print(f"   Error in few-shot evaluation: {e}")
-                    results['few_shot'] = {}
+                few_shot_results = self.evaluate_few_shot(config)
+                results['few_shot'] = few_shot_results
+                if 'MMLU' in few_shot_results:
+                    print(f"   MMLU Average: {few_shot_results['MMLU'].get('Average', 0):.1f}%")
+                if 'TriviaQA' in few_shot_results:
+                    print(f"   TriviaQA: {few_shot_results['TriviaQA']:.1f}%")
 
             all_results[config_name] = results
 
