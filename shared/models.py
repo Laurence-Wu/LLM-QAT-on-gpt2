@@ -364,7 +364,6 @@ class SwitchableQATGPT2Attention(nn.Module):
 
         return attn_output
 
-
 class SwitchableQATGPT2MLP(nn.Module):
     """MLP module with switchable precision."""
     def __init__(self, config: GPT2Config, bit_widths=[4, 8, 16]):
@@ -403,7 +402,6 @@ class SwitchableQATGPT2MLP(nn.Module):
         hidden_states = self.c_proj(hidden_states)
         return hidden_states
 
-
 class SwitchableQATGPT2Block(nn.Module):
     """Transformer block with switchable precision."""
     def __init__(self, config: GPT2Config, bit_widths=[4, 8, 16]):
@@ -430,7 +428,6 @@ class SwitchableQATGPT2Block(nn.Module):
         hidden_states = residual + mlp_output
 
         return hidden_states
-
 
 class SwitchableQATGPT2(nn.Module):
     """GPT-2 with switchable precision QAT."""

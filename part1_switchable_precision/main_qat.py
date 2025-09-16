@@ -70,7 +70,11 @@ def load_pretrained_weights(model):
 
     # Copy embeddings
     model.wte.weight.data = pretrained.wte.weight.data.clone()
-    model.wpe.weight.data = pretrained.wpe.weight.data.clone()
+    # Only copy the position embeddings we need (model might have fewer positions than pretrained)
+    min_positions = min(model.wpe.weight.shape[0], pretrained.wpe.weight.shape[0])
+    model.wpe.weight.data[:min_positions] = pretrained.wpe.weight.data[:min_positions].clone()
+    if model.wpe.weight.shape[0] != pretrained.wpe.weight.shape[0]:
+        print(f"Adjusted position embeddings from {pretrained.wpe.weight.shape[0]} to {model.wpe.weight.shape[0]}")
 
     # Copy transformer blocks
     for i in range(min(len(model.h), len(pretrained.h))):
