@@ -175,13 +175,25 @@ class ZeroShotEvaluator:
 
     def _generate_answer(self, prompt: str, max_length: int = 10) -> str:
         """Generate answer using the model"""
-        inputs = self.tokenizer(prompt, return_tensors='pt', truncation=True, max_length=512)
+        # Get model's max position from config
+        max_positions = self.model.config.n_positions if hasattr(self.model.config, 'n_positions') else 256
+        # Leave room for generation
+        max_input_length = max_positions - max_length - 1
+
+        inputs = self.tokenizer(prompt, return_tensors='pt', truncation=True, max_length=max_input_length)
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+        # Safety check: ensure input doesn't exceed model's max positions
+        if inputs['input_ids'].size(1) > max_positions:
+            print(f"WARNING: Input size {inputs['input_ids'].size(1)} exceeds max positions {max_positions}")
+            inputs['input_ids'] = inputs['input_ids'][:, :max_positions]
+            if 'attention_mask' in inputs:
+                inputs['attention_mask'] = inputs['attention_mask'][:, :max_positions]
 
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
-                max_new_tokens=max_length,
+                max_new_tokens=min(max_length, max_positions - inputs['input_ids'].size(1)),
                 temperature=0.1,
                 do_sample=False,
                 pad_token_id=self.tokenizer.eos_token_id
