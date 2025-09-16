@@ -249,12 +249,13 @@ def test_minimal_model():
 
     print("\n1. Testing standard QATGPT2 (not switchable)...")
     model = QATGPT2(gpt2_config, quantization_bits=8, initialize_weights=False)
-    model = model.to(device)
 
-    # Load weights from pretrained
+    # Load weights from pretrained BEFORE moving to device
     from main_qat import load_pretrained_weights
     load_pretrained_weights(model)
 
+    # Move to device AFTER loading weights
+    model = model.to(device)
     model.eval()
 
     # Test
