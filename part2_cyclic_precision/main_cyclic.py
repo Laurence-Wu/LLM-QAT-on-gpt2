@@ -43,8 +43,12 @@ def initialize_model(model_config, device):
         n_head=model_config.n_head,
         layer_norm_epsilon=model_config.layer_norm_epsilon,
         embd_pdrop=model_config.embd_pdrop,
-        
     )
+
+    # Add LoRA configuration to the config object
+    gpt2_config.lora_rank = model_config.lora_rank
+    gpt2_config.lora_alpha = model_config.lora_alpha
+    gpt2_config.lora_dropout = model_config.lora_dropout
 
     # Initialize model
     model = QATGPT2(gpt2_config,quantization_bits=model_config.default_bit_width)

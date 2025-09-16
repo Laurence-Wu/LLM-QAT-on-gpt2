@@ -65,33 +65,39 @@ class BitConfigurations:
     def apply_config_to_model(model, config: Dict):
         """
         Apply W-A-KV configuration to switchable model
-        For switchable models, we only set the weight precision
-        since the model handles activation and KV cache internally
+        Force proper configuration without fallbacks
         """
         weight_bits = config.get('W', 8)
 
-        # For switchable models, we set the precision if it's supported
-        try:
-            # Try to set global precision
-            try:
-                # Check if the requested bit-width is supported
-                bit_widths = model.bit_widths
-                if weight_bits in bit_widths:
-                    model.set_global_precision(weight_bits)
-                else:
-                    # Find the closest supported bit-width
-                    closest = min(bit_widths, key=lambda x: abs(x - weight_bits))
-                    print(f"Warning: {weight_bits}-bit not supported, using {closest}-bit instead")
-                    model.set_global_precision(closest)
-            except AttributeError:
-                # No bit_widths attribute, try to set directly
-                model.set_global_precision(weight_bits)
-        except AttributeError:
-            # set_global_precision doesn't exist, try set_precision
-            try:
-                model.set_precision(weight_bits)
-            except AttributeError:
-                pass  # Model doesn't support precision setting
+        # Check if model supports switchable precision
+        if not hasattr(model, 'bit_widths'):
+            raise AttributeError(f"Model does not support switchable precision. Missing 'bit_widths' attribute.")
+
+        # Get supported bit-widths
+        bit_widths = model.bit_widths
+        print(f"Model supports bit-widths: {bit_widths}")
+        print(f"Requested bit-width: {weight_bits}")
+
+        # Check if requested bit-width is supported
+        if weight_bits not in bit_widths:
+            raise ValueError(f"Requested bit-width {weight_bits} not in supported bit-widths {bit_widths}. "
+                           f"Model must be trained with this bit-width to support it.")
+
+        # Try to set global precision
+        if hasattr(model, 'set_global_precision'):
+            model.set_global_precision(weight_bits)
+            print(f"Successfully set global precision to {weight_bits}-bit")
+        elif hasattr(model, 'set_precision'):
+            model.set_precision(weight_bits)
+            print(f"Successfully set precision to {weight_bits}-bit")
+        else:
+            raise AttributeError(f"Model does not have 'set_global_precision' or 'set_precision' method. "
+                               f"Cannot apply bit configuration.")
+
+        # Verify the precision was set
+        if hasattr(model, 'current_bit_width'):
+            if model.current_bit_width != weight_bits:
+                raise RuntimeError(f"Failed to set bit-width. Expected {weight_bits}, got {model.current_bit_width}")
 
         return model
 

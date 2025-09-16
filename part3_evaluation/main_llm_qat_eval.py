@@ -271,7 +271,15 @@ def main():
                        help='Use pre-trained GPT-2 weights (strongly recommended)')
     parser.add_argument('--use_random_init', action='store_true',
                        help='Use random initialization instead of pre-trained (for testing only)')
+    parser.add_argument('--force_cuda', action='store_true', default=True,
+                       help='Force CUDA usage (default: True)')
     args = parser.parse_args()
+
+    # Force CUDA check
+    if args.force_cuda and not torch.cuda.is_available():
+        print("ERROR: CUDA is required but not available!")
+        print("Please ensure you have a CUDA-capable GPU and PyTorch with CUDA support installed.")
+        sys.exit(1)
 
     # Determine whether to use pre-trained weights
     use_pretrained = not args.use_random_init
@@ -281,28 +289,37 @@ def main():
 
     evaluator = LLMQATEvaluation(model, tokenizer)
 
-    # Automatically determine configurations based on model's supported bit-widths
-    try:
-        # Model supports switchable precision
-        supported_bit_widths = model.bit_widths
-        print(f"Model supports bit-widths: {supported_bit_widths}")
+    # Verify model has required attributes
+    if not hasattr(model, 'bit_widths'):
+        raise AttributeError("Model does not support switchable precision. Please ensure the model was trained with SwitchableQATGPT2.")
 
-        # Map bit-widths to configuration names
-        bit_to_config = {
-            2: 'INT2',
-            4: 'INT4',
-            8: 'INT8',
-            16: 'FP16'
-        }
+    # Model supports switchable precision
+    supported_bit_widths = model.bit_widths
+    print(f"Model supports bit-widths: {supported_bit_widths}")
 
-        # Override args.configs with supported configurations
-        if not args.configs or args.configs == ['INT4', 'INT8', 'FP16']:
-            # Use default or auto-detect
-            args.configs = [bit_to_config.get(b, f'INT{b}') for b in supported_bit_widths if b in bit_to_config]
-            print(f"Auto-detected configurations to evaluate: {args.configs}")
-    except AttributeError:
-        # Model doesn't have bit_widths attribute, use default configurations
-        print("Model doesn't specify supported bit-widths, using requested configurations")
+    # Map bit-widths to configuration names
+    bit_to_config = {
+        2: 'INT2',
+        4: 'INT4',
+        8: 'INT8',
+        16: 'FP16'
+    }
+
+    # Override args.configs with supported configurations
+    if not args.configs or args.configs == ['INT4', 'INT8', 'FP16']:
+        # Use default or auto-detect
+        args.configs = [bit_to_config.get(b, f'INT{b}') for b in supported_bit_widths if b in bit_to_config]
+        print(f"Auto-detected configurations to evaluate: {args.configs}")
+
+    # Validate that requested configs are supported
+    for config_name in args.configs:
+        if config_name in BitConfigurations.STANDARD_CONFIGS:
+            config = BitConfigurations.STANDARD_CONFIGS[config_name]
+            weight_bits = config['W']
+            if weight_bits not in supported_bit_widths:
+                raise ValueError(f"Configuration {config_name} requires {weight_bits}-bit precision, "
+                               f"but model only supports {supported_bit_widths}. "
+                               f"Please train the model with the required bit-width.")
 
     print("="*70)
     print("Running LLM-QAT Paper Evaluation Suite")
@@ -336,6 +353,7 @@ def main():
 
         print(f"Configuration: {config['name']} ({config['description']})")
         print(f"Model size: {results[config_name]['model_size_gb']} GB")
+        print(f"Applying bit configuration W={config['W']}, A={config['A']}, KV={config['KV']}")
 
         if not args.skip_zero_shot:
             print("\n1. Zero-shot common sense evaluation...")
