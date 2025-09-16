@@ -13,16 +13,25 @@ class QATLoRALayer(nn.Module):
     """Simple QAT LoRA: FP32 weights with fake quantization during forward."""
     def __init__(self, in_features, out_features, rank=8, alpha=16, bits=8):
         super().__init__()
-        self.scaling = alpha / rank
         self.in_features = in_features
         self.out_features = out_features
         self.rank = rank
 
-        # FP32 weights
-        self.lora_A = nn.Parameter(torch.empty(in_features, rank))
-        self.lora_B = nn.Parameter(torch.empty(rank, out_features))
-        nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
-        nn.init.zeros_(self.lora_B)
+        # Handle rank=0 case (no LoRA)
+        if rank <= 0:
+            self.scaling = 0
+            self.enabled = False
+            # Create dummy parameters to avoid issues
+            self.register_buffer('lora_A', torch.zeros(1, 1))
+            self.register_buffer('lora_B', torch.zeros(1, 1))
+        else:
+            self.scaling = alpha / rank
+            self.enabled = True
+            # FP32 weights
+            self.lora_A = nn.Parameter(torch.empty(in_features, rank))
+            self.lora_B = nn.Parameter(torch.empty(rank, out_features))
+            nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
+            nn.init.zeros_(self.lora_B)
 
         # Fake quantizers
         self.quantize_A = LearnableFakeQuantize(num_bits=bits, symmetric=True)
