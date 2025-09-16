@@ -52,12 +52,6 @@ class PerplexityEvaluator:
         if not texts:
             return float('inf')
 
-        # Join texts with proper spacing
-        text = ' '.join(texts)
-
-        # Tokenize the entire text
-        encodings = self.tokenizer(text, return_tensors='pt', truncation=False)
-
         # Get model's actual context length
         model_max_length = self.model.config.n_positions if hasattr(self.model.config, 'n_positions') else 1024
         max_length = min(max_length, model_max_length)
@@ -67,67 +61,97 @@ class PerplexityEvaluator:
 
         total_loss = 0.0
         total_tokens = 0
-
-        # Process text in sliding windows
-        seq_len = encodings.input_ids.size(1)
-
-        prev_end_loc = 0
         iterations = 0
-        for begin_loc in tqdm(range(0, seq_len, stride),
-                              desc=f"Calculating perplexity on {dataset_name}",
-                              disable=False):
-            if iterations >= 1000:  # Limit to 1000 iterations
-                break
 
-            end_loc = min(begin_loc + max_length, seq_len)
+        # Process texts one by one to avoid tokenization length issues
+        for text in tqdm(texts[:100], desc=f"Processing {dataset_name} documents"):
+            if not text.strip():
+                continue
 
-            # Skip if window is too small
-            if end_loc - begin_loc < 10:
-                break
+            # Tokenize individual text with proper truncation
+            encodings = self.tokenizer(
+                text,
+                return_tensors='pt',
+                truncation=True,
+                max_length=max_length * 10  # Allow longer texts but we'll process in windows
+            )
 
-            iterations += 1
+            seq_len = encodings.input_ids.size(1)
 
-            trg_len = end_loc - prev_end_loc  # How many tokens we're actually evaluating
-            input_ids = encodings.input_ids[:, begin_loc:end_loc].to(self.device)
+            # Skip very short texts
+            if seq_len < 10:
+                continue
 
-            # Create attention mask
-            attention_mask = torch.ones_like(input_ids)
+            # Process this text in sliding windows
+            for begin_loc in range(0, seq_len, stride):
+                if iterations >= 1000:  # Limit to 1000 iterations total
+                    break
 
-            with torch.no_grad():
-                try:
-                    outputs = self.model(
-                        input_ids,
-                        attention_mask=attention_mask,
-                        labels=input_ids
-                    )
+                end_loc = min(begin_loc + max_length, seq_len)
 
-                    # Get the loss (cross-entropy, already normalized per token)
-                    loss = outputs.loss
+                # Skip if window is too small
+                if end_loc - begin_loc < 10:
+                    break
 
-                    # Accumulate loss weighted by number of tokens
-                    # Only count tokens from prev_end_loc to end_loc to avoid double counting
-                    if prev_end_loc < begin_loc:
-                        # We have overlap, only count new tokens
-                        trg_len = end_loc - begin_loc
+                input_ids = encodings.input_ids[:, begin_loc:end_loc].to(self.device)
 
-                    total_loss += loss.item() * trg_len
-                    total_tokens += trg_len
+                # Create attention mask
+                attention_mask = torch.ones_like(input_ids)
 
-                    prev_end_loc = end_loc
+                with torch.no_grad():
+                    try:
+                        outputs = self.model(
+                            input_ids,
+                            attention_mask=attention_mask,
+                            labels=input_ids
+                        )
 
-                except RuntimeError as e:
-                    if "out of memory" in str(e):
-                        torch.cuda.empty_cache()
+                        # Handle different output formats
+                        if hasattr(outputs, 'loss'):
+                            loss = outputs.loss
+                        elif isinstance(outputs, dict) and 'loss' in outputs:
+                            loss = outputs['loss']
+                        elif isinstance(outputs, tuple) and len(outputs) > 0:
+                            # Some models return (loss, logits, ...)
+                            loss = outputs[0]
+                        else:
+                            # Calculate loss manually if not provided
+                            logits = outputs.logits if hasattr(outputs, 'logits') else outputs['logits']
+
+                            # Shift for language modeling
+                            shift_logits = logits[..., :-1, :].contiguous()
+                            shift_labels = input_ids[..., 1:].contiguous()
+
+                            # Calculate cross entropy loss
+                            loss_fct = torch.nn.CrossEntropyLoss()
+                            loss = loss_fct(
+                                shift_logits.view(-1, shift_logits.size(-1)),
+                                shift_labels.view(-1)
+                            )
+
+                        # Accumulate loss
+                        batch_size = end_loc - begin_loc
+                        total_loss += loss.item() * batch_size
+                        total_tokens += batch_size
+                        iterations += 1
+
+                    except RuntimeError as e:
+                        if "out of memory" in str(e):
+                            torch.cuda.empty_cache()
+                            continue
+                        else:
+                            print(f"Error processing batch: {e}")
+                            continue
+                    except Exception as e:
+                        print(f"Error: {e}")
                         continue
-                    else:
-                        print(f"Error processing batch: {e}")
-                        continue
 
-            # Clear cache periodically
-            if begin_loc % (stride * 10) == 0:
-                torch.cuda.empty_cache()
+                # Clear cache periodically
+                if iterations % 100 == 0:
+                    torch.cuda.empty_cache()
 
-            # Removed token limit - iterations limit is sufficient
+            if iterations >= 1000:
+                break
 
         if total_tokens == 0:
             return float('inf')
