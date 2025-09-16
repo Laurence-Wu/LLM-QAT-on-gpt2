@@ -66,8 +66,9 @@ class LearnableFakeQuantize(nn.Module):
             self.quant_max = 2 ** (self.num_bits - 1) - 1
     
     def forward(self, x):
-        # Pass through for FP32 mode
-        if self.num_bits >= 32:
+        # Pass through for high precision modes (16-bit and above)
+        # 16-bit provides sufficient precision without quantization artifacts
+        if self.num_bits >= 16:
             return x
 
         if self.training:
