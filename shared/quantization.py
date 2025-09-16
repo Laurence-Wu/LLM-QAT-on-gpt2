@@ -115,6 +115,7 @@ class LearnableFakeQuantize(nn.Module):
         # Update scale and zero_point in-place to avoid creating new tensors
         with torch.no_grad():
             if self.symmetric:
+                print("using the symmetric quantization")
                 # Paper formula: α = max(|X_R|)/(2^(N-1) - 1)
                 max_val = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
                 max_val = torch.clamp(max_val, min=self.eps)
