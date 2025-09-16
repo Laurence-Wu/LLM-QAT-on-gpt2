@@ -125,20 +125,19 @@ def test_weight_loading():
 
     from transformers import GPT2Tokenizer
     from shared.models import QATGPT2
-    from shared.config import GPT2Config
+    from transformers import GPT2Config
     import math
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
     # Create config
-    config = GPT2Config(
-        n_positions=256,
-        n_layer=12,
-        lora_rank=8,
-        lora_alpha=16,
-        lora_dropout=0.1
-    )
+    config = GPT2Config()
+    config.n_positions = 256
+    config.n_layer = 12
+    config.lora_rank = 8
+    config.lora_alpha = 16
+    config.lora_dropout = 0.1
 
     # Create model
     model = QATGPT2(config, quantization_bits=8, initialize_weights=False)

@@ -19,7 +19,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.models import QATGPT2, QATGPT2Block
-from shared.config import GPT2Config
+from transformers import GPT2Config
 from shared.lora import QATLinearWithLoRA
 
 
@@ -144,13 +144,12 @@ def test_fixed_model():
     print(f"Using device: {device}\n")
 
     # Configuration
-    config = GPT2Config(
-        n_positions=256,
-        n_layer=12,
-        lora_rank=0,  # Disable LoRA completely
-        lora_alpha=0,
-        lora_dropout=0.0
-    )
+    config = GPT2Config()
+    config.n_positions = 256
+    config.n_layer = 12
+    config.lora_rank = 0  # Disable LoRA completely
+    config.lora_alpha = 0
+    config.lora_dropout = 0.0
 
     # Create models
     print("Creating QAT model...")
