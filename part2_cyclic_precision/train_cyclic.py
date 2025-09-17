@@ -193,6 +193,14 @@ def train_with_cpt(model, train_loader, val_loader, training_config,
         eps=training_config.adam_epsilon,
         weight_decay=training_config.weight_decay
     )
+
+    # Add cosine annealing LR scheduler for smooth learning rate decay
+    from torch.optim.lr_scheduler import CosineAnnealingLR
+    lr_scheduler = CosineAnnealingLR(
+        optimizer,
+        T_max=training_config.num_iterations,
+        eta_min=training_config.learning_rate * 0.1  # Min LR is 10% of initial
+    )
     
     # Setup scheduler
     cyclic_scheduler = CyclicPrecisionScheduler(cyclic_config)
@@ -229,11 +237,20 @@ def train_with_cpt(model, train_loader, val_loader, training_config,
         # Set model precision
         model.set_layer_precision(layer_config)
         
-        # Adjust learning rate based on bit width
+        # Adjust learning rate based on bit width and cosine scheduler
         if not cyclic_config.layer_wise_cycling:
+            # Get base LR from cosine scheduler
+            if 'lr_scheduler' in locals():
+                base_lr = lr_scheduler.get_last_lr()[0]
+            else:
+                base_lr = training_config.learning_rate
+
+            # Apply bit-width specific scaling
             lr_scale = cyclic_scheduler.get_learning_rate_scale(current_bit_width)
+            adjusted_lr = base_lr * lr_scale
+
             for param_group in optimizer.param_groups:
-                param_group['lr'] = training_config.learning_rate * lr_scale
+                param_group['lr'] = adjusted_lr
         
         # Training step with memory optimization
         total_loss = 0
@@ -286,9 +303,11 @@ def train_with_cpt(model, train_loader, val_loader, training_config,
         else:
             torch.nn.utils.clip_grad_norm_(model.parameters(), training_config.max_grad_norm)
             optimizer.step()
-        
-        # Update scheduler
-        cyclic_scheduler.update(iteration)
+
+        # Update schedulers
+        cyclic_scheduler.update(iteration)  # Update bit-width cycling
+        if 'lr_scheduler' in locals():
+            lr_scheduler.step()  # Update cosine annealing LR scheduler
 
         # Record loss
         avg_loss = total_loss

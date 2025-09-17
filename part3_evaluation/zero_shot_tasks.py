@@ -102,13 +102,22 @@ class ZeroShotEvaluator:
 
     def _evaluate_single_example(self, task_name: str, example) -> float:
         """Evaluate a single example based on task type"""
+        # Get max positions for prompt construction
+        max_positions = self.model.config.n_positions if hasattr(self.model.config, 'n_positions') else 256
+        is_limited_context = max_positions <= 256
 
         if task_name == 'BoolQ':
             question = example['question']
             passage = example['passage']
             answer = example['answer']
 
-            prompt = f"Passage: {passage}\nQuestion: {question}\nAnswer (True/False):"
+            if is_limited_context:
+                # Truncate passage for limited context models
+                passage = passage[:200]
+                question = question[:100]
+                prompt = f"Passage: {passage}\nQ: {question}\nTrue/False:"
+            else:
+                prompt = f"Passage: {passage}\nQuestion: {question}\nAnswer (True/False):"
             predicted = self._generate_answer(prompt, max_length=5)
 
             predicted_bool = 'true' in predicted.lower()
@@ -119,10 +128,19 @@ class ZeroShotEvaluator:
             endings = example['endings']
             label = example['label']
 
-            prompt = f"Context: {context}\n"
-            for i, ending in enumerate(endings):
-                prompt += f"{chr(65+i)}: {ending}\n"
-            prompt += "Which ending is most likely? Answer:"
+            if is_limited_context:
+                # Truncate for limited context
+                context = context[:150]
+                prompt = f"Context: {context}\n"
+                for i, ending in enumerate(endings[:4]):  # Limit endings
+                    ending_text = ending[:50]  # Truncate each ending
+                    prompt += f"{chr(65+i)}: {ending_text}\n"
+                prompt += "Best:"
+            else:
+                prompt = f"Context: {context}\n"
+                for i, ending in enumerate(endings):
+                    prompt += f"{chr(65+i)}: {ending}\n"
+                prompt += "Which ending is most likely? Answer:"
 
             predicted = self._generate_answer(prompt, max_length=5)
 
@@ -137,7 +155,12 @@ class ZeroShotEvaluator:
             option2 = example['option2']
             answer = example['answer']
 
-            prompt = f"Sentence: {sentence}\nOption 1: {option1}\nOption 2: {option2}\nWhich option fills the blank better (1 or 2)?"
+            if is_limited_context:
+                # More concise format
+                sentence = sentence[:150]
+                prompt = f"S: {sentence}\n1: {option1}\n2: {option2}\nBest:"
+            else:
+                prompt = f"Sentence: {sentence}\nOption 1: {option1}\nOption 2: {option2}\nWhich option fills the blank better (1 or 2)?"
             predicted = self._generate_answer(prompt, max_length=5)
 
             predicted_answer = '1' if '1' in predicted else '2'
@@ -148,11 +171,21 @@ class ZeroShotEvaluator:
             choices = example['choices']
             answer = example['answerKey']
 
-            prompt = f"Question: {question}\n"
-            for i, choice in enumerate(choices['text']):
-                label = choices['label'][i]
-                prompt += f"{label}: {choice}\n"
-            prompt += "Answer:"
+            if is_limited_context:
+                # Truncate question and choices
+                question = question[:150]
+                prompt = f"Q: {question}\n"
+                for i, choice in enumerate(choices['text'][:4]):  # Limit to 4 choices
+                    label = choices['label'][i]
+                    choice_text = choice[:60]  # Truncate long choices
+                    prompt += f"{label}: {choice_text}\n"
+                prompt += "A:"
+            else:
+                prompt = f"Question: {question}\n"
+                for i, choice in enumerate(choices['text']):
+                    label = choices['label'][i]
+                    prompt += f"{label}: {choice}\n"
+                prompt += "Answer:"
 
             predicted = self._generate_answer(prompt, max_length=5)
             return float(answer.upper() in predicted.upper())
@@ -162,11 +195,21 @@ class ZeroShotEvaluator:
             choices = example['choices']
             answer = example['answerKey']
 
-            prompt = f"Question: {question}\n"
-            for i, choice in enumerate(choices['text']):
-                label = choices['label'][i]
-                prompt += f"{label}: {choice}\n"
-            prompt += "Answer:"
+            if is_limited_context:
+                # Truncate for limited context
+                question = question[:150]
+                prompt = f"Q: {question}\n"
+                for i, choice in enumerate(choices['text'][:4]):
+                    label = choices['label'][i]
+                    choice_text = choice[:60]
+                    prompt += f"{label}: {choice_text}\n"
+                prompt += "A:"
+            else:
+                prompt = f"Question: {question}\n"
+                for i, choice in enumerate(choices['text']):
+                    label = choices['label'][i]
+                    prompt += f"{label}: {choice}\n"
+                prompt += "Answer:"
 
             predicted = self._generate_answer(prompt, max_length=5)
             return float(answer.upper() in predicted.upper())
