@@ -25,21 +25,50 @@ class TruncationTester:
         if os.path.exists(model_path):
             checkpoint = torch.load(model_path, map_location=self.device)
 
-            # Load config from checkpoint or use default
-            if 'config' in checkpoint:
-                config = checkpoint['config']
-            else:
-                config = GPT2Config()
-                config.n_layer = 12
-                config.lora_rank = 8
-                config.lora_alpha = 16
-                config.lora_dropout = 0.0
+            # Load config from checkpoint - no defaults
+            config = GPT2Config()
 
-            # Create model and load state dict
-            if 'bit_widths' in checkpoint:
-                bit_widths = checkpoint['bit_widths']
+            # Check for model_config or config in checkpoint
+            config_dict = None
+            if 'model_config' in checkpoint:
+                config_dict = checkpoint['model_config']
+                print(f"Found 'model_config' in checkpoint with {len(config_dict)} attributes")
+            elif 'config' in checkpoint:
+                config_dict = checkpoint['config']
+                print(f"Found 'config' in checkpoint")
             else:
-                bit_widths = [4, 8, 16]
+                error_msg = f"No 'model_config' or 'config' found in checkpoint. Available keys: {list(checkpoint.keys())}"
+                print(f"Error: {error_msg}")
+                raise KeyError(error_msg)
+
+            # Set all attributes from config_dict
+            for key, value in config_dict.items():
+                setattr(config, key, value)
+
+            # Verify required QAT attributes exist
+            required_attrs = ['lora_rank_per_bit', 'lora_alpha_per_bit',
+                            'activation_bits_per_bit', 'kv_cache_bits_per_bit']
+            missing_attrs = []
+            for attr in required_attrs:
+                try:
+                    val = getattr(config, attr)
+                    if val is None:
+                        raise ValueError(f"Required attribute '{attr}' is None in config")
+                    print(f"  {attr}: {val}")
+                except AttributeError:
+                    missing_attrs.append(attr)
+
+            if missing_attrs:
+                error_msg = f"Config missing required QAT attributes: {missing_attrs}"
+                print(f"Error: {error_msg}")
+                raise KeyError(error_msg)
+
+            # Get bit_widths from checkpoint
+            if 'bit_widths' not in checkpoint:
+                error_msg = f"'bit_widths' not found in checkpoint. Available keys: {list(checkpoint.keys())}"
+                print(f"Error: {error_msg}")
+                raise KeyError(error_msg)
+            bit_widths = checkpoint['bit_widths']
 
             self.model = SwitchableQATGPT2(config, bit_widths=bit_widths, initialize_weights=False)
 
@@ -49,8 +78,9 @@ class TruncationTester:
             elif 'model' in checkpoint:
                 missing_keys, unexpected_keys = self.model.load_state_dict(checkpoint['model'], strict=False)
             else:
-                # Checkpoint might be just the state dict
-                missing_keys, unexpected_keys = self.model.load_state_dict(checkpoint, strict=False)
+                error_msg = f"No 'model_state_dict' or 'model' found in checkpoint. Available keys: {list(checkpoint.keys())}"
+                print(f"Error: {error_msg}")
+                raise KeyError(error_msg)
 
             if missing_keys:
                 print(f"Warning: Missing keys in checkpoint: {len(missing_keys)} keys")
@@ -60,15 +90,9 @@ class TruncationTester:
             self.model = self.model.to(self.device)
             print("Model loaded from checkpoint - NOT loading pretrained weights")
         else:
-            config = GPT2Config()
-            config.n_layer = 12
-            config.lora_rank = 8
-            config.lora_alpha = 16
-            config.lora_dropout = 0.0
-            self.model = SwitchableQATGPT2(config, bit_widths=[4, 8, 16], initialize_weights=False)
-            print("No checkpoint found - loading pretrained weights for baseline")
-            load_pretrained_weights(self.model)
-            self.model = self.model.to(self.device)
+            error_msg = f"Checkpoint file not found at: {model_path}"
+            print(f"Error: {error_msg}")
+            raise FileNotFoundError(error_msg)
 
         self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
         self.tokenizer.pad_token = self.tokenizer.eos_token
