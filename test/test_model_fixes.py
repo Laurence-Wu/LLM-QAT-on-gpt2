@@ -10,8 +10,9 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from part3_evaluation.main_llm_qat_eval import load_switchable_model, load_tokenizer
-from part3_evaluation.zero_shot_tasks import ZeroShotEvaluator
+from shared.models import SwitchableQATGPT2
+from part1_switchable_precision.main_qat import load_pretrained_weights
+from transformers import GPT2Tokenizer, GPT2Config
 
 
 def test_with_fixes():
@@ -27,8 +28,20 @@ def test_with_fixes():
     print("TESTING MODEL WITH VARIOUS FIXES")
     print("="*70)
     
-    model = load_switchable_model(args.model_path, args.config_path)
-    tokenizer = load_tokenizer()
+    # Load model
+    if os.path.exists(args.model_path):
+        model = torch.load(args.model_path)
+    else:
+        config = GPT2Config()
+        config.n_layer = 12
+        config.lora_rank = 8
+        config.lora_alpha = 16
+        config.lora_dropout = 0.0
+        model = SwitchableQATGPT2(config, bit_widths=[4, 8, 16], initialize_weights=False)
+        load_pretrained_weights(model)
+
+    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    tokenizer.pad_token = tokenizer.eos_token
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # Test prompt for all fixes

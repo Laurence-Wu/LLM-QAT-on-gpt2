@@ -14,7 +14,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.models import QATGPT2
 from shared.quantization import LearnableFakeQuantize
-from fix_weight_loading import load_pretrained_weights_fixed
+from part1_switchable_precision.main_qat import load_pretrained_weights
 
 
 def calibrate_quantizers(model, tokenizer, device='cuda', num_samples=100):
@@ -99,7 +99,7 @@ def test_8bit_with_calibration():
     # Create and load model
     print("Creating 8-bit QAT model...")
     model = QATGPT2(config, quantization_bits=8, initialize_weights=False)
-    load_pretrained_weights_fixed(model, debug=False)
+    load_pretrained_weights(model)
 
     # Zero LoRA weights to isolate quantization effects
     with torch.no_grad():

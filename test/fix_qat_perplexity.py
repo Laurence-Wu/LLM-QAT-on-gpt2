@@ -19,8 +19,9 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.models import QATGPT2, QATGPT2Block
-from transformers import GPT2Config
 from shared.lora import QATLinearWithLoRA
+from part1_switchable_precision.main_qat import load_pretrained_weights
+from transformers import GPT2Config
 
 
 def disable_lora_completely(model):

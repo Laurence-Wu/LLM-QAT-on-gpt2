@@ -10,8 +10,9 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from part3_evaluation.main_llm_qat_eval import load_switchable_model, load_tokenizer
-from part3_evaluation.zero_shot_tasks import ZeroShotEvaluator
+from shared.models import SwitchableQATGPT2
+from part1_switchable_precision.main_qat import load_pretrained_weights
+from transformers import GPT2Tokenizer, GPT2Config
 from datasets import load_dataset
 
 
@@ -19,9 +20,22 @@ class TruncationTester:
     """Test and fix truncation issues in evaluation."""
     
     def __init__(self, model_path, config_path=None):
-        self.model = load_switchable_model(model_path, config_path)
-        self.tokenizer = load_tokenizer()
+        # Load model
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        if os.path.exists(model_path):
+            self.model = torch.load(model_path, map_location=self.device)
+        else:
+            config = GPT2Config()
+            config.n_layer = 12
+            config.lora_rank = 8
+            config.lora_alpha = 16
+            config.lora_dropout = 0.0
+            self.model = SwitchableQATGPT2(config, bit_widths=[4, 8, 16], initialize_weights=False)
+            load_pretrained_weights(self.model)
+            self.model = self.model.to(self.device)
+
+        self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+        self.tokenizer.pad_token = self.tokenizer.eos_token
         self.model.eval()
         
     def test_arc_truncation(self):

@@ -11,11 +11,11 @@ import math
 from transformers import GPT2Model, GPT2LMHeadModel, GPT2Config, GPT2Tokenizer
 
 # Add paths
-sys.path.append(os.path.join(os.path.dirname(__file__), 'shared'))
-sys.path.append(os.path.join(os.path.dirname(__file__), 'part1_switchable_precision'))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from models import QATGPT2, SwitchableQATGPT2
-from config_qat import ModelConfig
+from shared.models import QATGPT2, SwitchableQATGPT2
+from part1_switchable_precision.main_qat import load_pretrained_weights
+from part1_switchable_precision.config_qat import ModelConfig
 
 
 def diagnose_model_issues():
@@ -249,9 +249,6 @@ def test_minimal_model():
 
     print("\n1. Testing standard QATGPT2 (not switchable)...")
     model = QATGPT2(gpt2_config, quantization_bits=8, initialize_weights=False)
-
-    # Load weights from pretrained BEFORE moving to device
-    from main_qat import load_pretrained_weights
     load_pretrained_weights(model)
 
     # Move to device AFTER loading weights

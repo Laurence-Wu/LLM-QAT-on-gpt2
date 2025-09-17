@@ -13,7 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.models import QATGPT2, QATGPT2Attention
 from shared.lora import QATLinearWithLoRA
-from transformers import GPT2Model
+from part1_switchable_precision.main_qat import load_pretrained_weights
 import math
 
 
@@ -32,10 +32,7 @@ def debug_attention_forward():
 
     # Create QAT model
     qat_model = QATGPT2(config, quantization_bits=16, initialize_weights=False)
-
-    # Load weights using the existing function
-    from fix_weight_loading import load_pretrained_weights_fixed
-    load_pretrained_weights_fixed(qat_model, debug=False)
+    load_pretrained_weights(qat_model)
     qat_model = qat_model.to(device)
     qat_model.eval()
 
