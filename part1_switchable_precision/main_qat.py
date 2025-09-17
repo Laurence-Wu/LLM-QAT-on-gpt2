@@ -19,11 +19,17 @@ os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True,max_split_size
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 # Import shared components
-from models import QATGPT2, SwitchableQATGPT2
-from dataset import create_dataloaders
-from config_qat import ModelConfig, TrainingConfig
-from train_qat import train_qat
-from deploy import save_int8_checkpoint
+from shared.models import QATGPT2, SwitchableQATGPT2
+from shared.dataset import create_dataloaders
+from shared.deploy import save_int8_checkpoint
+
+# Use try/except to handle both direct execution and import cases
+try:
+    from config_qat import ModelConfig, TrainingConfig
+    from train_qat import train_qat
+except ImportError:
+    from .config_qat import ModelConfig, TrainingConfig
+    from .train_qat import train_qat
 
 
 def initialize_model(model_config, device):
