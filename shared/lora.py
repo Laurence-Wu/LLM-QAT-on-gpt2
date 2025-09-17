@@ -68,7 +68,7 @@ class QATLinearWithLoRA(nn.Module):
 
         # Fake quantizers
         self.quantize_weight = LearnableFakeQuantize(num_bits=bits, symmetric=True)
-        self.quantize_input = LearnableFakeQuantize(num_bits=bits, symmetric=False)
+        self.quantize_input = LearnableFakeQuantize(num_bits=bits, symmetric=True)
 
         # LoRA adapter with config parameters
         self.lora = QATLoRALayer(in_features, out_features,
@@ -147,7 +147,7 @@ class SwitchableQATLinearWithLoRA(nn.Module):
             for bits in bit_widths
         })
         self.quantizers_input = nn.ModuleDict({
-            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=False)
+            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True)
             for bits in bit_widths
         })
 
