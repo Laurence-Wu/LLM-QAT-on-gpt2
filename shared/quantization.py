@@ -64,7 +64,6 @@ class LearnableFakeQuantize(nn.Module):
             # Optionally reset statistics for clean recalibration
             # self.running_min.zero_()
             # self.running_max.zero_()
-            print(f"Quantizer bit-width changed from {old_bits} to {self.num_bits}, recalibration needed")
 
     def _update_quant_range(self):
         """Update quantization range based on current num_bits."""
