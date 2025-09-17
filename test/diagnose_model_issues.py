@@ -41,39 +41,50 @@ class ModelDiagnostics:
             # Load config from checkpoint or use default
             from transformers import GPT2Config
 
-            if 'config' in checkpoint and isinstance(checkpoint['config'], dict):
-                # Convert dict config to GPT2Config
+            # Check for both 'config' and 'model_config' keys
+            config_dict = None
+            if 'model_config' in checkpoint:
+                config_dict = checkpoint['model_config']
+                print("Found 'model_config' in checkpoint")
+            elif 'config' in checkpoint:
                 config_dict = checkpoint['config']
+                print("Found 'config' in checkpoint")
+
+            if config_dict is not None and isinstance(config_dict, dict):
+                # Convert dict config to GPT2Config
                 config = GPT2Config()
 
-                # Required standard GPT2 attributes
+                # Required standard GPT2 attributes - no defaults, must exist
                 required_attrs = ['n_layer', 'n_embd', 'n_head', 'n_positions', 'vocab_size',
                                  'lora_rank', 'lora_alpha', 'lora_dropout', 'layer_norm_epsilon', 'embd_pdrop']
                 for attr in required_attrs:
                     if attr not in config_dict:
-                        print(f"Error: Required attribute '{attr}' not found in checkpoint config")
-                        raise KeyError(f"Checkpoint config missing required attribute: {attr}")
+                        print(f"Error: Required attribute '{attr}' not found in config")
+                        raise KeyError(f"Config missing required attribute: {attr}")
                     setattr(config, attr, config_dict[attr])
 
-                # Required switchable precision configs
+                # Required switchable precision configs - no defaults, must exist
                 switchable_attrs = ['lora_rank_per_bit', 'lora_alpha_per_bit',
                                    'activation_bits_per_bit', 'kv_cache_bits_per_bit', 'kv_cache_bits']
                 for attr in switchable_attrs:
                     if attr not in config_dict:
-                        print(f"Error: Required switchable precision attribute '{attr}' not found in checkpoint config")
-                        raise KeyError(f"Checkpoint config missing required switchable precision attribute: {attr}")
+                        print(f"Error: Required switchable precision attribute '{attr}' not found in config")
+                        raise KeyError(f"Config missing required switchable precision attribute: {attr}")
                     setattr(config, attr, config_dict[attr])
 
-            elif 'config' in checkpoint:
+                # Copy any additional attributes from config_dict
+                for key, value in config_dict.items():
+                    if not hasattr(config, key):
+                        setattr(config, key, value)
+
+            elif config_dict is not None:
                 # Config is already a GPT2Config object
-                config = checkpoint['config']
-                # Validate all required attributes exist
+                config = config_dict
+                # Validate all required attributes exist - no defaults
                 required_attrs = ['lora_rank_per_bit', 'lora_alpha_per_bit',
                                  'activation_bits_per_bit', 'kv_cache_bits_per_bit', 'kv_cache_bits']
                 for attr in required_attrs:
-                    try:
-                        _ = getattr(config, attr)
-                    except AttributeError:
+                    if not hasattr(config, attr):
                         print(f"Error: Config object missing required attribute: {attr}")
                         raise AttributeError(f"Config must have attribute: {attr}")
             else:
