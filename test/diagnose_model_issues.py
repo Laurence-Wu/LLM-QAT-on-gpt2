@@ -98,6 +98,7 @@ class ModelDiagnostics:
                 print(f"First few unexpected keys: {unexpected_keys[:3]}...")
 
             self.model = self.model.to(self.device)
+            print("Model loaded from checkpoint - NOT loading pretrained weights")
         else:
             from transformers import GPT2Config
             config = GPT2Config()
@@ -106,6 +107,7 @@ class ModelDiagnostics:
             config.lora_alpha = 16
             config.lora_dropout = 0.0
             self.model = SwitchableQATGPT2(config, bit_widths=[4, 8, 16], initialize_weights=False)
+            print("No checkpoint found - loading pretrained weights for baseline")
             load_pretrained_weights(self.model)
             self.model = self.model.to(self.device)
 

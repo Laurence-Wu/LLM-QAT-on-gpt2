@@ -58,6 +58,7 @@ class TruncationTester:
                 print(f"Warning: Unexpected keys in checkpoint: {len(unexpected_keys)} keys")
 
             self.model = self.model.to(self.device)
+            print("Model loaded from checkpoint - NOT loading pretrained weights")
         else:
             config = GPT2Config()
             config.n_layer = 12
@@ -65,6 +66,7 @@ class TruncationTester:
             config.lora_alpha = 16
             config.lora_dropout = 0.0
             self.model = SwitchableQATGPT2(config, bit_widths=[4, 8, 16], initialize_weights=False)
+            print("No checkpoint found - loading pretrained weights for baseline")
             load_pretrained_weights(self.model)
             self.model = self.model.to(self.device)
 
