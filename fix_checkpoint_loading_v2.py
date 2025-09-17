@@ -354,11 +354,54 @@ def convert_single_to_switchable_checkpoint(checkpoint_path, output_path=None,
     # Save the converted checkpoint
     print(f"\nSaving converted checkpoint to: {output_path}")
     try:
-        torch.save(checkpoint, output_path)
-        print("Checkpoint saved successfully")
+        # First try standard save
+        try:
+            torch.save(checkpoint, output_path)
+            print("Checkpoint saved successfully with standard method")
+        except Exception as e1:
+            print(f"Standard save failed: {e1}")
+            print("Trying alternative save method...")
+
+            # Try with different parameters
+            import pickle
+            with open(output_path, 'wb') as f:
+                pickle.dump(checkpoint, f, protocol=pickle.HIGHEST_PROTOCOL)
+            print("Checkpoint saved successfully with pickle method")
+
+        # Verify file was written correctly by checking file size
+        import os
+        if os.path.exists(output_path):
+            file_size = os.path.getsize(output_path)
+            print(f"Checkpoint file size: {file_size / (1024*1024):.2f} MB")
+
+            # Try to load it back to verify it's not corrupted
+            print("Verifying saved file can be loaded...")
+            try:
+                test_load = torch.load(output_path, map_location='cpu')
+                print("✓ File can be loaded successfully with torch.load")
+                del test_load  # Free memory
+            except:
+                # Try pickle load
+                with open(output_path, 'rb') as f:
+                    test_load = pickle.load(f)
+                print("✓ File can be loaded successfully with pickle.load")
+                del test_load
+        else:
+            print("Warning: File was not created")
+
     except Exception as e:
         print(f"Error saving checkpoint: {e}")
-        raise
+        print("\nTrying to save just the state dict instead of full checkpoint...")
+
+        # As a fallback, save only the state dict
+        fallback_path = str(output_path).replace('.pth', '_state_dict_only.pth')
+        try:
+            torch.save(new_state_dict, fallback_path)
+            print(f"Saved state dict only to: {fallback_path}")
+            output_path = fallback_path
+        except Exception as e2:
+            print(f"Failed to save state dict: {e2}")
+            raise
 
     # Verify the conversion - use the in-memory checkpoint
     print("\nVerifying conversion...")
