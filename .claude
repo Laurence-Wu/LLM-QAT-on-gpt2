@@ -5,4 +5,6 @@ For the current ptoject
 3. If not explicitly expressed, you should print instead of doing the logging information.
 4. When printing out the debugging or error information, always use the data from the script or variables from the script, instead of the hardcoded inforamtion.
 5. you should not add more files unless its for testing and explictly specified
+6. Always has a test folder and save all the test files there
+7. 
 
