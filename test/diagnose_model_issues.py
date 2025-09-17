@@ -116,7 +116,7 @@ class ModelDiagnostics:
                 print(f"First few unexpected keys: {unexpected_keys[:3]}...")
 
             self.model = self.model.to(self.device)
-            print("Model loaded from checkpoint - NOT loading pretrained weights")
+            print("Model loaded from checkpoint")
         else:
             print("Error: No checkpoint file provided or checkpoint could not be loaded")
             print(f"Attempted to load: {model_path}")

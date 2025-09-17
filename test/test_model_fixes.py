@@ -34,20 +34,52 @@ def test_with_fixes():
         checkpoint = torch.load(args.model_path, map_location=device)
 
         # Load config from checkpoint or use default
-        if 'config' in checkpoint:
-            config = checkpoint['config']
+        config = GPT2Config()
+
+        # Check for model_config or config in checkpoint
+        config_dict = None
+        if 'model_config' in checkpoint:
+            config_dict = checkpoint['model_config']
+            print(f"Found 'model_config' in checkpoint with {len(config_dict)} attributes")
+        elif 'config' in checkpoint:
+            config_dict = checkpoint['config']
+            print(f"Found 'config' in checkpoint")
+
+        if config_dict is not None:
+            # Set all attributes from config_dict
+            for key, value in config_dict.items():
+                setattr(config, key, value)
+
+            # Verify required QAT attributes exist
+            required_attrs = ['lora_rank_per_bit', 'lora_alpha_per_bit',
+                            'activation_bits_per_bit', 'kv_cache_bits_per_bit']
+            missing_attrs = []
+            for attr in required_attrs:
+                try:
+                    val = getattr(config, attr)
+                    if val is None:
+                        raise ValueError(f"Required attribute '{attr}' is None in config")
+                    print(f"  {attr}: {val}")
+                except AttributeError:
+                    missing_attrs.append(attr)
+
+            if missing_attrs:
+                error_msg = f"Config missing required QAT attributes: {missing_attrs}"
+                print(f"Error: {error_msg}")
+                print("These attributes must be defined in the checkpoint's model_config")
+                raise KeyError(error_msg)
         else:
-            config = GPT2Config()
-            config.n_layer = 12
-            config.lora_rank = 8
-            config.lora_alpha = 16
-            config.lora_dropout = 0.0
+            error_msg = "No 'model_config' or 'config' found in checkpoint"
+            print(f"Error: {error_msg}")
+            print(f"Checkpoint keys available: {list(checkpoint.keys())}")
+            raise KeyError(error_msg)
 
         # Create model and load state dict
-        if 'bit_widths' in checkpoint:
-            bit_widths = checkpoint['bit_widths']
-        else:
-            bit_widths = [4, 8, 16]
+        if 'bit_widths' not in checkpoint:
+            error_msg = f"'bit_widths' not found in checkpoint. Available keys: {list(checkpoint.keys())}"
+            print(f"Error: {error_msg}")
+            raise KeyError(error_msg)
+        bit_widths = checkpoint['bit_widths']
 
         model = SwitchableQATGPT2(config, bit_widths=bit_widths, initialize_weights=False)
 
@@ -57,8 +89,9 @@ def test_with_fixes():
         elif 'model' in checkpoint:
             missing_keys, unexpected_keys = model.load_state_dict(checkpoint['model'], strict=False)
         else:
-            # Checkpoint might be just the state dict
-            missing_keys, unexpected_keys = model.load_state_dict(checkpoint, strict=False)
+            error_msg = f"No 'model_state_dict' or 'model' found in checkpoint. Available keys: {list(checkpoint.keys())}"
+            print(f"Error: {error_msg}")
+            raise KeyError(error_msg)
 
         if missing_keys:
             print(f"Warning: Missing keys in checkpoint: {len(missing_keys)} keys")
@@ -68,15 +101,9 @@ def test_with_fixes():
         model = model.to(device)
         print("Model loaded from checkpoint - NOT loading pretrained weights")
     else:
-        config = GPT2Config()
-        config.n_layer = 12
-        config.lora_rank = 8
-        config.lora_alpha = 16
-        config.lora_dropout = 0.0
-        model = SwitchableQATGPT2(config, bit_widths=[4, 8, 16], initialize_weights=False)
-        print("No checkpoint found - loading pretrained weights for baseline")
-        load_pretrained_weights(model)
-        model = model.to(device)
+        error_msg = f"Checkpoint file not found at: {args.model_path}"
+        print(f"Error: {error_msg}")
+        raise FileNotFoundError(error_msg)
 
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     tokenizer.pad_token = tokenizer.eos_token
