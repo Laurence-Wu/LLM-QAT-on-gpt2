@@ -11,8 +11,8 @@ import gc
 import json
 from transformers import GPT2Config, GPT2TokenizerFast, GPT2Model
 
-# Add shared folder to path for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'shared'))
+# Add parent directory to path for imports
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 # Memory optimizations for efficient training
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True,max_split_size_mb:512'
