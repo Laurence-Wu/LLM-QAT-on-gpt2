@@ -20,7 +20,7 @@ class ModelConfig:
         # Quantization settings
         self.quantization_bits = 8  # Default for single-precision mode
         self.activation_bits = 8  # Bits for activation quantization
-        self.kv_cache_bits = 8  # Bits for KV cache quantization
+        self.kv_cache_bits = 8  # Bits for KV cache quantization (default)
         self.use_gradient_checkpointing = True
 
         # LoRA settings (used when not in switchable mode)
@@ -50,7 +50,7 @@ class TrainingConfig:
         # Dataset
         self.train_split = 'train[:5000]'
         self.val_split = 'validation[:1000]'
-        self.batch_size = 8
+        self.batch_size = 32
         self.max_seq_length = 256
         self.doc_stride = 128
 

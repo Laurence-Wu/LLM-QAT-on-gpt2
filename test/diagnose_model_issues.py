@@ -46,45 +46,39 @@ class ModelDiagnostics:
                 config_dict = checkpoint['config']
                 config = GPT2Config()
 
-                # Set standard GPT2 attributes
-                config.n_layer = config_dict.get('n_layer', 12)
-                config.n_embd = config_dict.get('n_embd', 768)
-                config.n_head = config_dict.get('n_head', 12)
-                config.n_positions = config_dict.get('n_positions', 1024)
-                config.vocab_size = config_dict.get('vocab_size', 50257)
+                # Required standard GPT2 attributes
+                required_attrs = ['n_layer', 'n_embd', 'n_head', 'n_positions', 'vocab_size',
+                                 'lora_rank', 'lora_alpha', 'lora_dropout', 'layer_norm_epsilon', 'embd_pdrop']
+                for attr in required_attrs:
+                    if attr not in config_dict:
+                        print(f"Error: Required attribute '{attr}' not found in checkpoint config")
+                        raise KeyError(f"Checkpoint config missing required attribute: {attr}")
+                    setattr(config, attr, config_dict[attr])
 
-                # Set LoRA attributes
-                config.lora_rank = config_dict.get('lora_rank', 8)
-                config.lora_alpha = config_dict.get('lora_alpha', 16)
-                config.lora_dropout = config_dict.get('lora_dropout', 0.0)
-
-                # Set switchable precision configs - use defaults if not in checkpoint
-                config.lora_rank_per_bit = config_dict.get('lora_rank_per_bit', {4: 8, 8: 16, 16: 32})
-                config.lora_alpha_per_bit = config_dict.get('lora_alpha_per_bit', {4: 16, 8: 32, 16: 64})
-                config.activation_bits_per_bit = config_dict.get('activation_bits_per_bit', {4: 4, 8: 8, 16: 16})
-                config.kv_cache_bits_per_bit = config_dict.get('kv_cache_bits_per_bit', {4: 4, 8: 8, 16: 16})
+                # Required switchable precision configs
+                switchable_attrs = ['lora_rank_per_bit', 'lora_alpha_per_bit',
+                                   'activation_bits_per_bit', 'kv_cache_bits_per_bit', 'kv_cache_bits']
+                for attr in switchable_attrs:
+                    if attr not in config_dict:
+                        print(f"Error: Required switchable precision attribute '{attr}' not found in checkpoint config")
+                        raise KeyError(f"Checkpoint config missing required switchable precision attribute: {attr}")
+                    setattr(config, attr, config_dict[attr])
 
             elif 'config' in checkpoint:
                 # Config is already a GPT2Config object
                 config = checkpoint['config']
-                # Ensure switchable precision configs exist
-                if not hasattr(config, 'lora_rank_per_bit'):
-                    config.lora_rank_per_bit = {4: 8, 8: 16, 16: 32}
-                    config.lora_alpha_per_bit = {4: 16, 8: 32, 16: 64}
-                    config.activation_bits_per_bit = {4: 4, 8: 8, 16: 16}
-                    config.kv_cache_bits_per_bit = {4: 4, 8: 8, 16: 16}
+                # Validate all required attributes exist
+                required_attrs = ['lora_rank_per_bit', 'lora_alpha_per_bit',
+                                 'activation_bits_per_bit', 'kv_cache_bits_per_bit', 'kv_cache_bits']
+                for attr in required_attrs:
+                    try:
+                        _ = getattr(config, attr)
+                    except AttributeError:
+                        print(f"Error: Config object missing required attribute: {attr}")
+                        raise AttributeError(f"Config must have attribute: {attr}")
             else:
-                # Use default config
-                config = GPT2Config()
-                config.n_layer = 12
-                config.lora_rank = 8
-                config.lora_alpha = 16
-                config.lora_dropout = 0.0
-                # Add switchable precision configs
-                config.lora_rank_per_bit = {4: 8, 8: 16, 16: 32}
-                config.lora_alpha_per_bit = {4: 16, 8: 32, 16: 64}
-                config.activation_bits_per_bit = {4: 4, 8: 8, 16: 16}
-                config.kv_cache_bits_per_bit = {4: 4, 8: 8, 16: 16}
+                print("Error: No 'config' or 'model_config' found in checkpoint")
+                raise KeyError("Checkpoint must contain 'config' or 'model_config' to load the model")
 
             # Create model and load state dict
             if 'bit_widths' in checkpoint:
@@ -113,21 +107,9 @@ class ModelDiagnostics:
             self.model = self.model.to(self.device)
             print("Model loaded from checkpoint - NOT loading pretrained weights")
         else:
-            from transformers import GPT2Config
-            config = GPT2Config()
-            config.n_layer = 12
-            config.lora_rank = 8
-            config.lora_alpha = 16
-            config.lora_dropout = 0.0
-            # Add switchable precision configs
-            config.lora_rank_per_bit = {4: 8, 8: 16, 16: 32}
-            config.lora_alpha_per_bit = {4: 16, 8: 32, 16: 64}
-            config.activation_bits_per_bit = {4: 4, 8: 8, 16: 16}
-            config.kv_cache_bits_per_bit = {4: 4, 8: 8, 16: 16}
-            self.model = SwitchableQATGPT2(config, bit_widths=[4, 8, 16], initialize_weights=False)
-            print("No checkpoint found - loading pretrained weights for baseline")
-            load_pretrained_weights(self.model)
-            self.model = self.model.to(self.device)
+            print("Error: No checkpoint file provided or checkpoint could not be loaded")
+            print(f"Attempted to load: {model_path}")
+            raise FileNotFoundError(f"Checkpoint file not found or invalid: {model_path}")
 
         from transformers import GPT2Tokenizer
         self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')

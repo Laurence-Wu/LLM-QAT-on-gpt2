@@ -40,9 +40,10 @@ def initialize_model(model_config, device):
         _ = model_config.lora_alpha_per_bit
         _ = model_config.activation_bits_per_bit
         _ = model_config.kv_cache_bits_per_bit
+        _ = model_config.kv_cache_bits  # Single kv_cache_bits attribute
     except AttributeError as e:
         print(f"Error: ModelConfig missing required attribute: {e}")
-        print("Required attributes: lora_rank_per_bit, lora_alpha_per_bit, activation_bits_per_bit, kv_cache_bits_per_bit")
+        print("Required attributes: lora_rank_per_bit, lora_alpha_per_bit, activation_bits_per_bit, kv_cache_bits_per_bit, kv_cache_bits")
         print("These should be defined in ModelConfig class in config_qat.py")
         raise AttributeError(f"ModelConfig missing required switchable precision attribute: {e}")
 
@@ -57,7 +58,8 @@ def initialize_model(model_config, device):
         quantization_bits=model_config.quantization_bits,
         lora_rank=model_config.lora_rank,
         lora_alpha=model_config.lora_alpha,
-        lora_dropout=model_config.lora_dropout
+        lora_dropout=model_config.lora_dropout,
+        kv_cache_bits=model_config.kv_cache_bits
     )
 
     # Add switchable precision specific configs
@@ -73,6 +75,7 @@ def initialize_model(model_config, device):
     print(f"  LoRA alpha per bit: {model_config.lora_alpha_per_bit}")
     print(f"  Activation bits per bit: {model_config.activation_bits_per_bit}")
     print(f"  KV cache bits per bit: {model_config.kv_cache_bits_per_bit}")
+    print(f"  Default KV cache bits: {model_config.kv_cache_bits}")
 
     # Use switchable model if configured
     model = SwitchableQATGPT2(gpt2_config, bit_widths=model_config.bit_widths)
