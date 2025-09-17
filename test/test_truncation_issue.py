@@ -43,14 +43,19 @@ class TruncationTester:
 
             self.model = SwitchableQATGPT2(config, bit_widths=bit_widths, initialize_weights=False)
 
-            # Load model state
+            # Load model state with strict=False to handle mismatched keys
             if 'model_state_dict' in checkpoint:
-                self.model.load_state_dict(checkpoint['model_state_dict'])
+                missing_keys, unexpected_keys = self.model.load_state_dict(checkpoint['model_state_dict'], strict=False)
             elif 'model' in checkpoint:
-                self.model.load_state_dict(checkpoint['model'])
+                missing_keys, unexpected_keys = self.model.load_state_dict(checkpoint['model'], strict=False)
             else:
                 # Checkpoint might be just the state dict
-                self.model.load_state_dict(checkpoint)
+                missing_keys, unexpected_keys = self.model.load_state_dict(checkpoint, strict=False)
+
+            if missing_keys:
+                print(f"Warning: Missing keys in checkpoint: {len(missing_keys)} keys")
+            if unexpected_keys:
+                print(f"Warning: Unexpected keys in checkpoint: {len(unexpected_keys)} keys")
 
             self.model = self.model.to(self.device)
         else:
