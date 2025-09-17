@@ -353,6 +353,9 @@ def convert_single_to_switchable_checkpoint(checkpoint_path, output_path=None,
 
     # Save the converted checkpoint
     print(f"\nSaving converted checkpoint to: {output_path}")
+    import os
+    import pickle
+
     try:
         # First try standard save
         try:
@@ -362,14 +365,12 @@ def convert_single_to_switchable_checkpoint(checkpoint_path, output_path=None,
             print(f"Standard save failed: {e1}")
             print("Trying alternative save method...")
 
-            # Try with different parameters
-            import pickle
+            # Try with pickle directly
             with open(output_path, 'wb') as f:
                 pickle.dump(checkpoint, f, protocol=pickle.HIGHEST_PROTOCOL)
             print("Checkpoint saved successfully with pickle method")
 
         # Verify file was written correctly by checking file size
-        import os
         if os.path.exists(output_path):
             file_size = os.path.getsize(output_path)
             print(f"Checkpoint file size: {file_size / (1024*1024):.2f} MB")
