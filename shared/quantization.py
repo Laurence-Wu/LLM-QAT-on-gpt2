@@ -49,12 +49,22 @@ class LearnableFakeQuantize(nn.Module):
         self.register_buffer('running_min', torch.zeros(1))
         self.register_buffer('running_max', torch.zeros(1))
 
-        self.calibrated = True
+        self.calibrated = False  # Should be False initially, will be set True after first calibration
 
     def set_num_bits(self, value):
         """Update num_bits and recalculate quantization ranges."""
+        old_bits = self.num_bits
         self.num_bits = max(1, min(value, 32))
         self._update_quant_range()
+
+        # Reset calibration when bit-width changes
+        # Different bit-widths need different scale/zero_point calibration
+        if old_bits != self.num_bits:
+            self.calibrated = False
+            # Optionally reset statistics for clean recalibration
+            # self.running_min.zero_()
+            # self.running_max.zero_()
+            print(f"Quantizer bit-width changed from {old_bits} to {self.num_bits}, recalibration needed")
 
     def _update_quant_range(self):
         """Update quantization range based on current num_bits."""
@@ -70,6 +80,31 @@ class LearnableFakeQuantize(nn.Module):
         # 16-bit provides sufficient precision without quantization artifacts
         if self.num_bits >= 16:
             return x
+
+        # If uncalibrated in eval mode, do one-shot calibration on first input
+        if not self.calibrated and not self.training:
+            with torch.no_grad():
+                if self.per_channel:
+                    # Per-channel one-shot calibration
+                    dims_to_reduce = list(range(x.dim()))
+                    dims_to_reduce.remove(self.channel_dim)
+
+                    min_val = x
+                    max_val = x
+                    for dim in sorted(dims_to_reduce, reverse=True):
+                        min_val = min_val.min(dim=dim, keepdim=True)[0]
+                        max_val = max_val.max(dim=dim, keepdim=True)[0]
+
+                    self.running_min.resize_as_(min_val).copy_(min_val)
+                    self.running_max.resize_as_(max_val).copy_(max_val)
+                    self.scale.resize_as_(min_val)
+                    self.zero_point.resize_as_(min_val)
+                else:
+                    # Per-tensor one-shot calibration
+                    self.running_min.copy_(x.min())
+                    self.running_max.copy_(x.max())
+
+                self.calibrated = True  # Mark as calibrated
 
         if self.training:
             with torch.no_grad():  # Ensure no gradient tracking for statistics
@@ -112,30 +147,30 @@ class LearnableFakeQuantize(nn.Module):
                         self.running_min.mul_(0.9).add_(min_val, alpha=0.1)
                         self.running_max.mul_(0.9).add_(max_val, alpha=0.1)
         
-        # Update scale and zero_point in-place to avoid creating new tensors
-        with torch.no_grad():
-            if self.symmetric:
-                print("using the symmetric quantization")
-                # Paper formula: α = max(|X_R|)/(2^(N-1) - 1)
-                max_val = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
-                max_val = torch.clamp(max_val, min=self.eps)
-                # In-place update of scale
-                self.scale.copy_(max_val / (2**(self.num_bits-1) - 1))
-                self.zero_point.zero_()  # In-place zero
-            else:
-                range_val = torch.clamp(self.running_max - self.running_min, min=self.eps)
-                denom = self.quant_max - self.quant_min
-                if denom > 0:
+        # Only update scale and zero_point if we have valid statistics
+        if self.calibrated or self.training:
+            with torch.no_grad():
+                if self.symmetric:
+                    # Paper formula: α = max(|X_R|)/(2^(N-1) - 1)
+                    max_val = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
+                    max_val = torch.clamp(max_val, min=self.eps)
                     # In-place update of scale
-                    self.scale.copy_(range_val / denom)
-                    if torch.any(self.scale > 0):
-                        # In-place update of zero_point
-                        self.zero_point.copy_(torch.round(self.quant_min - self.running_min / self.scale))
-                    else:
-                        self.zero_point.zero_()
+                    self.scale.copy_(max_val / (2**(self.num_bits-1) - 1))
+                    self.zero_point.zero_()  # In-place zero
                 else:
-                    self.scale.fill_(1.0)
-                    self.zero_point.zero_()
+                    range_val = torch.clamp(self.running_max - self.running_min, min=self.eps)
+                    denom = self.quant_max - self.quant_min
+                    if denom > 0:
+                        # In-place update of scale
+                        self.scale.copy_(range_val / denom)
+                        if torch.any(self.scale > 0):
+                            # In-place update of zero_point
+                            self.zero_point.copy_(torch.round(self.quant_min - self.running_min / self.scale))
+                        else:
+                            self.zero_point.zero_()
+                    else:
+                        self.scale.fill_(1.0)
+                        self.zero_point.zero_()
 
         # Scale and zero_point are already registered buffers, so they're on the right device
         # Just use them directly without creating new tensors

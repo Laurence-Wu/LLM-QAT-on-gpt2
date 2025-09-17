@@ -100,14 +100,9 @@ def load_pretrained_weights_fixed(model, debug=False):
     model.ln_f.weight.data = pretrained.ln_f.weight.data.clone()
     model.ln_f.bias.data = pretrained.ln_f.bias.data.clone()
 
-    # Initialize LoRA parameters to zero if they exist
-    for name, param in model.named_parameters():
-        if 'lora' in name.lower() and ('lora_a' in name or 'lora_b' in name):
-            if debug:
-                print(f"Zeroing LoRA parameter: {name}")
-            if 'lora_b' in name:
-                # lora_b should be initialized to zero for no initial effect
-                param.data.zero_()
+    # Note: LoRA parameters should be initialized by the caller if needed
+    # lora_b is already initialized to zero in QATLoRALayer.__init__
+    # lora_a uses Kaiming initialization and shouldn't be zeroed
 
     # Delete pretrained model to free memory
     del pretrained
