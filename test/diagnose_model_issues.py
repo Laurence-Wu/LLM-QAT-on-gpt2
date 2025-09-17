@@ -39,10 +39,34 @@ class ModelDiagnostics:
             checkpoint = torch.load(model_path, map_location=self.device)
 
             # Load config from checkpoint or use default
-            if 'config' in checkpoint:
+            from transformers import GPT2Config
+
+            if 'config' in checkpoint and isinstance(checkpoint['config'], dict):
+                # Convert dict config to GPT2Config
+                config_dict = checkpoint['config']
+                config = GPT2Config()
+
+                # Set standard GPT2 attributes
+                config.n_layer = config_dict.get('n_layer', 12)
+                config.n_embd = config_dict.get('n_embd', 768)
+                config.n_head = config_dict.get('n_head', 12)
+                config.n_positions = config_dict.get('n_positions', 1024)
+                config.vocab_size = config_dict.get('vocab_size', 50257)
+
+                # Set LoRA attributes
+                config.lora_rank = config_dict.get('lora_rank', 8)
+                config.lora_alpha = config_dict.get('lora_alpha', 16)
+                config.lora_dropout = config_dict.get('lora_dropout', 0.0)
+
+                # Set rank per bit if available
+                if 'lora_rank_per_bit' in config_dict:
+                    config.lora_rank_per_bit = config_dict['lora_rank_per_bit']
+
+            elif 'config' in checkpoint:
+                # Config is already a GPT2Config object
                 config = checkpoint['config']
             else:
-                from transformers import GPT2Config
+                # Use default config
                 config = GPT2Config()
                 config.n_layer = 12
                 config.lora_rank = 8
