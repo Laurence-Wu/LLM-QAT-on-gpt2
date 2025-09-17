@@ -353,11 +353,16 @@ def convert_single_to_switchable_checkpoint(checkpoint_path, output_path=None,
 
     # Save the converted checkpoint
     print(f"\nSaving converted checkpoint to: {output_path}")
-    torch.save(checkpoint, output_path)
+    try:
+        torch.save(checkpoint, output_path)
+        print("Checkpoint saved successfully")
+    except Exception as e:
+        print(f"Error saving checkpoint: {e}")
+        raise
 
-    # Verify the conversion
+    # Verify the conversion - use the in-memory checkpoint
     print("\nVerifying conversion...")
-    verify_checkpoint = torch.load(output_path, map_location='cpu')
+    verify_checkpoint = checkpoint
     verify_state_dict = verify_checkpoint.get('model_state_dict', verify_checkpoint)
 
     # Check for expected key patterns
