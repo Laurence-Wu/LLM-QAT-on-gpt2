@@ -29,8 +29,38 @@ def test_with_fixes():
     print("="*70)
     
     # Load model
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     if os.path.exists(args.model_path):
-        model = torch.load(args.model_path)
+        checkpoint = torch.load(args.model_path, map_location=device)
+
+        # Load config from checkpoint or use default
+        if 'config' in checkpoint:
+            config = checkpoint['config']
+        else:
+            config = GPT2Config()
+            config.n_layer = 12
+            config.lora_rank = 8
+            config.lora_alpha = 16
+            config.lora_dropout = 0.0
+
+        # Create model and load state dict
+        if 'bit_widths' in checkpoint:
+            bit_widths = checkpoint['bit_widths']
+        else:
+            bit_widths = [4, 8, 16]
+
+        model = SwitchableQATGPT2(config, bit_widths=bit_widths, initialize_weights=False)
+
+        # Load model state
+        if 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+        elif 'model' in checkpoint:
+            model.load_state_dict(checkpoint['model'])
+        else:
+            # Checkpoint might be just the state dict
+            model.load_state_dict(checkpoint)
+
+        model = model.to(device)
     else:
         config = GPT2Config()
         config.n_layer = 12
@@ -39,10 +69,10 @@ def test_with_fixes():
         config.lora_dropout = 0.0
         model = SwitchableQATGPT2(config, bit_widths=[4, 8, 16], initialize_weights=False)
         load_pretrained_weights(model)
+        model = model.to(device)
 
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     tokenizer.pad_token = tokenizer.eos_token
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # Test prompt for all fixes
     test_prompts = [

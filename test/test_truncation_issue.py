@@ -23,7 +23,36 @@ class TruncationTester:
         # Load model
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         if os.path.exists(model_path):
-            self.model = torch.load(model_path, map_location=self.device)
+            checkpoint = torch.load(model_path, map_location=self.device)
+
+            # Load config from checkpoint or use default
+            if 'config' in checkpoint:
+                config = checkpoint['config']
+            else:
+                config = GPT2Config()
+                config.n_layer = 12
+                config.lora_rank = 8
+                config.lora_alpha = 16
+                config.lora_dropout = 0.0
+
+            # Create model and load state dict
+            if 'bit_widths' in checkpoint:
+                bit_widths = checkpoint['bit_widths']
+            else:
+                bit_widths = [4, 8, 16]
+
+            self.model = SwitchableQATGPT2(config, bit_widths=bit_widths, initialize_weights=False)
+
+            # Load model state
+            if 'model_state_dict' in checkpoint:
+                self.model.load_state_dict(checkpoint['model_state_dict'])
+            elif 'model' in checkpoint:
+                self.model.load_state_dict(checkpoint['model'])
+            else:
+                # Checkpoint might be just the state dict
+                self.model.load_state_dict(checkpoint)
+
+            self.model = self.model.to(self.device)
         else:
             config = GPT2Config()
             config.n_layer = 12
