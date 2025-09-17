@@ -58,13 +58,21 @@ class ModelDiagnostics:
                 config.lora_alpha = config_dict.get('lora_alpha', 16)
                 config.lora_dropout = config_dict.get('lora_dropout', 0.0)
 
-                # Set rank per bit if available
-                if 'lora_rank_per_bit' in config_dict:
-                    config.lora_rank_per_bit = config_dict['lora_rank_per_bit']
+                # Set switchable precision configs - use defaults if not in checkpoint
+                config.lora_rank_per_bit = config_dict.get('lora_rank_per_bit', {4: 8, 8: 16, 16: 32})
+                config.lora_alpha_per_bit = config_dict.get('lora_alpha_per_bit', {4: 16, 8: 32, 16: 64})
+                config.activation_bits_per_bit = config_dict.get('activation_bits_per_bit', {4: 4, 8: 8, 16: 16})
+                config.kv_cache_bits_per_bit = config_dict.get('kv_cache_bits_per_bit', {4: 4, 8: 8, 16: 16})
 
             elif 'config' in checkpoint:
                 # Config is already a GPT2Config object
                 config = checkpoint['config']
+                # Ensure switchable precision configs exist
+                if not hasattr(config, 'lora_rank_per_bit'):
+                    config.lora_rank_per_bit = {4: 8, 8: 16, 16: 32}
+                    config.lora_alpha_per_bit = {4: 16, 8: 32, 16: 64}
+                    config.activation_bits_per_bit = {4: 4, 8: 8, 16: 16}
+                    config.kv_cache_bits_per_bit = {4: 4, 8: 8, 16: 16}
             else:
                 # Use default config
                 config = GPT2Config()
@@ -72,6 +80,11 @@ class ModelDiagnostics:
                 config.lora_rank = 8
                 config.lora_alpha = 16
                 config.lora_dropout = 0.0
+                # Add switchable precision configs
+                config.lora_rank_per_bit = {4: 8, 8: 16, 16: 32}
+                config.lora_alpha_per_bit = {4: 16, 8: 32, 16: 64}
+                config.activation_bits_per_bit = {4: 4, 8: 8, 16: 16}
+                config.kv_cache_bits_per_bit = {4: 4, 8: 8, 16: 16}
 
             # Create model and load state dict
             if 'bit_widths' in checkpoint:
@@ -106,6 +119,11 @@ class ModelDiagnostics:
             config.lora_rank = 8
             config.lora_alpha = 16
             config.lora_dropout = 0.0
+            # Add switchable precision configs
+            config.lora_rank_per_bit = {4: 8, 8: 16, 16: 32}
+            config.lora_alpha_per_bit = {4: 16, 8: 32, 16: 64}
+            config.activation_bits_per_bit = {4: 4, 8: 8, 16: 16}
+            config.kv_cache_bits_per_bit = {4: 4, 8: 8, 16: 16}
             self.model = SwitchableQATGPT2(config, bit_widths=[4, 8, 16], initialize_weights=False)
             print("No checkpoint found - loading pretrained weights for baseline")
             load_pretrained_weights(self.model)

@@ -319,9 +319,18 @@ class SwitchableQATGPT2Attention(nn.Module):
         self.head_dim = self.n_embd // self.n_head
         self.bit_widths = bit_widths
 
-        # Get LoRA configs from config - these must be provided in the config
-        lora_rank_per_bit = config.lora_rank_per_bit
-        lora_alpha_per_bit = config.lora_alpha_per_bit
+        # Get LoRA configs from config - throw error if not provided
+        try:
+            lora_rank_per_bit = config.lora_rank_per_bit
+            lora_alpha_per_bit = config.lora_alpha_per_bit
+        except AttributeError as e:
+            print(f"Error: Config missing required switchable precision attributes: {e}")
+            print("Required config attributes: lora_rank_per_bit, lora_alpha_per_bit")
+            print("These should be defined in config_qat.py or passed when creating the config")
+            raise AttributeError(
+                "Config must have lora_rank_per_bit and lora_alpha_per_bit. "
+                "Example: config.lora_rank_per_bit = {4: 8, 8: 16, 16: 32}"
+            )
         lora_dropout = config.lora_dropout
 
         # Switchable layers
@@ -385,9 +394,18 @@ class SwitchableQATGPT2MLP(nn.Module):
         super().__init__()
         self.bit_widths = bit_widths
 
-        # Get LoRA configs from config - these must be provided in the config
-        lora_rank_per_bit = config.lora_rank_per_bit
-        lora_alpha_per_bit = config.lora_alpha_per_bit
+        # Get LoRA configs from config - throw error if not provided
+        try:
+            lora_rank_per_bit = config.lora_rank_per_bit
+            lora_alpha_per_bit = config.lora_alpha_per_bit
+        except AttributeError as e:
+            print(f"Error: Config missing required switchable precision attributes: {e}")
+            print("Required config attributes: lora_rank_per_bit, lora_alpha_per_bit")
+            print("These should be defined in config_qat.py or passed when creating the config")
+            raise AttributeError(
+                "Config must have lora_rank_per_bit and lora_alpha_per_bit. "
+                "Example: config.lora_rank_per_bit = {4: 8, 8: 16, 16: 32}"
+            )
         lora_dropout = config.lora_dropout
 
         self.c_fc = SwitchableQATLinearWithLoRA(

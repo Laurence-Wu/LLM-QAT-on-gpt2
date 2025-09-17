@@ -34,11 +34,17 @@ except ImportError:
 
 def initialize_model(model_config, device):
     # Validate required config attributes for switchable precision
-    required_attrs = ['lora_rank_per_bit', 'lora_alpha_per_bit',
-                     'activation_bits_per_bit', 'kv_cache_bits_per_bit']
-    for attr in required_attrs:
-        if not hasattr(model_config, attr):
-            raise AttributeError(f"ModelConfig missing required attribute: {attr}")
+    # Try to access each required attribute, throw error if any are missing
+    try:
+        _ = model_config.lora_rank_per_bit
+        _ = model_config.lora_alpha_per_bit
+        _ = model_config.activation_bits_per_bit
+        _ = model_config.kv_cache_bits_per_bit
+    except AttributeError as e:
+        print(f"Error: ModelConfig missing required attribute: {e}")
+        print("Required attributes: lora_rank_per_bit, lora_alpha_per_bit, activation_bits_per_bit, kv_cache_bits_per_bit")
+        print("These should be defined in ModelConfig class in config_qat.py")
+        raise AttributeError(f"ModelConfig missing required switchable precision attribute: {e}")
 
     gpt2_config = GPT2Config(
         vocab_size=model_config.vocab_size,
@@ -59,6 +65,14 @@ def initialize_model(model_config, device):
     gpt2_config.lora_alpha_per_bit = model_config.lora_alpha_per_bit
     gpt2_config.activation_bits_per_bit = model_config.activation_bits_per_bit
     gpt2_config.kv_cache_bits_per_bit = model_config.kv_cache_bits_per_bit
+
+    # Print configuration being used
+    print(f"Initializing SwitchableQATGPT2 with configurations:")
+    print(f"  Bit widths: {model_config.bit_widths}")
+    print(f"  LoRA rank per bit: {model_config.lora_rank_per_bit}")
+    print(f"  LoRA alpha per bit: {model_config.lora_alpha_per_bit}")
+    print(f"  Activation bits per bit: {model_config.activation_bits_per_bit}")
+    print(f"  KV cache bits per bit: {model_config.kv_cache_bits_per_bit}")
 
     # Use switchable model if configured
     model = SwitchableQATGPT2(gpt2_config, bit_widths=model_config.bit_widths)
