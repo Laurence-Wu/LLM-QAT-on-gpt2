@@ -49,7 +49,7 @@ class LearnableFakeQuantize(nn.Module):
         self.register_buffer('running_min', torch.zeros(1))
         self.register_buffer('running_max', torch.zeros(1))
 
-        self.calibrated = False
+        self.calibrated = True
 
     def set_num_bits(self, value):
         """Update num_bits and recalculate quantization ranges."""
