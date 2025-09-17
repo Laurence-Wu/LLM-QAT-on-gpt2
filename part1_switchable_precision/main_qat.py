@@ -33,6 +33,13 @@ except ImportError:
 
 
 def initialize_model(model_config, device):
+    # Validate required config attributes for switchable precision
+    required_attrs = ['lora_rank_per_bit', 'lora_alpha_per_bit',
+                     'activation_bits_per_bit', 'kv_cache_bits_per_bit']
+    for attr in required_attrs:
+        if not hasattr(model_config, attr):
+            raise AttributeError(f"ModelConfig missing required attribute: {attr}")
+
     gpt2_config = GPT2Config(
         vocab_size=model_config.vocab_size,
         n_positions=model_config.n_positions,
@@ -46,6 +53,12 @@ def initialize_model(model_config, device):
         lora_alpha=model_config.lora_alpha,
         lora_dropout=model_config.lora_dropout
     )
+
+    # Add switchable precision specific configs
+    gpt2_config.lora_rank_per_bit = model_config.lora_rank_per_bit
+    gpt2_config.lora_alpha_per_bit = model_config.lora_alpha_per_bit
+    gpt2_config.activation_bits_per_bit = model_config.activation_bits_per_bit
+    gpt2_config.kv_cache_bits_per_bit = model_config.kv_cache_bits_per_bit
 
     # Use switchable model if configured
     model = SwitchableQATGPT2(gpt2_config, bit_widths=model_config.bit_widths)

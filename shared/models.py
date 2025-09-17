@@ -319,9 +319,9 @@ class SwitchableQATGPT2Attention(nn.Module):
         self.head_dim = self.n_embd // self.n_head
         self.bit_widths = bit_widths
 
-        # Get LoRA configs from config
-        lora_rank_per_bit = {4: 32, 8: 16, 16: 8}
-        lora_alpha_per_bit = {4: 64, 8: 32, 16: 16}
+        # Get LoRA configs from config - these must be provided in the config
+        lora_rank_per_bit = config.lora_rank_per_bit
+        lora_alpha_per_bit = config.lora_alpha_per_bit
         lora_dropout = config.lora_dropout
 
         # Switchable layers
@@ -385,9 +385,9 @@ class SwitchableQATGPT2MLP(nn.Module):
         super().__init__()
         self.bit_widths = bit_widths
 
-        # Get LoRA configs
-        lora_rank_per_bit = {4: 32, 8: 16, 16: 8}
-        lora_alpha_per_bit = {4: 64, 8: 32, 16: 16}
+        # Get LoRA configs from config - these must be provided in the config
+        lora_rank_per_bit = config.lora_rank_per_bit
+        lora_alpha_per_bit = config.lora_alpha_per_bit
         lora_dropout = config.lora_dropout
 
         self.c_fc = SwitchableQATLinearWithLoRA(
