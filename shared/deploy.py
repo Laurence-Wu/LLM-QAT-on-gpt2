@@ -140,7 +140,33 @@ def save_int8_checkpoint(model, filepath, model_config=None, training_config=Non
 
     # Add configurations if provided
     if model_config is not None:
-        checkpoint['model_config'] = model_config.__dict__
+        # Create comprehensive model configuration dictionary
+        model_config_dict = model_config.__dict__.copy()
+
+        # Ensure critical QAT configurations are included
+        critical_configs = [
+            'lora_rank_per_bit', 'lora_alpha_per_bit',
+            'activation_bits_per_bit', 'kv_cache_bits_per_bit',
+            'bit_widths', 'switch_strategy', 'switch_interval', 'curriculum_schedule'
+        ]
+
+        for config_key in critical_configs:
+            if hasattr(model_config, config_key):
+                model_config_dict[config_key] = getattr(model_config, config_key)
+
+        # Verify lora_rank_per_bit and lora_alpha_per_bit are present
+        if 'lora_rank_per_bit' not in model_config_dict or model_config_dict['lora_rank_per_bit'] is None:
+            print("Warning: 'lora_rank_per_bit' configuration is missing or None!")
+            # Use defaults from config_qat.py if missing
+            model_config_dict['lora_rank_per_bit'] = {4: 8, 8: 16, 16: 32}
+
+        if 'lora_alpha_per_bit' not in model_config_dict or model_config_dict['lora_alpha_per_bit'] is None:
+            print("Warning: 'lora_alpha_per_bit' configuration is missing or None!")
+            # Use defaults from config_qat.py if missing
+            model_config_dict['lora_alpha_per_bit'] = {4: 16, 8: 32, 16: 64}
+
+        checkpoint['model_config'] = model_config_dict
+        checkpoint['bit_widths'] = model_config_dict.get('bit_widths', [4, 8, 16])  # Add for easy access
 
     if training_config is not None:
         checkpoint['training_config'] = training_config.__dict__

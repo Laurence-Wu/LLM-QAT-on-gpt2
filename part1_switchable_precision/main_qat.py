@@ -203,13 +203,37 @@ def main():
         import time
         timestamp = time.strftime('%Y%m%d_%H%M%S')
 
-        # Save FP32 model (standard checkpoint)
+        # Save FP32 model (standard checkpoint with ALL configurations)
         fp32_filename = f"qat_gpt2_{model_config.quantization_bits}bit_fp32_{timestamp}.pth"
+
+        # Create comprehensive model configuration dictionary
+        model_config_dict = model_config.__dict__.copy()
+
+        # Ensure critical QAT configurations are included
+        critical_configs = [
+            'lora_rank_per_bit', 'lora_alpha_per_bit',
+            'activation_bits_per_bit', 'kv_cache_bits_per_bit',
+            'bit_widths', 'switch_strategy', 'switch_interval', 'curriculum_schedule'
+        ]
+
+        for config_key in critical_configs:
+            if hasattr(model_config, config_key):
+                model_config_dict[config_key] = getattr(model_config, config_key)
+            else:
+                print(f"Warning: Configuration '{config_key}' not found in model_config")
+
+        # Verify lora_rank_per_bit and lora_alpha_per_bit are present and not None
+        if 'lora_rank_per_bit' not in model_config_dict or model_config_dict['lora_rank_per_bit'] is None:
+            raise ValueError("Critical configuration 'lora_rank_per_bit' is missing or None!")
+        if 'lora_alpha_per_bit' not in model_config_dict or model_config_dict['lora_alpha_per_bit'] is None:
+            raise ValueError("Critical configuration 'lora_alpha_per_bit' is missing or None!")
+
         torch.save({
             'model_state_dict': trained_model.state_dict(),
-            'model_config': model_config.__dict__,
+            'model_config': model_config_dict,
             'training_config': training_config.__dict__,
-            'timestamp': timestamp
+            'timestamp': timestamp,
+            'bit_widths': getattr(model_config, 'bit_widths', [4, 8, 16])  # Add for easy access
         }, fp32_filename)
         print(f"Saved FP32 model to {fp32_filename}")
 
