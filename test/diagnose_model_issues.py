@@ -191,14 +191,26 @@ class ModelDiagnostics:
         
         # Get first layer's quantizers
         first_layer = self.model.h[0].attn.c_attn
-        
-        # Record initial state
-        initial_state = {
-            'input_scale': first_layer.quantize_input.scale.item(),
-            'input_calibrated': first_layer.quantize_input.calibrated,
-            'weight_scale': first_layer.quantize_weight.scale.item(),
-            'weight_calibrated': first_layer.quantize_weight.calibrated
-        }
+
+        # Handle different quantizer structures
+        initial_state = {}
+        if hasattr(first_layer, 'quantizers_input'):  # SwitchableQATLinearWithLoRA
+            bits_key = f'{first_layer.current_bits}bit'
+            if bits_key in first_layer.quantizers_input:
+                initial_state['input_scale'] = first_layer.quantizers_input[bits_key].scale.item()
+                initial_state['input_calibrated'] = first_layer.quantizers_input[bits_key].calibrated
+            if bits_key in first_layer.quantizers_weight:
+                initial_state['weight_scale'] = first_layer.quantizers_weight[bits_key].scale.item()
+                initial_state['weight_calibrated'] = first_layer.quantizers_weight[bits_key].calibrated
+        elif hasattr(first_layer, 'quantize_input'):  # QATLinearWithLoRA
+            initial_state['input_scale'] = first_layer.quantize_input.scale.item()
+            initial_state['input_calibrated'] = first_layer.quantize_input.calibrated
+            initial_state['weight_scale'] = first_layer.quantize_weight.scale.item()
+            initial_state['weight_calibrated'] = first_layer.quantize_weight.calibrated
+        else:
+            print("Warning: Could not find quantizers in first layer")
+            self.results['quantization_stability'] = {'error': 'No quantizers found'}
+            return
         
         print("Initial quantizer state:")
         for key, val in initial_state.items():
@@ -217,17 +229,25 @@ class ModelDiagnostics:
                 current_ids = torch.cat([current_ids, next_token.unsqueeze(0).unsqueeze(0)], dim=1)
                 
                 # Record scale
-                scales_during_generation.append({
-                    'step': step,
-                    'input_scale': first_layer.quantize_input.scale.item(),
-                    'weight_scale': first_layer.quantize_weight.scale.item()
-                })
+                scale_data = {'step': step}
+
+                if hasattr(first_layer, 'quantizers_input'):  # SwitchableQATLinearWithLoRA
+                    bits_key = f'{first_layer.current_bits}bit'
+                    if bits_key in first_layer.quantizers_input:
+                        scale_data['input_scale'] = first_layer.quantizers_input[bits_key].scale.item()
+                    if bits_key in first_layer.quantizers_weight:
+                        scale_data['weight_scale'] = first_layer.quantizers_weight[bits_key].scale.item()
+                elif hasattr(first_layer, 'quantize_input'):  # QATLinearWithLoRA
+                    scale_data['input_scale'] = first_layer.quantize_input.scale.item()
+                    scale_data['weight_scale'] = first_layer.quantize_weight.scale.item()
+
+                scales_during_generation.append(scale_data)
         
         # Check if scales changed
         scale_changes = []
         for i, scales in enumerate(scales_during_generation):
-            input_change = abs(scales['input_scale'] - initial_state['input_scale'])
-            weight_change = abs(scales['weight_scale'] - initial_state['weight_scale'])
+            input_change = abs(scales.get('input_scale', 0) - initial_state.get('input_scale', 0))
+            weight_change = abs(scales.get('weight_scale', 0) - initial_state.get('weight_scale', 0))
             scale_changes.append(input_change + weight_change)
             
             if input_change > 0.001 or weight_change > 0.001:
@@ -319,9 +339,16 @@ class ModelDiagnostics:
         # Temporarily disable LoRA
         lora_modules = []
         for name, module in self.model.named_modules():
-            if hasattr(module, 'lora'):
-                lora_modules.append((name, module.lora.scaling))
-                module.lora.scaling = 0  # Disable LoRA
+            # Handle different LoRA structures
+            if hasattr(module, 'lora_adapters'):  # SwitchableQATLinearWithLoRA
+                for bits_key, adapter in module.lora_adapters.items():
+                    if hasattr(adapter, 'scaling'):
+                        lora_modules.append((f"{name}.{bits_key}", adapter, adapter.scaling))
+                        adapter.scaling = 0  # Disable LoRA
+            elif hasattr(module, 'lora'):  # QATLinearWithLoRA
+                if hasattr(module.lora, 'scaling'):
+                    lora_modules.append((name, module.lora, module.lora.scaling))
+                    module.lora.scaling = 0  # Disable LoRA
         
         print(f"Disabled {len(lora_modules)} LoRA modules")
         
@@ -337,11 +364,8 @@ class ModelDiagnostics:
         generated_without_lora = self.tokenizer.decode(outputs_without_lora[0], skip_special_tokens=True)
         
         # Restore LoRA
-        for name, original_scaling in lora_modules:
-            module = self.model
-            for attr in name.split('.'):
-                module = getattr(module, attr)
-            module.lora.scaling = original_scaling
+        for name, lora_module, original_scaling in lora_modules:
+            lora_module.scaling = original_scaling
         
         self.results['lora_interference'] = {
             'with_lora': generated_with_lora,
