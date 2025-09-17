@@ -20,6 +20,17 @@ import json
 from copy import deepcopy
 import numpy as np
 
+# Add parent directory to path to import config
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Try to import the config
+try:
+    from part1_switchable_precision.config_qat import ModelConfig
+    CONFIG_AVAILABLE = True
+except ImportError:
+    print("Warning: Could not import ModelConfig from config_qat")
+    CONFIG_AVAILABLE = False
+
 
 def adapt_lora_rank(tensor, original_rank, target_rank, matrix_type='A'):
     """
@@ -110,8 +121,62 @@ def detect_lora_rank(state_dict):
         return None
 
 
+def get_config_from_checkpoint_or_default(checkpoint):
+    """
+    Extract configuration from checkpoint or use defaults.
+
+    Args:
+        checkpoint: The loaded checkpoint dictionary
+
+    Returns:
+        config object or dict with configuration
+    """
+    config_data = {}
+
+    # First, try to get config from checkpoint
+    if isinstance(checkpoint, dict) and 'config' in checkpoint:
+        stored_config = checkpoint['config']
+        print("Found config in checkpoint")
+
+        # Extract relevant config values
+        if isinstance(stored_config, dict):
+            config_data = stored_config.copy()
+        else:
+            # If it's an object, try to extract attributes
+            try:
+                config_data['bit_widths'] = getattr(stored_config, 'bit_widths', [4, 8, 16])
+                config_data['lora_rank_per_bit'] = getattr(stored_config, 'lora_rank_per_bit', None)
+                config_data['lora_alpha_per_bit'] = getattr(stored_config, 'lora_alpha_per_bit', None)
+                config_data['lora_rank'] = getattr(stored_config, 'lora_rank', 8)
+                config_data['lora_alpha'] = getattr(stored_config, 'lora_alpha', 16)
+            except Exception as e:
+                print(f"Warning: Could not extract config attributes: {e}")
+
+    # If config not in checkpoint or incomplete, use ModelConfig if available
+    if CONFIG_AVAILABLE and (not config_data or 'lora_rank_per_bit' not in config_data):
+        print("Using ModelConfig from config_qat.py")
+        model_config = ModelConfig()
+        config_data['bit_widths'] = model_config.bit_widths
+        config_data['lora_rank_per_bit'] = model_config.lora_rank_per_bit
+        config_data['lora_alpha_per_bit'] = model_config.lora_alpha_per_bit
+        config_data['lora_rank'] = model_config.lora_rank
+        config_data['lora_alpha'] = model_config.lora_alpha
+        config_data['activation_bits_per_bit'] = model_config.activation_bits_per_bit
+        config_data['kv_cache_bits_per_bit'] = model_config.kv_cache_bits_per_bit
+
+    # Final fallback to hardcoded defaults
+    if 'bit_widths' not in config_data:
+        config_data['bit_widths'] = [4, 8, 16]
+    if 'lora_rank_per_bit' not in config_data:
+        # Note: Using the shared/lora.py defaults which seem to be the actual implementation
+        config_data['lora_rank_per_bit'] = {4: 32, 8: 16, 16: 8}
+        print("Warning: Using fallback LoRA ranks (4:32, 8:16, 16:8)")
+
+    return config_data
+
+
 def convert_single_to_switchable_checkpoint(checkpoint_path, output_path=None,
-                                           lora_rank_per_bit=None):
+                                           lora_rank_per_bit=None, use_config=True):
     """
     Convert a single-precision QAT checkpoint to switchable multi-precision format
     with LoRA rank adaptation.
@@ -120,6 +185,7 @@ def convert_single_to_switchable_checkpoint(checkpoint_path, output_path=None,
         checkpoint_path: Path to the original checkpoint
         output_path: Path for the converted checkpoint (optional)
         lora_rank_per_bit: Dict mapping bit-width to LoRA rank (optional)
+        use_config: Whether to use config from checkpoint/file (default: True)
 
     Returns:
         Path to the converted checkpoint
@@ -127,12 +193,6 @@ def convert_single_to_switchable_checkpoint(checkpoint_path, output_path=None,
     print(f"\n{'='*70}")
     print("CHECKPOINT CONVERSION V2: With LoRA Rank Adaptation")
     print(f"{'='*70}\n")
-
-    # Default LoRA ranks per bit-width (matching model architecture)
-    if lora_rank_per_bit is None:
-        lora_rank_per_bit = {4: 32, 8: 16, 16: 8}
-
-    print(f"Target LoRA ranks per bit-width: {lora_rank_per_bit}")
 
     # Load the original checkpoint
     print(f"\nLoading checkpoint: {checkpoint_path}")
@@ -157,15 +217,33 @@ def convert_single_to_switchable_checkpoint(checkpoint_path, output_path=None,
 
     print(f"Original state dict has {len(old_state_dict)} keys")
 
+    # Get configuration
+    if use_config:
+        config_data = get_config_from_checkpoint_or_default(checkpoint)
+        bit_widths = config_data['bit_widths']
+        if lora_rank_per_bit is None:
+            lora_rank_per_bit = config_data['lora_rank_per_bit']
+    else:
+        bit_widths = [4, 8, 16]
+        if lora_rank_per_bit is None:
+            lora_rank_per_bit = {4: 32, 8: 16, 16: 8}
+
+    print(f"Using bit widths: {bit_widths}")
+    print(f"Target LoRA ranks per bit-width: {lora_rank_per_bit}")
+
     # Detect original LoRA rank
     original_rank = detect_lora_rank(old_state_dict)
     if original_rank is None:
-        print("Warning: Could not detect LoRA rank, assuming 8")
-        original_rank = 8
+        # Try to get from config
+        if use_config and 'lora_rank' in config_data:
+            original_rank = config_data['lora_rank']
+            print(f"Using LoRA rank from config: {original_rank}")
+        else:
+            print("Warning: Could not detect LoRA rank, assuming 8")
+            original_rank = 8
 
     # Create the new state dict with converted keys
     new_state_dict = {}
-    bit_widths = [4, 8, 16]
 
     # Statistics
     converted_keys = {
@@ -237,14 +315,28 @@ def convert_single_to_switchable_checkpoint(checkpoint_path, output_path=None,
     # Update the checkpoint with new state dict
     checkpoint['model_state_dict'] = new_state_dict
 
-    # Add bit_widths and LoRA ranks to config
+    # Add complete configuration to checkpoint
     try:
-        if 'config' in checkpoint:
+        if use_config:
+            # Store the complete config
+            if 'config' not in checkpoint:
+                checkpoint['config'] = {}
+
             checkpoint['config']['bit_widths'] = bit_widths
             checkpoint['config']['lora_rank_per_bit'] = lora_rank_per_bit
+
+            # Add other config values if available
+            if 'lora_alpha_per_bit' in config_data:
+                checkpoint['config']['lora_alpha_per_bit'] = config_data['lora_alpha_per_bit']
+            if 'activation_bits_per_bit' in config_data:
+                checkpoint['config']['activation_bits_per_bit'] = config_data['activation_bits_per_bit']
+            if 'kv_cache_bits_per_bit' in config_data:
+                checkpoint['config']['kv_cache_bits_per_bit'] = config_data['kv_cache_bits_per_bit']
+
             print(f"\nAdded to config:")
-            print(f"  bit_widths: {bit_widths}")
-            print(f"  lora_rank_per_bit: {lora_rank_per_bit}")
+            for key, value in checkpoint['config'].items():
+                if isinstance(value, dict) or isinstance(value, list):
+                    print(f"  {key}: {value}")
         else:
             checkpoint['bit_widths'] = bit_widths
             checkpoint['lora_rank_per_bit'] = lora_rank_per_bit
@@ -420,6 +512,8 @@ def main():
                         help='Only analyze checkpoint structure without conversion')
     parser.add_argument('--lora-ranks', type=str, default=None,
                         help='LoRA ranks per bit-width as JSON string, e.g., \'{"4": 32, "8": 16, "16": 8}\'')
+    parser.add_argument('--no-config', action='store_true',
+                        help='Do not use config from checkpoint or config file')
 
     args = parser.parse_args()
 
@@ -447,7 +541,8 @@ def main():
         output_path = convert_single_to_switchable_checkpoint(
             args.checkpoint_path,
             args.output,
-            lora_rank_per_bit
+            lora_rank_per_bit,
+            use_config=not args.no_config
         )
 
         print(f"\n{'='*70}")
