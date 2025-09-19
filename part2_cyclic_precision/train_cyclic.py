@@ -167,7 +167,7 @@ def train_with_cpt(model, train_loader, val_loader, training_config,
     Implements Step 5 of Algorithm Test 2: Dynamic bit-width changes during training.
 
     Args:
-        model: QATGPT2 model with switchable quantization
+        model: CPTLMHeadModel with cyclic precision training
         train_loader: Training data loader (SQuAD dataset)
         val_loader: Validation data loader
         training_config: Training configuration
@@ -398,7 +398,7 @@ def explore_bit_width_configurations(model, train_loader, val_loader, training_c
     Tests multiple cyclic patterns to find optimal configuration.
 
     Args:
-        model: QATGPT2 model
+        model: CPTLMHeadModel
         train_loader: Training data loader
         val_loader: Validation data loader
         training_config: Training configuration

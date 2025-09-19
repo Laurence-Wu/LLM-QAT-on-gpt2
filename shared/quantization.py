@@ -11,7 +11,7 @@ class QuantizationFunction(torch.autograd.Function):
         ctx.num_bits = num_bits
         ctx.symmetric = symmetric
         
-        # Symmetric MinMax quantization without clipping (following LLM-QAT paper)
+        # Symmetric MinMax quantization without clipping
         if symmetric:
             # Paper formula: X_Q = α⌊X_R/α⌉, α = max(|X_R|)/(2^(N-1) - 1)
             quantized = torch.round(input / scale)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Part 1: QAT (Quantization-Aware Training)
-Single precision training with fake quantization to simulate low-precision effects.
+Part 1: Switchable Precision (SP)
+Multi-precision training with separate LoRA adapters for each bit-width.
 """
 
 import os
@@ -26,11 +26,11 @@ from shared.deploy import save_int8_checkpoint
 
 # Use try/except to handle both direct execution and import cases
 try:
-    from config_qat import ModelConfig, TrainingConfig
-    from train_qat import train_qat
+    from config_sp import ModelConfig, TrainingConfig
+    from train_sp import train_sp
 except ImportError:
-    from .config_qat import ModelConfig, TrainingConfig
-    from .train_qat import train_qat
+    from .config_sp import ModelConfig, TrainingConfig
+    from .train_sp import train_sp
 
 
 def initialize_model(model_config, device):
@@ -45,7 +45,7 @@ def initialize_model(model_config, device):
     except AttributeError as e:
         print(f"Error: ModelConfig missing required attribute: {e}")
         print("Required attributes: lora_rank_per_bit, lora_alpha_per_bit, activation_bits_per_bit, kv_cache_bits_per_bit, kv_cache_bits")
-        print("These should be defined in ModelConfig class in config_qat.py")
+        print("These should be defined in ModelConfig class in config_sp.py")
         raise AttributeError(f"ModelConfig missing required switchable precision attribute: {e}")
 
     gpt2_config = GPT2Config(
@@ -70,7 +70,7 @@ def initialize_model(model_config, device):
     gpt2_config.kv_cache_bits_per_bit = model_config.kv_cache_bits_per_bit
 
     # Print configuration being used
-    print(f"Initializing SwitchableQATGPT2 with configurations:")
+    print(f"Initializing SP Model with configurations:")
     print(f"  Bit widths: {model_config.bit_widths}")
     print(f"  LoRA rank per bit: {model_config.lora_rank_per_bit}")
     print(f"  LoRA alpha per bit: {model_config.lora_alpha_per_bit}")
@@ -79,7 +79,8 @@ def initialize_model(model_config, device):
     print(f"  Default KV cache bits: {model_config.kv_cache_bits}")
 
     # Use switchable model if configured
-    model = SwitchableQATGPT2(gpt2_config, bit_widths=model_config.bit_widths)
+    gpt2_config.bit_widths = model_config.bit_widths
+    model = SPLMHeadModel(gpt2_config)
 
 
     # Explicitly enable gradient checkpointing
@@ -95,7 +96,7 @@ def initialize_model(model_config, device):
     # Model should be on the GPU
     model = model.to(device)
 
-    print(f"QAT Model: {model_config.n_layer} layers, {model_config.quantization_bits}-bit quantization")
+    print(f"SP Model: {model_config.n_layer} layers, bit-widths: {model_config.bit_widths}")
     print(f"Gradient checkpointing: {model.use_gradient_checkpointing}")
 
     return model
@@ -121,7 +122,7 @@ def load_pretrained_weights(model):
         model.h[i].ln_2.weight.data = pretrained.h[i].ln_2.weight.data.clone()
         model.h[i].ln_2.bias.data = pretrained.h[i].ln_2.bias.data.clone()
 
-        # For QKV matrixs
+        # Attention QKV weights
         model.h[i].attn.c_attn.linear.weight.data = pretrained.h[i].attn.c_attn.weight.data.t().contiguous()
         model.h[i].attn.c_attn.linear.bias.data = pretrained.h[i].attn.c_attn.bias.data.clone()
         #  for attention layer projection
@@ -149,7 +150,7 @@ def load_pretrained_weights(model):
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description='QAT Training Script')
+    parser = argparse.ArgumentParser(description='Switchable Precision Training Script')
     parser.add_argument('--checkpoint', type=str, default=None,
                        help='Path to checkpoint to resume from')
     args = parser.parse_args()
@@ -189,7 +190,7 @@ def main():
     print(f"GPU: {torch.cuda.get_device_name(0)}")
     print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
 
-    trained_model, training_stats = train_qat(
+    trained_model, training_stats = train_sp(
         model,
         train_loader,
         val_loader,
@@ -210,7 +211,7 @@ def main():
         # Create comprehensive model configuration dictionary
         model_config_dict = model_config.__dict__.copy()
 
-        # Ensure critical QAT configurations are included
+        # Ensure critical SP configurations are included
         critical_configs = [
             'lora_rank_per_bit', 'lora_alpha_per_bit',
             'activation_bits_per_bit', 'kv_cache_bits_per_bit',
@@ -239,7 +240,7 @@ def main():
         print(f"Saved FP32 model to {fp32_filename}")
 
         # Save INT8 model (quantized for deployment)
-        int8_filename = f"qat_gpt2_{model_config.quantization_bits}bit_int8_{timestamp}.pth"
+        int8_filename = f"sp_gpt2_int8_{timestamp}.pth"
         save_int8_checkpoint(trained_model, int8_filename, model_config, training_config)
 
     except Exception as e:

@@ -1,4 +1,4 @@
-# LLM Quantization-Aware Training (QAT) on GPT-2
+# LLM Switchable and Cyclic Precision Training on GPT-2
 
 A comprehensive framework for training quantized GPT-2 models with switchable and cyclic precision approaches. This project explores different quantization training strategies and provides thorough analysis tools.
 

@@ -1,5 +1,5 @@
 """
-Configuration for Quantization-Aware Training (QAT)
+Configuration for Switchable Precision Training
 Simplified and unified configuration.
 """
 
@@ -44,7 +44,7 @@ class ModelConfig:
 
 
 class TrainingConfig:
-    """Training configuration for QAT."""
+    """Training configuration for Switchable Precision."""
     def __init__(self):
         # Dataset
         self.train_split = 'train[:5000]'

@@ -52,7 +52,7 @@ def initialize_model(model_config, device):
     gpt2_config.lora_dropout = model_config.lora_dropout
 
     # Initialize model
-    model = QATGPT2(gpt2_config,quantization_bits=model_config.default_bit_width)
+    model = CPTLMHeadModel(gpt2_config)
 
     # Load pretrained weights if requested
     if model_config.use_pretrained:

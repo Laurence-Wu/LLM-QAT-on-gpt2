@@ -1,5 +1,5 @@
 """
-Deployment utilities for converting QAT models to INT8 format.
+Deployment utilities for converting quantized models to INT8 format.
 """
 
 import torch
@@ -8,10 +8,10 @@ import torch.nn as nn
 
 def convert_to_int8(model):
     """
-    Convert QAT-trained model weights to INT8 format.
+    Convert quantization-aware trained model weights to INT8 format.
 
     Args:
-        model: QAT-trained model with FP32 weights
+        model: Quantization-aware trained model with FP32 weights
 
     Returns:
         Dictionary containing INT8 weights and quantization parameters
@@ -21,23 +21,23 @@ def convert_to_int8(model):
 
     with torch.no_grad():
         for name, module in model.named_modules():
-            # Skip regular nn.Linear layers that are not QAT layers
+            # Skip regular nn.Linear layers that are not quantized layers
             if module.__class__.__name__ == 'Linear':
                 continue
 
-            # Process QATLinearWithLoRA and SwitchableQATLinearWithLoRA layers
-            if 'QATLinear' in module.__class__.__name__ or 'SwitchableQATLinear' in module.__class__.__name__:
+            # Process LinearWithLoRA and SwitchableLinearWithLoRA layers
+            if 'LinearWithLoRA' in module.__class__.__name__ or 'SwitchableLinearWithLoRA' in module.__class__.__name__:
                 # Get weight from the appropriate location
                 if hasattr(module, 'linear'):
                     weight = module.linear.weight.data
                 else:
                     continue
 
-                # Handle both regular QAT and Switchable QAT layers
+                # Handle both regular and Switchable quantized layers
                 if hasattr(module, 'quantize_weight'):
                     weight_quantizer = module.quantize_weight
                 elif hasattr(module, 'quantizers_weight'):
-                    # For SwitchableQATLinearWithLoRA, get current bit-width quantizer
+                    # For SwitchableLinearWithLoRA, get current bit-width quantizer
                     current_bits = module.current_bits if hasattr(module, 'current_bits') else 8
                     weight_quantizer = module.quantizers_weight[f'{current_bits}bit']
                 else:
@@ -78,7 +78,7 @@ def convert_to_int8(model):
                     int8_state_dict[f"{prefix}lora.B"] = module.lora.lora_B.data.cpu()
                     int8_state_dict[f"{prefix}lora.scaling"] = torch.scalar_tensor(module.lora.scaling, dtype=torch.float32).cpu()
                 elif hasattr(module, 'loras'):
-                    # For SwitchableQATLinearWithLoRA, store current LoRA adapter
+                    # For SwitchableLinearWithLoRA, store current LoRA adapter
                     current_bits = module.current_bits if hasattr(module, 'current_bits') else 8
                     lora = module.loras[f'{current_bits}bit']
                     int8_state_dict[f"{prefix}lora.A"] = lora.lora_A.data.cpu()
@@ -93,7 +93,7 @@ def save_int8_checkpoint(model, filepath, model_config=None, training_config=Non
     Save model in INT8 format with metadata.
 
     Args:
-        model: QAT-trained model
+        model: Quantization-aware trained model
         filepath: Path to save INT8 checkpoint
         model_config: Optional model configuration
         training_config: Optional training configuration
@@ -143,7 +143,7 @@ def save_int8_checkpoint(model, filepath, model_config=None, training_config=Non
         # Create comprehensive model configuration dictionary
         model_config_dict = model_config.__dict__.copy()
 
-        # Ensure critical QAT configurations are included
+        # Ensure critical quantization configurations are included
         critical_configs = [
             'lora_rank_per_bit', 'lora_alpha_per_bit',
             'activation_bits_per_bit', 'kv_cache_bits_per_bit',
@@ -157,12 +157,12 @@ def save_int8_checkpoint(model, filepath, model_config=None, training_config=Non
         # Verify lora_rank_per_bit and lora_alpha_per_bit are present
         if 'lora_rank_per_bit' not in model_config_dict or model_config_dict['lora_rank_per_bit'] is None:
             print("Warning: 'lora_rank_per_bit' configuration is missing or None!")
-            # Use defaults from config_qat.py if missing
+            # Use defaults from config if missing
             model_config_dict['lora_rank_per_bit'] = {4: 8, 8: 16, 16: 32}
 
         if 'lora_alpha_per_bit' not in model_config_dict or model_config_dict['lora_alpha_per_bit'] is None:
             print("Warning: 'lora_alpha_per_bit' configuration is missing or None!")
-            # Use defaults from config_qat.py if missing
+            # Use defaults from config if missing
             model_config_dict['lora_alpha_per_bit'] = {4: 16, 8: 32, 16: 64}
 
         checkpoint['model_config'] = model_config_dict
