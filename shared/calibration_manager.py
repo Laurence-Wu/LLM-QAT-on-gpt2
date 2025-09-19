@@ -90,7 +90,6 @@ class CalibrationManager:
                 module.calibrated = False
                 module.running_min.fill_(float('inf'))
                 module.running_max.fill_(float('-inf'))
-                print(f"    Reset calibration for LearnableFakeQuantize: {name}")
 
     def validate_calibration(self) -> bool:
         """Check if quantizers are properly calibrated for each precision"""
