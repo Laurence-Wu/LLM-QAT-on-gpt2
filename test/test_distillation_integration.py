@@ -208,7 +208,9 @@ def test_distillation_convergence():
     # Initialize
     model_config = ModelConfig()
     model_config.n_layer = 2  # Smaller model for faster testing
+    model_config.lora_rank = 8  # Smaller rank for faster training
     training_config = TrainingConfig()
+    training_config.distill_temperature = 4.0  # Higher temperature for smoother gradients
 
     model = SPLMHeadModel(model_config)
     model = model.to(device)
@@ -250,11 +252,16 @@ def test_distillation_convergence():
     print(f"   Initial KL divergence: {initial_divergence.item():.4f}")
 
     print("\n3. Simulating distillation training...")
-    # Simple optimization loop
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    # Simple optimization loop with more iterations and better hyperparameters
+    optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad],
+                                   lr=5e-4, weight_decay=0.01)
 
-    for step in range(10):
-        model.train()
+    num_iterations = 50  # More iterations for better convergence
+    model.train()
+
+    losses = []  # Track losses for trend analysis
+
+    for step in range(num_iterations):
         optimizer.zero_grad()
 
         # Get student outputs
@@ -262,13 +269,24 @@ def test_distillation_convergence():
 
         # Compute distillation loss
         loss = distill_mgr.compute_distillation_loss(student_outputs, input_ids)
+        losses.append(loss.item())
 
         # Backward pass
         loss.backward()
+
+        # Clip gradients to prevent explosion
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
         optimizer.step()
 
-        if step % 3 == 0:
+        if step % 10 == 0:
             print(f"   Step {step}: Loss = {loss.item():.4f}")
+
+    # Show loss improvement
+    print(f"\n   Loss trajectory:")
+    print(f"   Initial loss: {losses[0]:.4f}")
+    print(f"   Final loss: {losses[-1]:.4f}")
+    print(f"   Loss reduction: {(losses[0] - losses[-1]):.4f}")
 
     print("\n4. Testing student after distillation...")
     model.eval()
