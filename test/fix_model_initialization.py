@@ -241,6 +241,20 @@ def test_initialized_model(model, model_config):
 
     losses = {}
     with torch.no_grad():
+        # Test FP32 first (no quantization)
+        model.eval()
+        outputs = model(input_ids, labels=labels)
+        loss_fp32 = outputs['loss'].item()
+        losses['FP32'] = loss_fp32
+
+        if loss_fp32 < 15:
+            print(f"   ✅ FP32: Loss = {loss_fp32:8.4f} (Good)")
+        elif loss_fp32 < 30:
+            print(f"   ⚠️ FP32: Loss = {loss_fp32:8.4f} (Acceptable)")
+        else:
+            print(f"   ❌ FP32: Loss = {loss_fp32:8.4f} (Too high)")
+
+        # Test quantized versions
         for bits in [16, 8, 4]:
             model.set_precision(bits)
             outputs = model(input_ids, labels=labels)
@@ -261,9 +275,17 @@ def test_initialized_model(model, model_config):
     ).item()
 
     print(f"\n   Expected loss for random predictions: {expected_random_loss:.2f}")
-    print(f"   Your model's best loss: {min(losses.values()):.2f}")
 
-    if min(losses.values()) < expected_random_loss * 2:
+    # Get numerical losses for comparison
+    numeric_losses = {k: v for k, v in losses.items() if isinstance(k, (int, str)) and k != 'FP32'}
+    if numeric_losses:
+        best_quantized_loss = min(numeric_losses.values())
+        print(f"   FP32 loss: {losses['FP32']:.2f}")
+        print(f"   Best quantized loss: {best_quantized_loss:.2f}")
+    else:
+        print(f"   FP32 loss: {losses['FP32']:.2f}")
+
+    if losses['FP32'] < expected_random_loss * 2:
         print("\n   ✅ Model initialization is good! Loss is reasonable.")
     else:
         print("\n   ⚠️ Loss is still high. Consider:")
@@ -298,11 +320,20 @@ def main():
     print("="*80)
 
     print("\nResults:")
-    print(f"  With pretrained weights: Best loss = {min(losses_pretrained.values()):.2f}")
-    print(f"  With random init:        Best loss = {min(losses_random.values()):.2f}")
+    print(f"  With pretrained weights:")
+    print(f"    FP32 loss: {losses_pretrained['FP32']:.2f}")
+    numeric_pretrained = {k: v for k, v in losses_pretrained.items() if isinstance(k, int)}
+    if numeric_pretrained:
+        print(f"    Best quantized loss: {min(numeric_pretrained.values()):.2f}")
+
+    print(f"  With random init:")
+    print(f"    FP32 loss: {losses_random['FP32']:.2f}")
+    numeric_random = {k: v for k, v in losses_random.items() if isinstance(k, int)}
+    if numeric_random:
+        print(f"    Best quantized loss: {min(numeric_random.values()):.2f}")
 
     print("\n💡 RECOMMENDATION:")
-    if min(losses_pretrained.values()) < min(losses_random.values()):
+    if losses_pretrained['FP32'] < losses_random['FP32']:
         print("  Always use pretrained weights for better initialization!")
         print("  This dramatically reduces initial loss and speeds up training.")
     else:
