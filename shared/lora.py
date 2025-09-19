@@ -55,6 +55,7 @@ class LoRALayer(nn.Module):
 
         return output
 
+
 class LinearWithLoRA(nn.Module):
     """Linear layer with LoRA adapter and quantization."""
     def __init__(self, in_features, out_features, bias=True, bits=8,
@@ -90,7 +91,7 @@ class LinearWithLoRA(nn.Module):
 
         # Add outputs
         return base + lora
-    
+
     def set_precision(self, weight_bits, activation_bits):
         """Set the precision (bit-width) for quantization."""
         # Update weight quantizer
