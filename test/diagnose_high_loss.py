@@ -315,21 +315,6 @@ load_pretrained_weights(model)
     return pretrained_model
 
 
-if __name__ == "__main__":
-    model = diagnose_and_fix()
-
-    # NEW: Diagnose distillation-related loss issues
-    diagnose_distillation_loss()
-
-    print("\n" + "="*60)
-    print("DIAGNOSIS COMPLETE")
-    print("="*60)
-    print("\nKey findings:")
-    print("1. High loss may be due to random initialization - always load pretrained weights")
-    print("2. With distillation, loss components should be balanced (check α weights)")
-    print("3. Temperature scaling affects KL divergence magnitude significantly")
-
-
 def diagnose_distillation_loss():
     """Diagnose potential issues with distillation loss."""
     print("\n" + "="*60)
@@ -495,3 +480,18 @@ def diagnose_distillation_loss():
             print(f"     ⚠️ WARNING: Vanishing gradients detected!")
         elif np.max(grad_norms) > 10:
             print(f"     ⚠️ WARNING: Exploding gradients detected!")
+
+
+if __name__ == "__main__":
+    model = diagnose_and_fix()
+
+    # NEW: Diagnose distillation-related loss issues
+    diagnose_distillation_loss()
+
+    print("\n" + "="*60)
+    print("DIAGNOSIS COMPLETE")
+    print("="*60)
+    print("\nKey findings:")
+    print("1. High loss may be due to random initialization - always load pretrained weights")
+    print("2. With distillation, loss components should be balanced (check α weights)")
+    print("3. Temperature scaling affects KL divergence magnitude significantly")
