@@ -17,42 +17,52 @@ class LoRALayer(nn.Module):
         self.out_features = out_features
         self.rank = rank
         self.alpha = alpha
+        self.bits = bits
 
-        # Handle rank=0 case (no LoRA)
-        if rank <= 0:
-            self.scaling = 0
+        # For 16-bit, disable LoRA entirely
+        if bits >= 16 or rank <= 0:
             self.enabled = False
+            self.scaling = 0
             # Create dummy parameters to avoid issues
             self.register_buffer('lora_A', torch.zeros(1, 1))
             self.register_buffer('lora_B', torch.zeros(1, 1))
+            # Dummy quantizers for 16-bit
+            self.quantize_A = None
+            self.quantize_B = None
         else:
-            self.scaling = alpha / rank
             self.enabled = True
-            # FP32 weights
-            self.lora_A = nn.Parameter(torch.empty(in_features, rank))
-            self.lora_B = nn.Parameter(torch.empty(rank, out_features))
+            self.scaling = alpha / rank
+
+            # Initialize LoRA matrices
+            self.lora_A = nn.Parameter(torch.zeros(in_features, rank))
+            self.lora_B = nn.Parameter(torch.zeros(rank, out_features))
+
+            # CRITICAL: Initialize A with small values, B with zeros
             nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
             nn.init.zeros_(self.lora_B)
 
-        # Fake quantizers
-        self.quantize_A = LearnableFakeQuantize(num_bits=bits, symmetric=True)
-        self.quantize_B = LearnableFakeQuantize(num_bits=bits, symmetric=True)
+            # Quantizers for LoRA weights (only for low-bit)
+            self.quantize_A = LearnableFakeQuantize(num_bits=bits, symmetric=True)
+            self.quantize_B = LearnableFakeQuantize(num_bits=bits, symmetric=True)
 
         # Pre-allocate buffers for quantized weights to avoid creating new tensors
         self.register_buffer('lora_A_quantized', torch.empty(in_features, rank))
         self.register_buffer('lora_B_quantized', torch.empty(rank, out_features))
 
     def forward(self, x):
-        # Quantize weights - these need gradients for backprop
-        lora_A_quantized = self.quantize_A(self.lora_A)
-        lora_B_quantized = self.quantize_B(self.lora_B)
+        if not self.enabled or self.scaling == 0:
+            # Return zeros for disabled LoRA (16-bit mode)
+            batch_shape = x.shape[:-1]  # All dims except last
+            return torch.zeros(*batch_shape, self.out_features, device=x.device, dtype=x.dtype)
 
-        # Use more memory-efficient matrix multiplication
-        # Split the computation to avoid intermediate large tensors
-        output = torch.matmul(x, lora_A_quantized)
-        output = torch.matmul(output, lora_B_quantized)
+        # Quantize LoRA weights (only for enabled low-bit modes)
+        lora_A_q = self.quantize_A(self.lora_A)
+        lora_B_q = self.quantize_B(self.lora_B)
+
+        # Compute LoRA output: x @ A @ B * scaling
+        output = torch.matmul(x, lora_A_q)
+        output = torch.matmul(output, lora_B_q)
         output = output * self.scaling
-
         return output
 
 
@@ -179,27 +189,29 @@ class SPLinearWithLoRA(nn.Module):
         return self.lora_adapters[f'{self.current_bits}bit']
 
     def forward(self, x):
-        # Get current bit-width quantizers and LoRA
+        """
+        Forward pass with bit-width-specific behavior:
+        - 16-bit: Direct computation (no quantization, no LoRA)
+        - 8/4-bit: Quantization + LoRA compensation
+        """
+        # CRITICAL: 16-bit uses pure FP32 weights without modifications
+        if self.current_bits >= 16:
+            return F.linear(x, self.linear.weight, self.linear.bias)
+
+        # Lower precision: Apply quantization and LoRA
         bits_key = f'{self.current_bits}bit'
         weight_quantizer = self.quantizers_weight[bits_key]
         input_quantizer = self.quantizers_input[bits_key]
         active_lora = self.lora_adapters[bits_key]
 
-        # For 16-bit precision, use exact FP32 computation (no quantization, no LoRA)
-        # This ensures perfect equivalence to GPT-2 for baseline comparison
-        if self.current_bits == 16:
-            # Pure FP32 computation - bypass quantization and LoRA for exact match
-            return F.linear(x, self.linear.weight, self.linear.bias)
-
-        # For lower precisions, use quantization + LoRA
-        # Quantize inputs and weights for current bit-width
+        # Quantize inputs and weights
         x_quantized = input_quantizer(x)
         weight_quantized = weight_quantizer(self.linear.weight)
 
         # Base computation with quantized values
         base_output = F.linear(x_quantized, weight_quantized, self.linear.bias)
 
-        # Add only the active LoRA adapter
+        # Add LoRA compensation for quantization errors
         lora_output = active_lora(x)
 
         return base_output + lora_output
