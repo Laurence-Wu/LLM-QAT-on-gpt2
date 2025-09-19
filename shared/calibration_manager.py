@@ -88,8 +88,8 @@ class CalibrationManager:
             if isinstance(module, LearnableFakeQuantize):
                 # Reset calibration to allow fresh calibration
                 module.calibrated = False
-                module.running_min.fill_(float('inf'))
-                module.running_max.fill_(float('-inf'))
+                # Don't set to infinity - let the forward pass initialize properly
+                # The forward pass will set these on first call when calibrated=False
 
     def validate_calibration(self) -> bool:
         """Check if quantizers are properly calibrated for each precision"""
