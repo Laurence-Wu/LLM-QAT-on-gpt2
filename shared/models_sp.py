@@ -69,6 +69,8 @@ class SPAttention(nn.Module):
         """Set precision for all layers to specified bit-width."""
         if bits not in self.bit_widths:
             raise ValueError(f"Bit width {bits} not in configured widths {self.bit_widths}")
+        # Store current precision for KV quantization bypass
+        self.current_bit_width = bits
         self.c_attn.set_precision(bits)
         self.c_proj.set_precision(bits)
 
@@ -82,9 +84,14 @@ class SPAttention(nn.Module):
         k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
 
-        # Quantize KV cache
-        k = self.kv_quantizer(k)
-        v = self.kv_quantizer(v)
+        # Quantize KV cache (bypass for 16-bit to match GPT-2 exactly)
+        if hasattr(self, 'current_bit_width') and self.current_bit_width == 16:
+            # Skip quantization in 16-bit mode for exact GPT-2 equivalence
+            pass
+        else:
+            # Apply quantization for lower precisions
+            k = self.kv_quantizer(k)
+            v = self.kv_quantizer(v)
 
         attn_weights = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)
         bias_mask = self.bias[:T, :T].to(attn_weights.device)
