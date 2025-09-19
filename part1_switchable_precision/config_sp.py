@@ -73,12 +73,13 @@ class TrainingConfig:
         self.empty_cache_interval = 25
         self.num_workers = 0  # For DataLoader
 
-        # Self-Distillation settings
+        # Distillation parameters (following paper specifications)
         self.use_distillation = True
-        self.distillation_alpha_output = 1.0  # Weight for KL divergence loss
-        self.distillation_alpha_feature = 1e-7  # Weight for feature matching loss
-        self.distillation_temperature = 3.0  # Temperature for KL divergence
-        self.teacher_update_freq = 10  # How often to update teacher cache
-        self.distillation_warmup = 100  # Warmup steps before starting distillation
-        self.distillation_feature_layers = None  # None means all layers
-        self.distillation_cache_size = 32  # Size of teacher cache
+        self.distill_alpha_kl = 1.0  # α₁: Weight for KL divergence
+        self.distill_alpha_feature = 1e-7  # α₂: Weight for feature matching
+        self.distill_temperature = 3.0  # Temperature for KL softening
+        self.teacher_update_interval = 10  # How often to update teacher
+        self.distill_warmup_steps = 100  # Steps before starting distillation
+        self.feature_layers = None  # Which layers to match (None = all)
+        self.cache_size = 32  # Teacher cache size
+        self.move_cache_to_cpu = False  # Move cache to CPU to save GPU memory

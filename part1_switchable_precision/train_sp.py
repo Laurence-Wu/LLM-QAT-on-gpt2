@@ -11,7 +11,7 @@ import gc
 import json
 import time
 import random
-from distillation import DistillationConfig, SelfDistillationTrainer
+from distillation_manager import DistillationManager
 
 
 def get_next_bitwidth(iteration, model_config):
@@ -41,20 +41,14 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     torch.cuda.empty_cache()
     gc.collect()
 
-    # Initialize self-distillation if enabled
-    distillation_trainer = None
+    # Initialize distillation manager if enabled
+    distill_mgr = None
     if config.use_distillation:
-        distill_config = DistillationConfig(
-            use_distillation=config.use_distillation,
-            alpha_output=config.distillation_alpha_output,
-            alpha_feature=config.distillation_alpha_feature,
-            temperature=config.distillation_temperature,
-            teacher_update_freq=config.teacher_update_freq,
-            warmup_steps=config.distillation_warmup,
-            feature_layers=config.distillation_feature_layers,
-            cache_size=config.distillation_cache_size
+        distill_mgr = DistillationManager(
+            model=model,
+            full_precision_bits=max(model_config.bit_widths),
+            config=config
         )
-        distillation_trainer = SelfDistillationTrainer(model, distill_config, device)
 
     # Optimizer - only optimize trainable parameters (LoRA adapters)
     trainable_params = [p for p in model.parameters() if p.requires_grad]
@@ -103,25 +97,18 @@ def train_sp(model, train_loader, val_loader, config, model_config):
         model.train()
 
         # Switch bit-width if using switchable model
-        previous_bits = model.get_current_precision() if hasattr(model, 'get_current_precision') else model_config.quantization_bits
+        try:
+            previous_bits = model.get_current_precision()
+        except AttributeError:
+            previous_bits = model_config.quantization_bits
+
         current_bits = get_next_bitwidth(iteration, model_config)
 
-        # Update teacher cache before switching away from full precision
-        if distillation_trainer and previous_bits == distillation_trainer.full_precision_bits and current_bits != previous_bits:
-            # Force teacher update with current batch
-            try:
-                temp_batch = next(train_iter)
-            except StopIteration:
-                train_iter = iter(train_loader)
-                temp_batch = next(train_iter)
-            temp_input_ids = temp_batch['input_ids'].to(device)
-            temp_attention_mask = temp_batch.get('attention_mask')
-            if temp_attention_mask is not None:
-                temp_attention_mask = temp_attention_mask.to(device)
-            distillation_trainer.compute_teacher_outputs(temp_input_ids, temp_attention_mask)
-            del temp_batch, temp_input_ids
-            if temp_attention_mask is not None:
-                del temp_attention_mask
+        # Handle precision switching for distillation
+        if distill_mgr and previous_bits != current_bits:
+            # Switching FROM full precision - mark for teacher update
+            if previous_bits == distill_mgr.full_precision_bits:
+                distill_mgr.mark_switch_from_teacher()
 
         model.set_precision(current_bits)
 
@@ -143,32 +130,26 @@ def train_sp(model, train_loader, val_loader, config, model_config):
                 attention_mask = attention_mask.to(device, non_blocking=True)
             labels = input_ids.clone()
 
-            # Check if we should use distillation
-            use_distillation = distillation_trainer and distillation_trainer.should_use_distillation(iteration)
-
-            # Update teacher periodically or when at full precision
-            if distillation_trainer and (current_bits == distillation_trainer.full_precision_bits or
-                                        iteration % config.teacher_update_freq == 0):
-                distillation_trainer.compute_teacher_outputs(input_ids, attention_mask)
-
-            # Forward with AMP
+            # Compute loss based on current precision
             with torch.amp.autocast('cuda', enabled=config.use_amp):
-                if use_distillation:
-                    # Get outputs with hidden states for distillation
-                    outputs = model(
-                        input_ids,
-                        labels=None,  # Compute loss separately in distillation
-                        attention_mask=attention_mask,
-                        output_hidden_states=True,
-                        return_dict=True
-                    )
-                    # Compute distillation loss
-                    loss, loss_components = distillation_trainer.compute_distillation_loss(
-                        outputs, labels, input_ids, attention_mask
-                    )
+                if current_bits == distill_mgr.full_precision_bits if distill_mgr else False:
+                    # Teacher mode: standard cross-entropy
+                    outputs = model(input_ids, labels=labels, attention_mask=attention_mask,
+                                  output_hidden_states=False, return_dict=True)
+                    loss = outputs['loss'] / config.gradient_accumulation_steps
+
+                    # Update teacher cache if needed
+                    if distill_mgr and distill_mgr.should_update_teacher(current_bits, iteration):
+                        distill_mgr.update_teacher(input_ids, attention_mask)
+
+                elif distill_mgr and config.use_distillation and iteration >= config.distill_warmup_steps:
+                    # Student mode: distillation
+                    outputs = model(input_ids, output_hidden_states=True, return_dict=True)
+                    loss = distill_mgr.compute_distillation_loss(outputs, input_ids)
                     loss = loss / config.gradient_accumulation_steps
+
                 else:
-                    # Standard training without distillation
+                    # Fallback: standard loss (during warmup or no distillation)
                     outputs = model(input_ids, labels=labels, attention_mask=attention_mask)
                     loss = outputs['loss'] / config.gradient_accumulation_steps
 
@@ -204,14 +185,17 @@ def train_sp(model, train_loader, val_loader, config, model_config):
         # Clear gradients after optimizer step to free memory
         optimizer.zero_grad(set_to_none=True)
 
+        # Update distillation manager iteration count
+        if distill_mgr:
+            distill_mgr.step()
+
         # Store training statistics
         training_stats['iteration_losses'].append(total_loss)
         training_stats['bit_width_usage'].append(current_bits)  # Track actual bit-width used
         training_stats['learning_rates'].append(optimizer.param_groups[0]['lr'])
         training_stats['memory_usage'].append(torch.cuda.memory_allocated() / 1024**2)  # MB
 
-        # Track loss per bit-width if switchable
-
+        # Track loss per bit-width
         training_stats['losses_per_bit'][current_bits].append(total_loss)
 
         # Periodic memory cleanup to prevent accumulation
@@ -245,9 +229,9 @@ def train_sp(model, train_loader, val_loader, config, model_config):
 
     print(f"\nTraining complete.")
 
-    # Clean up distillation trainer
-    if distillation_trainer:
-        distillation_trainer.clear_cache()
+    # Clean up distillation manager
+    if distill_mgr:
+        distill_mgr.clear_cache()
 
     # Save training statistics to JSON file
     timestamp = time.strftime('%Y%m%d_%H%M%S')
