@@ -84,23 +84,23 @@ def analyze_transformer_block(model):
     print(f"   ├── attn (SPAttention)")
     print(f"   │   ├── n_head: {block.attn.n_head}")
     print(f"   │   ├── head_dim: {block.attn.head_dim}")
-    print(f"   │   ├── c_attn (SwitchableLinearWithLoRA): {block.attn.c_attn}")
-    print(f"   │   ├── c_proj (SwitchableLinearWithLoRA): {block.attn.c_proj}")
+    print(f"   │   ├── c_attn (SPLinearWithLoRA): {block.attn.c_attn}")
+    print(f"   │   ├── c_proj (SPLinearWithLoRA): {block.attn.c_proj}")
     print(f"   │   ├── kv_quantizer: {block.attn.kv_quantizer}")
     print(f"   │   └── bias: {block.attn.bias.shape}")
     print(f"   ├── ln_2 (LayerNorm): {block.ln_2}")
     print(f"   └── mlp (SPMLP)")
-    print(f"       ├── c_fc (SwitchableLinearWithLoRA): {block.mlp.c_fc}")
+    print(f"       ├── c_fc (SPLinearWithLoRA): {block.mlp.c_fc}")
     print(f"       ├── act (GELU): {block.mlp.act}")
-    print(f"       └── c_proj (SwitchableLinearWithLoRA): {block.mlp.c_proj}")
+    print(f"       └── c_proj (SPLinearWithLoRA): {block.mlp.c_proj}")
 
 
 def analyze_switchable_linear(model):
-    """Analyze the SwitchableLinearWithLoRA structure."""
-    print(f"\n6. SWITCHABLE LINEAR STRUCTURE (c_attn from block 0):")
+    """Analyze the SPLinearWithLoRA structure."""
+    print(f"\n6. SP LINEAR STRUCTURE (c_attn from block 0):")
     linear = model.transformer.h[0].attn.c_attn
 
-    print(f"   SwitchableLinearWithLoRA")
+    print(f"   SPLinearWithLoRA")
     print(f"   ├── in_features: {linear.in_features}")
     print(f"   ├── out_features: {linear.out_features}")
     print(f"   ├── bit_widths: {linear.bit_widths}")
