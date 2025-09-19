@@ -19,7 +19,8 @@ os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True,max_split_size
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 # Import shared components
-from shared.models import QATGPT2, SwitchableQATGPT2
+# Use the new separated model file for Switchable Precision
+from shared.models_sp import SPModel, SPLMHeadModel
 from shared.dataset import create_dataloaders
 from shared.deploy import save_int8_checkpoint
 

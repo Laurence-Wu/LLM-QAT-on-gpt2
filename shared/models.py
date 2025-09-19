@@ -9,10 +9,10 @@ from torch.utils.checkpoint import checkpoint
 # Try relative imports first, fall back to direct imports
 try:
     from .quantization import LearnableFakeQuantize
-    from .lora import QATLinearWithLoRA, SwitchableQATLinearWithLoRA
+    from .lora import LinearWithLoRA, SwitchableLinearWithLoRA
 except ImportError:
     from quantization import LearnableFakeQuantize
-    from lora import QATLinearWithLoRA, SwitchableQATLinearWithLoRA
+    from lora import LinearWithLoRA, SwitchableLinearWithLoRA
 
 class QATGPT2Attention(nn.Module):
     def __init__(self, config: GPT2Config, bits=8):
@@ -21,9 +21,9 @@ class QATGPT2Attention(nn.Module):
         self.n_embd = config.n_embd
         self.head_dim = self.n_embd // self.n_head
 
-        self.c_attn = QATLinearWithLoRA(config.n_embd, 3 * config.n_embd, bits=bits,
+        self.c_attn = LinearWithLoRA(config.n_embd, 3 * config.n_embd, bits=bits,
                                          lora_rank=config.lora_rank, lora_alpha=config.lora_alpha, lora_dropout=config.lora_dropout)
-        self.c_proj = QATLinearWithLoRA(config.n_embd, config.n_embd, bits=bits,
+        self.c_proj = LinearWithLoRA(config.n_embd, config.n_embd, bits=bits,
                                          lora_rank=config.lora_rank, lora_alpha=config.lora_alpha, lora_dropout=config.lora_dropout)
 
         # Use config-specified KV cache bits, must be present in config
@@ -70,9 +70,9 @@ class QATGPT2Attention(nn.Module):
 class QATGPT2MLP(nn.Module):
     def __init__(self, config: GPT2Config, bits=8):
         super().__init__()
-        self.c_fc = QATLinearWithLoRA(config.n_embd, 4 * config.n_embd, bits=bits,
+        self.c_fc = LinearWithLoRA(config.n_embd, 4 * config.n_embd, bits=bits,
                                        lora_rank=config.lora_rank, lora_alpha=config.lora_alpha, lora_dropout=config.lora_dropout)
-        self.c_proj = QATLinearWithLoRA(4 * config.n_embd, config.n_embd, bits=bits,
+        self.c_proj = LinearWithLoRA(4 * config.n_embd, config.n_embd, bits=bits,
                                          lora_rank=config.lora_rank, lora_alpha=config.lora_alpha, lora_dropout=config.lora_dropout)
         self.act = nn.GELU()
         
@@ -334,14 +334,14 @@ class SwitchableQATGPT2Attention(nn.Module):
         lora_dropout = config.lora_dropout
 
         # Switchable layers
-        self.c_attn = SwitchableQATLinearWithLoRA(
+        self.c_attn = SwitchableLinearWithLoRA(
             config.n_embd, 3 * config.n_embd,
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
             lora_dropout=lora_dropout
         )
-        self.c_proj = SwitchableQATLinearWithLoRA(
+        self.c_proj = SwitchableLinearWithLoRA(
             config.n_embd, config.n_embd,
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
@@ -408,14 +408,14 @@ class SwitchableQATGPT2MLP(nn.Module):
             )
         lora_dropout = config.lora_dropout
 
-        self.c_fc = SwitchableQATLinearWithLoRA(
+        self.c_fc = SwitchableLinearWithLoRA(
             config.n_embd, 4 * config.n_embd,
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
             lora_dropout=lora_dropout
         )
-        self.c_proj = SwitchableQATLinearWithLoRA(
+        self.c_proj = SwitchableLinearWithLoRA(
             4 * config.n_embd, config.n_embd,
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,

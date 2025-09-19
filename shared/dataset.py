@@ -181,7 +181,7 @@ def collate_fn(batch):
     }
 
 
-def create_dataloaders(tokenizer, dataset_type='squad', train_split='train',
+def create_dataloaders(tokenizer, dataset_type='wikitext', train_split='train',
                       val_split='validation', test_split=None, batch_size=8, max_length=384,
                       doc_stride=128, num_workers=0):
     """

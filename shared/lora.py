@@ -9,8 +9,8 @@ try:
 except ImportError:
     from quantization import LearnableFakeQuantize
 
-class QATLoRALayer(nn.Module):
-    """Simple QAT LoRA: FP32 weights with fake quantization during forward."""
+class LoRALayer(nn.Module):
+    """LoRA adapter with fake quantization."""
     def __init__(self, in_features, out_features, rank=8, alpha=16, bits=8):
         super().__init__()
         self.in_features = in_features
@@ -54,8 +54,8 @@ class QATLoRALayer(nn.Module):
 
         return output
 
-class QATLinearWithLoRA(nn.Module):
-    """QAT Linear layer: FP32 weights, fake quantization, LoRA adaptation."""
+class LinearWithLoRA(nn.Module):
+    """Linear layer with LoRA adapter and quantization."""
     def __init__(self, in_features, out_features, bias=True, bits=8,
                  lora_rank=8, lora_alpha=16, lora_dropout=0.1):
         super().__init__()
@@ -71,7 +71,7 @@ class QATLinearWithLoRA(nn.Module):
         self.quantize_input = LearnableFakeQuantize(num_bits=bits, symmetric=True)
 
         # LoRA adapter with config parameters
-        self.lora = QATLoRALayer(in_features, out_features,
+        self.lora = LoRALayer(in_features, out_features,
                                  rank=lora_rank, alpha=lora_alpha, bits=bits)
 
         # Pre-allocate buffers for quantized tensors
@@ -124,8 +124,8 @@ class QATLinearWithLoRA(nn.Module):
             pass  # LoRA quantizers not present
 
 
-class SwitchableQATLinearWithLoRA(nn.Module):
-    """Switchable QAT Linear layer with multiple LoRA adapters for different bit-widths."""
+class SwitchableLinearWithLoRA(nn.Module):
+    """Linear layer with multiple LoRA adapters for switchable precision."""
 
     def __init__(self, in_features, out_features, bias=True,
                  bit_widths=[4, 8, 16],
@@ -153,7 +153,7 @@ class SwitchableQATLinearWithLoRA(nn.Module):
 
         # Create separate LoRA adapters for each bit-width
         self.lora_adapters = nn.ModuleDict({
-            f'{bits}bit': QATLoRALayer(
+            f'{bits}bit': LoRALayer(
                 in_features, out_features,
                 rank=lora_rank_per_bit.get(bits, 16),
                 alpha=lora_alpha_per_bit.get(bits, 32),

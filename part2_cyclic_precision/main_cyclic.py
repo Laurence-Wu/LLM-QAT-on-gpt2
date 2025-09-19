@@ -20,7 +20,8 @@ os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True,max_split_size
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 # Import shared components
-from models import QATGPT2
+# Use the new separated model file for Cyclic Precision Training
+from models_cpt import CPTModel, CPTLMHeadModel, CyclicPrecisionScheduler
 from dataset import create_dataloaders
 
 # Import local configurations and training

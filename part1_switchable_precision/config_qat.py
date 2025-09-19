@@ -31,11 +31,10 @@ class ModelConfig:
         # Switchable precision settings
         self.bit_widths = [4, 8, 16]  # Supported bit-widths
 
-        # IMPORTANT: These dictionaries control the LoRA rank for each bit-width
-        # The model will use these exact values - no hardcoded defaults
         # Lower precision uses lower rank for efficiency
         self.lora_rank_per_bit = {4: 8, 8: 16, 16: 32}  # Maps bit-width to LoRA rank
         self.lora_alpha_per_bit = {4: 16, 8: 32, 16: 64}  # Maps bit-width to LoRA alpha
+        
         # Activation and KV cache bits per weight precision
         self.activation_bits_per_bit = {4: 4, 8: 8, 16: 16}  # Match weight precision
         self.kv_cache_bits_per_bit = {4: 4, 8: 8, 16: 16}  # Match weight precision
