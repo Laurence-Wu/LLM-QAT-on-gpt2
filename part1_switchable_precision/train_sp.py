@@ -40,9 +40,12 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     torch.cuda.empty_cache()
     gc.collect()
 
-    # Optimizer
+    # Optimizer - only optimize trainable parameters (LoRA adapters)
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    print(f"Optimizing {len(trainable_params)} trainable parameter tensors")
+
     optimizer = AdamW(
-        model.parameters(),
+        trainable_params,  # Only optimize parameters that require gradients
         lr=config.learning_rate,
         weight_decay=config.weight_decay,
         betas=config.adam_betas,

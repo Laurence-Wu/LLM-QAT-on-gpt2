@@ -8,9 +8,9 @@ class ModelConfig:
     def __init__(self):
         # GPT-2 architecture
         self.vocab_size = 50257
-        self.n_positions = 256
+        self.n_positions = 1024  # Match GPT-2's position embeddings
         self.n_embd = 768
-        self.n_layer = 6
+        self.n_layer = 6  # Can be reduced for smaller models
         self.n_head = 12
 
         # Regularization
