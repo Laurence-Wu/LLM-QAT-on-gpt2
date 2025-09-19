@@ -14,7 +14,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from part1_switchable_precision.config_sp import ModelConfig, TrainingConfig
 from part1_switchable_precision.distillation_manager import DistillationManager
-from shared.models_sp import SwitchableGPT2LMHeadModel
+from shared.models_sp import SPLMHeadModel
 
 
 def test_distillation_manager():
@@ -32,7 +32,7 @@ def test_distillation_manager():
 
     # Create model
     print("\n1. Creating switchable precision model...")
-    model = SwitchableGPT2LMHeadModel(model_config)
+    model = SPLMHeadModel(model_config)
     model = model.to(device)
 
     # Initialize distillation manager
@@ -210,7 +210,7 @@ def test_distillation_convergence():
     model_config.n_layer = 2  # Smaller model for faster testing
     training_config = TrainingConfig()
 
-    model = SwitchableGPT2LMHeadModel(model_config)
+    model = SPLMHeadModel(model_config)
     model = model.to(device)
 
     distill_mgr = DistillationManager(
