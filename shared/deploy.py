@@ -25,19 +25,19 @@ def convert_to_int8(model):
             if module.__class__.__name__ == 'Linear':
                 continue
 
-            # Process LinearWithLoRA and SwitchableLinearWithLoRA layers
-            if 'LinearWithLoRA' in module.__class__.__name__ or 'SwitchableLinearWithLoRA' in module.__class__.__name__:
+            # Process LinearWithLoRA and SPLinearWithLoRA layers
+            if 'LinearWithLoRA' in module.__class__.__name__ or 'SPLinearWithLoRA' in module.__class__.__name__:
                 # Get weight from the appropriate location
                 if hasattr(module, 'linear'):
                     weight = module.linear.weight.data
                 else:
                     continue
 
-                # Handle both regular and Switchable quantized layers
+                # Handle both regular and SP quantized layers
                 if hasattr(module, 'quantize_weight'):
                     weight_quantizer = module.quantize_weight
                 elif hasattr(module, 'quantizers_weight'):
-                    # For SwitchableLinearWithLoRA, get current bit-width quantizer
+                    # For SPLinearWithLoRA, get current bit-width quantizer
                     current_bits = module.current_bits if hasattr(module, 'current_bits') else 8
                     weight_quantizer = module.quantizers_weight[f'{current_bits}bit']
                 else:

@@ -201,6 +201,7 @@ def initialize_with_pretrained():
 
     # Test with real text
     tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
+    tokenizer.pad_token = tokenizer.eos_token  # Set pad token to EOS token for GPT-2
     text = "The quick brown fox jumps over the lazy dog."
     inputs = tokenizer(text, return_tensors='pt', max_length=50, truncation=True, padding='max_length')
     input_ids = inputs['input_ids'].to(device)

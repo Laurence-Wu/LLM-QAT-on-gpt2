@@ -125,7 +125,7 @@ class LinearWithLoRA(nn.Module):
             pass  # LoRA quantizers not present
 
 
-class SwitchableLinearWithLoRA(nn.Module):
+class SPLinearWithLoRA(nn.Module):
     """Linear layer with multiple LoRA adapters for switchable precision."""
 
     def __init__(self, in_features, out_features, bias=True,

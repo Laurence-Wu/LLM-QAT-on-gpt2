@@ -14,10 +14,10 @@ from torch.utils.checkpoint import checkpoint
 # Import quantization and LoRA modules
 try:
     from .quantization import LearnableFakeQuantize
-    from .lora import SwitchableLinearWithLoRA
+    from .lora import SPLinearWithLoRA
 except ImportError:
     from quantization import LearnableFakeQuantize
-    from lora import SwitchableLinearWithLoRA
+    from lora import SPLinearWithLoRA
 
 
 class SPAttention(nn.Module):
@@ -43,14 +43,14 @@ class SPAttention(nn.Module):
         lora_dropout = getattr(config, 'lora_dropout', 0.1)
 
         # Switchable layers with per-bit-width LoRA modules
-        self.c_attn = SwitchableLinearWithLoRA(
+        self.c_attn = SPLinearWithLoRA(
             config.n_embd, 3 * config.n_embd,
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
             lora_dropout=lora_dropout
         )
-        self.c_proj = SwitchableLinearWithLoRA(
+        self.c_proj = SPLinearWithLoRA(
             config.n_embd, config.n_embd,
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
@@ -117,14 +117,14 @@ class SPMLP(nn.Module):
         lora_dropout = getattr(config, 'lora_dropout', 0.1)
 
         # Switchable layers with per-bit-width LoRA modules
-        self.c_fc = SwitchableLinearWithLoRA(
+        self.c_fc = SPLinearWithLoRA(
             config.n_embd, 4 * config.n_embd,
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
             lora_dropout=lora_dropout
         )
-        self.c_proj = SwitchableLinearWithLoRA(
+        self.c_proj = SPLinearWithLoRA(
             4 * config.n_embd, config.n_embd,
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
