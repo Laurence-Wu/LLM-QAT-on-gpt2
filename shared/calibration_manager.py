@@ -90,23 +90,7 @@ class CalibrationManager:
                 module.calibrated = False
                 module.running_min.fill_(float('inf'))
                 module.running_max.fill_(float('-inf'))
-
-            # Handle LoRA quantizers - they might be None for 16-bit
-            try:
-                if module.quantize_A is not None:
-                    module.quantize_A.calibrated = False
-                    module.quantize_A.running_min.fill_(float('inf'))
-                    module.quantize_A.running_max.fill_(float('-inf'))
-            except AttributeError:
-                print(f"    Module {name} does not have quantize_A attribute")
-
-            try:
-                if module.quantize_B is not None:
-                    module.quantize_B.calibrated = False
-                    module.quantize_B.running_min.fill_(float('inf'))
-                    module.quantize_B.running_max.fill_(float('-inf'))
-            except AttributeError:
-                print(f"    Module {name} does not have quantize_B attribute")
+                print(f"    Reset calibration for LearnableFakeQuantize: {name}")
 
     def validate_calibration(self) -> bool:
         """Check if quantizers are properly calibrated"""
