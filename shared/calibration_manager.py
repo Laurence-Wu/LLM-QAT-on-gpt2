@@ -93,38 +93,69 @@ class CalibrationManager:
                 print(f"    Reset calibration for LearnableFakeQuantize: {name}")
 
     def validate_calibration(self) -> bool:
-        """Check if quantizers are properly calibrated"""
+        """Check if quantizers are properly calibrated for each precision"""
         print("\n🔍 Validating quantizer calibration...")
 
-        issues = []
-        calibrated_quantizers = 0
-        total_quantizers = 0
+        # Test each precision separately
+        validation_results = {}
 
-        for name, module in self.model.named_modules():
-            if isinstance(module, LearnableFakeQuantize):
-                total_quantizers += 1
+        for bits in [4, 8, 16]:
+            print(f"    Checking {bits}-bit precision...")
+            issues = []
+            calibrated_quantizers = 0
+            total_quantizers = 0
 
-                try:
-                    if not module.calibrated:
-                        issues.append(f"{name} not calibrated")
-                    elif torch.all(module.scale == 1.0) and torch.all(module.zero_point == 0.0):
-                        issues.append(f"{name} has default parameters (not calibrated)")
-                    elif torch.any(torch.isinf(module.running_min)) or torch.any(torch.isinf(module.running_max)):
-                        issues.append(f"{name} has invalid running statistics")
-                    else:
-                        calibrated_quantizers += 1
-                except AttributeError as e:
-                    issues.append(f"{name} missing calibration attributes: {e}")
-                    print(f"    Calibration validation error for {name}: {e}")
+            # Set model to specific precision for validation
+            self.model.set_precision(bits)
 
-        if issues:
-            print("⚠️ Calibration issues found:")
-            for issue in issues:
-                print(f"  - {issue}")
-            print(f"📊 Successfully calibrated: {calibrated_quantizers}/{total_quantizers} quantizers")
+            for name, module in self.model.named_modules():
+                if isinstance(module, LearnableFakeQuantize):
+                    # Skip quantizers that shouldn't be active for this precision
+                    if bits >= 16 and module.num_bits >= 16:
+                        # 16-bit quantizers are expected to be uncalibrated (they pass through)
+                        continue
+                    elif bits < 16 and module.num_bits != bits:
+                        # Only check quantizers that match current precision
+                        continue
+
+                    total_quantizers += 1
+
+                    try:
+                        if not module.calibrated:
+                            issues.append(f"{name} not calibrated")
+                        elif torch.all(module.scale == 1.0) and torch.all(module.zero_point == 0.0):
+                            issues.append(f"{name} has default parameters")
+                        elif torch.any(torch.isinf(module.running_min)) or torch.any(torch.isinf(module.running_max)):
+                            issues.append(f"{name} has invalid running statistics")
+                        else:
+                            calibrated_quantizers += 1
+                    except AttributeError as e:
+                        issues.append(f"{name} missing calibration attributes: {e}")
+                        print(f"      Calibration validation error for {name}: {e}")
+
+            validation_results[bits] = {
+                'issues': issues,
+                'calibrated': calibrated_quantizers,
+                'total': total_quantizers
+            }
+
+            if issues:
+                print(f"      ⚠️ {len(issues)} issues found for {bits}-bit")
+                print(f"      📊 Calibrated: {calibrated_quantizers}/{total_quantizers} quantizers")
+            else:
+                print(f"      ✅ All {total_quantizers} quantizers calibrated for {bits}-bit")
+
+        # Overall assessment
+        total_issues = sum(len(result['issues']) for result in validation_results.values())
+
+        if total_issues > 0:
+            print(f"\n⚠️ Total calibration issues: {total_issues}")
+            for bits, result in validation_results.items():
+                if result['issues']:
+                    print(f"  {bits}-bit precision: {len(result['issues'])} issues")
             return False
 
-        print(f"✅ All {total_quantizers} quantizers properly calibrated")
+        print(f"\n✅ All precision modes properly calibrated")
         return True
 
     def get_calibration_stats(self) -> Dict[str, Any]:
