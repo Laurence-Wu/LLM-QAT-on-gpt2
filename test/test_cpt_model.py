@@ -212,8 +212,12 @@ def test_cpt_model():
     assert output.shape == (2, 10, 768), f"Wrong output shape after precision change"
 
     # Test layer-wise precision setting
-    layer_bits = [(8, 8), (4, 4)]  # Different precision for each layer
-    model.set_layer_wise_precision(layer_bits)
+    # CPTModel expects a list of dicts with 'attn_bits', 'mlp_bits', 'activation_bits', 'kv_bits'
+    layer_configs = [
+        {'attn_bits': 8, 'mlp_bits': 8, 'activation_bits': 8, 'kv_bits': 8},
+        {'attn_bits': 4, 'mlp_bits': 4, 'activation_bits': 4, 'kv_bits': 4}
+    ]
+    model.set_layer_precision(layer_configs)
     output = model(input_ids)
     assert output.shape == (2, 10, 768), f"Wrong output shape with layer-wise precision"
 
