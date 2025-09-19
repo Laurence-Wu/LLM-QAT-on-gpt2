@@ -256,10 +256,78 @@ def test_lora_behavior(sp_model, tokenizer, device):
     return lora_contributions
 
 
-def test_distillation_setup(sp_model, tokenizer, device):
-    """Test 4: Verify distillation setup works"""
+def test_quantizer_activation(sp_model, tokenizer, device):
+    """Test 4: Diagnose why quantizers aren't getting calibrated"""
     print("\n" + "="*60)
-    print("TEST 4: DISTILLATION SETUP")
+    print("TEST 4: QUANTIZER ACTIVATION DIAGNOSIS")
+    print("="*60)
+
+    test_input = "Testing quantizer activation during forward pass."
+    inputs = tokenizer(test_input, return_tensors='pt')
+    input_ids = inputs['input_ids'].to(device)
+
+    sp_model.eval()
+
+    # Add hooks to monitor quantizer calls
+    quantizer_calls = {}
+
+    def create_hook(name):
+        def hook(module, input, output):
+            if name not in quantizer_calls:
+                quantizer_calls[name] = 0
+            quantizer_calls[name] += 1
+            print(f"    📞 Quantizer called: {name} (call #{quantizer_calls[name]}, num_bits={module.num_bits})")
+        return hook
+
+    # Register hooks on first few quantizers to see if they get called
+    hooks = []
+    quantizer_count = 0
+    for name, module in sp_model.named_modules():
+        if 'LearnableFakeQuantize' in str(type(module)) and quantizer_count < 10:
+            hook = module.register_forward_hook(create_hook(name))
+            hooks.append(hook)
+            quantizer_count += 1
+
+    print(f"Registered hooks on {len(hooks)} quantizers for monitoring...")
+
+    with torch.no_grad():
+        for bits in [4, 8, 16]:
+            print(f"\n🔧 Testing {bits}-bit precision:")
+            sp_model.set_precision(bits)
+
+            # Reset call counts
+            quantizer_calls.clear()
+
+            # Forward pass
+            outputs = sp_model(input_ids)
+
+            print(f"   Forward pass completed. Quantizer calls: {len(quantizer_calls)}")
+            if quantizer_calls:
+                print(f"   Active quantizers: {list(quantizer_calls.keys())[:5]}...")
+            else:
+                print(f"   ❌ NO QUANTIZERS WERE CALLED!")
+
+                # Check if quantizers exist but aren't being used
+                total_quantizers = 0
+                for name, module in sp_model.named_modules():
+                    if 'LearnableFakeQuantize' in str(type(module)):
+                        total_quantizers += 1
+                        if total_quantizers <= 3:  # Print first few
+                            print(f"      Found quantizer {name}: num_bits={module.num_bits}")
+
+                print(f"   Total quantizers found: {total_quantizers}")
+
+    # Remove hooks
+    for hook in hooks:
+        hook.remove()
+
+    return len(quantizer_calls) > 0
+
+
+def test_distillation_setup(sp_model, tokenizer, device):
+    """Test 5: Verify distillation setup works"""
+    print("\n" + "="*60)
+    print("TEST 5: DISTILLATION SETUP")
     print("="*60)
 
     test_input = "Distillation transfers knowledge from teacher to student models."
@@ -367,7 +435,12 @@ def run_comprehensive_test():
             sp_model, tokenizer, device
         )
 
-        # Test 4: Distillation setup
+        # Test 4: Quantizer activation diagnosis
+        test_results['quantizer_activation'] = test_quantizer_activation(
+            sp_model, tokenizer, device
+        )
+
+        # Test 5: Distillation setup
         test_results['distillation'] = test_distillation_setup(
             sp_model, tokenizer, device
         )
@@ -382,7 +455,7 @@ def run_comprehensive_test():
     print("="*80)
 
     passed_tests = 0
-    total_tests = 4
+    total_tests = 5
 
     # Assess each test
     if test_results['equivalence']['ppl_status'] in ['excellent', 'good']:
@@ -404,11 +477,17 @@ def run_comprehensive_test():
     else:
         print("❌ Test 3 (LoRA behavior): FAILED")
 
-    if test_results['distillation']:
-        print("✅ Test 4 (distillation setup): PASSED")
+    if test_results['quantizer_activation']:
+        print("✅ Test 4 (quantizer activation): PASSED")
         passed_tests += 1
     else:
-        print("❌ Test 4 (distillation setup): FAILED")
+        print("❌ Test 4 (quantizer activation): FAILED - Quantizers not being called!")
+
+    if test_results['distillation']:
+        print("✅ Test 5 (distillation setup): PASSED")
+        passed_tests += 1
+    else:
+        print("❌ Test 5 (distillation setup): FAILED")
 
     print(f"\n🏆 OVERALL RESULT: {passed_tests}/{total_tests} tests passed")
 
