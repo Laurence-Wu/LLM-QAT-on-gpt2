@@ -107,39 +107,39 @@ def load_pretrained_weights(model):
     pretrained = GPT2Model.from_pretrained('gpt2')
 
     # Copy embeddings
-    model.wte.weight.data = pretrained.wte.weight.data.clone()
+    model.transformer.wte.weight.data = pretrained.wte.weight.data.clone()
     # Only copy the position embeddings we need (model might have fewer positions than pretrained)
-    min_positions = min(model.wpe.weight.shape[0], pretrained.wpe.weight.shape[0])
-    model.wpe.weight.data[:min_positions] = pretrained.wpe.weight.data[:min_positions].clone()
-    if model.wpe.weight.shape[0] != pretrained.wpe.weight.shape[0]:
-        print(f"Adjusted position embeddings from {pretrained.wpe.weight.shape[0]} to {model.wpe.weight.shape[0]}")
+    min_positions = min(model.transformer.wpe.weight.shape[0], pretrained.wpe.weight.shape[0])
+    model.transformer.wpe.weight.data[:min_positions] = pretrained.wpe.weight.data[:min_positions].clone()
+    if model.transformer.wpe.weight.shape[0] != pretrained.wpe.weight.shape[0]:
+        print(f"Adjusted position embeddings from {pretrained.wpe.weight.shape[0]} to {model.transformer.wpe.weight.shape[0]}")
 
     # Copy transformer blocks
-    for i in range(min(len(model.h), len(pretrained.h))):
+    for i in range(min(len(model.transformer.h), len(pretrained.h))):
         # Layer normalizations
-        model.h[i].ln_1.weight.data = pretrained.h[i].ln_1.weight.data.clone()
-        model.h[i].ln_1.bias.data = pretrained.h[i].ln_1.bias.data.clone()
-        model.h[i].ln_2.weight.data = pretrained.h[i].ln_2.weight.data.clone()
-        model.h[i].ln_2.bias.data = pretrained.h[i].ln_2.bias.data.clone()
+        model.transformer.h[i].ln_1.weight.data = pretrained.h[i].ln_1.weight.data.clone()
+        model.transformer.h[i].ln_1.bias.data = pretrained.h[i].ln_1.bias.data.clone()
+        model.transformer.h[i].ln_2.weight.data = pretrained.h[i].ln_2.weight.data.clone()
+        model.transformer.h[i].ln_2.bias.data = pretrained.h[i].ln_2.bias.data.clone()
 
         # Attention QKV weights
-        model.h[i].attn.c_attn.linear.weight.data = pretrained.h[i].attn.c_attn.weight.data.t().contiguous()
-        model.h[i].attn.c_attn.linear.bias.data = pretrained.h[i].attn.c_attn.bias.data.clone()
+        model.transformer.h[i].attn.c_attn.linear.weight.data = pretrained.h[i].attn.c_attn.weight.data.t().contiguous()
+        model.transformer.h[i].attn.c_attn.linear.bias.data = pretrained.h[i].attn.c_attn.bias.data.clone()
         #  for attention layer projection
-        model.h[i].attn.c_proj.linear.weight.data = pretrained.h[i].attn.c_proj.weight.data.t().contiguous()
-        model.h[i].attn.c_proj.linear.bias.data = pretrained.h[i].attn.c_proj.bias.data.clone()
+        model.transformer.h[i].attn.c_proj.linear.weight.data = pretrained.h[i].attn.c_proj.weight.data.t().contiguous()
+        model.transformer.h[i].attn.c_proj.linear.bias.data = pretrained.h[i].attn.c_proj.bias.data.clone()
 
         # feedforward projection matrix to a higher dimension.
-        model.h[i].mlp.c_fc.linear.weight.data = pretrained.h[i].mlp.c_fc.weight.data.t().contiguous()
-        model.h[i].mlp.c_fc.linear.bias.data = pretrained.h[i].mlp.c_fc.bias.data.clone()
+        model.transformer.h[i].mlp.c_fc.linear.weight.data = pretrained.h[i].mlp.c_fc.weight.data.t().contiguous()
+        model.transformer.h[i].mlp.c_fc.linear.bias.data = pretrained.h[i].mlp.c_fc.bias.data.clone()
 
         # feedforward projection matrix from a higher dimension.
-        model.h[i].mlp.c_proj.linear.weight.data = pretrained.h[i].mlp.c_proj.weight.data.t().contiguous()
-        model.h[i].mlp.c_proj.linear.bias.data = pretrained.h[i].mlp.c_proj.bias.data.clone()
+        model.transformer.h[i].mlp.c_proj.linear.weight.data = pretrained.h[i].mlp.c_proj.weight.data.t().contiguous()
+        model.transformer.h[i].mlp.c_proj.linear.bias.data = pretrained.h[i].mlp.c_proj.bias.data.clone()
 
     # Final layer normalization
-    model.ln_f.weight.data = pretrained.ln_f.weight.data.clone()
-    model.ln_f.bias.data = pretrained.ln_f.bias.data.clone()
+    model.transformer.ln_f.weight.data = pretrained.ln_f.weight.data.clone()
+    model.transformer.ln_f.bias.data = pretrained.ln_f.bias.data.clone()
 
     # Delete pretrained model to free memory immediately
     del pretrained
