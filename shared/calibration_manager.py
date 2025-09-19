@@ -45,18 +45,14 @@ class CalibrationManager:
         # MUST be in eval mode for one-shot calibration
         self.model.eval()
 
-        # Calibrate each bit-width separately to avoid cross-contamination
+        # Calibrate each bit-width separately
         for bits in [4, 8, 16]:
+            if bits >= 16:
+                # Skip 16-bit - no calibration needed
+                continue
+
             print(f"  📊 Calibrating {bits}-bit mode...")
             self.model.set_precision(bits)
-
-            # Count active quantizers for this precision
-            active_count = 0
-            bits_key = f'{bits}bit'
-            for name, module in self.model.named_modules():
-                if isinstance(module, LearnableFakeQuantize) and bits_key in name:
-                    active_count += 1
-            print(f"    Found {active_count} quantizers for {bits}-bit mode")
 
             # Reset calibration state for quantizers matching this precision
             self._reset_calibration_for_precision(bits)
@@ -67,43 +63,18 @@ class CalibrationManager:
                     tokens = self.tokenizer(
                         text,
                         return_tensors='pt',
-                        max_length=64,  # Reasonable length for calibration
+                        max_length=64,
                         truncation=True,
                         padding=False
                     )['input_ids'].to(self.device)
 
                     # This triggers calibration in LearnableFakeQuantize
-                    try:
-                        outputs = self.model(tokens)
+                    outputs = self.model(tokens)
 
-                        # Check calibration status on first sample
-                        if i == 0 and bits < 16:
-                            calibrated_count = 0
-                            for name, module in self.model.named_modules():
-                                if isinstance(module, LearnableFakeQuantize) and f'{bits}bit' in name:
-                                    if module.calibrated:
-                                        calibrated_count += 1
-                            print(f"    After first sample: {calibrated_count}/{active_count} quantizers calibrated")
+                    if (i + 1) % 4 == 0:
+                        print(f"    Processed {i + 1}/{len(self.calibration_texts)} samples")
 
-                        # Progress indicator
-                        if (i + 1) % 4 == 0:
-                            print(f"    🔄 Processed {i + 1}/{len(self.calibration_texts)} calibration samples")
-
-                    except Exception as e:
-                        print(f"    ⚠️ Warning: Calibration error on sample {i+1}: {e}")
-                        continue
-
-            # Final check - print some quantizer statistics
-            if bits < 16:
-                sample_count = 0
-                for name, module in self.model.named_modules():
-                    if isinstance(module, LearnableFakeQuantize) and f'{bits}bit' in name:
-                        if sample_count < 2:  # Just show first 2 as examples
-                            scale_val = module.scale.mean().item() if module.scale.numel() > 1 else module.scale.item()
-                            print(f"    Sample {name}: scale={scale_val:.6f}, calibrated={module.calibrated}")
-                            sample_count += 1
-
-            print(f"    ✅ {bits}-bit calibration complete")
+            print(f"  ✅ {bits}-bit calibration complete")
 
         # Reset to 16-bit after calibration
         self.model.set_precision(16)
@@ -111,94 +82,44 @@ class CalibrationManager:
 
     def _reset_calibration_for_precision(self, bits: int):
         """Reset calibration state for quantizers at specific precision"""
-        # Skip 16-bit - it doesn't need calibration
         if bits >= 16:
-            return
+            raise ValueError("16-bit mode doesn't need calibration")
 
         bits_key = f'{bits}bit'
         for name, module in self.model.named_modules():
-            if isinstance(module, LearnableFakeQuantize):
-                # Only reset quantizers matching current precision
-                if bits_key in name:
-                    # Reset calibration to allow fresh calibration
-                    module.calibrated = False
-                    # Ensure num_bits matches expected value
-                    if module.num_bits != bits:
-                        print(f"    Warning: {name} has num_bits={module.num_bits}, expected {bits}")
+            if isinstance(module, LearnableFakeQuantize) and bits_key in name:
+                # Reset calibration to allow fresh calibration
+                module.calibrated = False
 
     def validate_calibration(self) -> bool:
-        """Check if quantizers are properly calibrated for each precision"""
+        """Check if each layer has properly calibrated quantizers for each precision"""
         print("\n🔍 Validating quantizer calibration...")
 
-        # Test each precision separately
-        validation_results = {}
+        # Check that each precision has its quantizers calibrated
+        all_valid = True
+        for bits in [4, 8]:  # Only check 4 and 8 bit (16-bit bypasses)
+            bits_key = f'{bits}bit'
+            total = 0
+            calibrated = 0
 
-        for bits in [4, 8, 16]:
-            print(f"    Checking {bits}-bit precision...")
-            issues = []
-            calibrated_quantizers = 0
-            total_quantizers = 0
-
-            # Set model to specific precision for validation
-            self.model.set_precision(bits)
-
-            # Skip 16-bit validation - quantizers bypass at 16-bit
-            if bits >= 16:
-                print(f"      ✅ 16-bit mode uses pass-through (no quantization)")
-                validation_results[bits] = {
-                    'issues': [],
-                    'calibrated': 0,
-                    'total': 0
-                }
-                continue
-
+            # Check quantizers for this specific bit-width
             for name, module in self.model.named_modules():
-                if isinstance(module, LearnableFakeQuantize):
-                    # Only validate quantizers that match current bit-width
-                    # SPLinearWithLoRA uses keys like "quantizers_weight.4bit"
-                    bits_key = f'{bits}bit'
-                    if bits_key not in name:
-                        continue
+                if isinstance(module, LearnableFakeQuantize) and bits_key in name:
+                    total += 1
+                    if module.calibrated:
+                        calibrated += 1
+                    else:
+                        all_valid = False
 
-                    total_quantizers += 1
-
-                    try:
-                        if not module.calibrated:
-                            issues.append(f"{name} not calibrated")
-                        elif torch.all(module.scale == 1.0) and torch.all(module.zero_point == 0.0):
-                            issues.append(f"{name} has default parameters")
-                        elif torch.any(torch.isinf(module.running_min)) or torch.any(torch.isinf(module.running_max)):
-                            issues.append(f"{name} has invalid running statistics")
-                        else:
-                            calibrated_quantizers += 1
-                    except AttributeError as e:
-                        issues.append(f"{name} missing calibration attributes: {e}")
-                        print(f"      Calibration validation error for {name}: {e}")
-
-            validation_results[bits] = {
-                'issues': issues,
-                'calibrated': calibrated_quantizers,
-                'total': total_quantizers
-            }
-
-            if issues:
-                print(f"      ⚠️ {len(issues)} issues found for {bits}-bit")
-                print(f"      📊 Calibrated: {calibrated_quantizers}/{total_quantizers} quantizers")
+            if total == 0:
+                print(f"  ❌ {bits}-bit: No quantizers found!")
+                return False
+            elif calibrated == total:
+                print(f"  ✅ {bits}-bit: {calibrated}/{total} quantizers calibrated")
             else:
-                print(f"      ✅ All {total_quantizers} quantizers calibrated for {bits}-bit")
+                print(f"  ❌ {bits}-bit: Only {calibrated}/{total} quantizers calibrated")
 
-        # Overall assessment
-        total_issues = sum(len(result['issues']) for result in validation_results.values())
-
-        if total_issues > 0:
-            print(f"\n⚠️ Total calibration issues: {total_issues}")
-            for bits, result in validation_results.items():
-                if result['issues']:
-                    print(f"  {bits}-bit precision: {len(result['issues'])} issues")
-            return False
-
-        print(f"\n✅ All precision modes properly calibrated")
-        return True
+        return all_valid
 
     def get_calibration_stats(self) -> Dict[str, Any]:
         """Get calibration statistics for analysis"""
@@ -240,40 +161,21 @@ class CalibrationManager:
         with torch.no_grad():
             for bits in [16, 8, 4]:
                 self.model.set_precision(bits)
-
-                try:
-                    outputs = self.model(tokens, labels=tokens)
-                    loss = outputs['loss'].item()
-                    ppl = torch.exp(torch.tensor(loss)).item()
-
-                    results[bits] = {'loss': loss, 'ppl': ppl}
-                    print(f"  {bits:2d}-bit: Loss = {loss:.4f}, PPL = {ppl:.2f}")
-
-                except Exception as e:
-                    print(f"  {bits:2d}-bit: Error - {e}")
-                    results[bits] = {'error': str(e)}
+                outputs = self.model(tokens, labels=tokens)
+                loss = outputs['loss'].item()
+                ppl = torch.exp(torch.tensor(loss)).item()
+                results[bits] = {'loss': loss, 'ppl': ppl}
+                print(f"  {bits:2d}-bit: Loss = {loss:.4f}, PPL = {ppl:.2f}")
 
         # Analyze degradation
-        if 16 in results and 8 in results and 'loss' in results[16] and 'loss' in results[8]:
-            baseline_ppl = results[16]['ppl']
+        baseline_ppl = results[16]['ppl']
+        for bits in [8, 4]:
+            ppl = results[bits]['ppl']
+            degradation = ((ppl - baseline_ppl) / baseline_ppl) * 100
+            status = "✅" if degradation < 20 else "⚠️" if degradation < 100 else "❌"
+            print(f"  {bits}-bit degradation: {degradation:.1f}% {status}")
 
-            for bits in [8, 4]:
-                if bits in results and 'ppl' in results[bits]:
-                    ppl = results[bits]['ppl']
-                    degradation = ((ppl - baseline_ppl) / baseline_ppl) * 100
-
-                    if degradation < 20:
-                        status = "✅ Excellent"
-                    elif degradation < 100:
-                        status = "⚠️ Acceptable"
-                    else:
-                        status = "❌ Poor"
-
-                    print(f"  {bits}-bit degradation: {degradation:.1f}% ({status})")
-
-        # Reset to 16-bit
         self.model.set_precision(16)
-
         return results
 
 
@@ -282,14 +184,8 @@ def calibrate_sp_model(model, tokenizer, device='cuda'):
     calibration_mgr = CalibrationManager(model, tokenizer, device)
     calibration_mgr.calibrate_all_precisions()
 
-    # Validate calibration worked
-    if calibration_mgr.validate_calibration():
-        print("🎉 Model calibration successful!")
+    if not calibration_mgr.validate_calibration():
+        raise RuntimeError("Model calibration failed!")
 
-        # Quick quality check
-        calibration_mgr.quick_calibration_check()
-
-        return True
-    else:
-        print("❌ Model calibration failed!")
-        return False
+    calibration_mgr.quick_calibration_check()
+    return True
