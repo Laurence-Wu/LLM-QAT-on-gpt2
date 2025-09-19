@@ -50,7 +50,15 @@ class CalibrationManager:
             print(f"  📊 Calibrating {bits}-bit mode...")
             self.model.set_precision(bits)
 
-            # Reset calibration state for all quantizers at this precision
+            # Count active quantizers for this precision
+            active_count = 0
+            bits_key = f'{bits}bit'
+            for name, module in self.model.named_modules():
+                if isinstance(module, LearnableFakeQuantize) and bits_key in name:
+                    active_count += 1
+            print(f"    Found {active_count} quantizers for {bits}-bit mode")
+
+            # Reset calibration state for quantizers matching this precision
             self._reset_calibration_for_precision(bits)
 
             # Run forward passes to calibrate quantizers
@@ -84,12 +92,20 @@ class CalibrationManager:
 
     def _reset_calibration_for_precision(self, bits: int):
         """Reset calibration state for quantizers at specific precision"""
+        # Skip 16-bit - it doesn't need calibration
+        if bits >= 16:
+            return
+
+        bits_key = f'{bits}bit'
         for name, module in self.model.named_modules():
             if isinstance(module, LearnableFakeQuantize):
-                # Reset calibration to allow fresh calibration
-                module.calibrated = False
-                # Don't set to infinity - let the forward pass initialize properly
-                # The forward pass will set these on first call when calibrated=False
+                # Only reset quantizers matching current precision
+                if bits_key in name:
+                    # Reset calibration to allow fresh calibration
+                    module.calibrated = False
+                    # Ensure num_bits matches expected value
+                    if module.num_bits != bits:
+                        print(f"    Warning: {name} has num_bits={module.num_bits}, expected {bits}")
 
     def validate_calibration(self) -> bool:
         """Check if quantizers are properly calibrated for each precision"""
@@ -107,14 +123,22 @@ class CalibrationManager:
             # Set model to specific precision for validation
             self.model.set_precision(bits)
 
+            # Skip 16-bit validation - quantizers bypass at 16-bit
+            if bits >= 16:
+                print(f"      ✅ 16-bit mode uses pass-through (no quantization)")
+                validation_results[bits] = {
+                    'issues': [],
+                    'calibrated': 0,
+                    'total': 0
+                }
+                continue
+
             for name, module in self.model.named_modules():
                 if isinstance(module, LearnableFakeQuantize):
-                    # Skip quantizers that shouldn't be active for this precision
-                    if bits >= 16 and module.num_bits >= 16:
-                        # 16-bit quantizers are expected to be uncalibrated (they pass through)
-                        continue
-                    elif bits < 16 and module.num_bits != bits:
-                        # Only check quantizers that match current precision
+                    # Only validate quantizers that match current bit-width
+                    # SPLinearWithLoRA uses keys like "quantizers_weight.4bit"
+                    bits_key = f'{bits}bit'
+                    if bits_key not in name:
                         continue
 
                     total_quantizers += 1
