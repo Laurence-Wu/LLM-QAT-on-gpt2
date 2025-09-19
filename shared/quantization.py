@@ -60,6 +60,7 @@ class LearnableFakeQuantize(nn.Module):
         # Reset calibration when bit-width changes
         # Different bit-widths need different scale/zero_point calibration
         if old_bits != self.num_bits:
+            print(f"    Reset calibration for LearnableFakeQuantize: {old_bits}")
             self.calibrated = False
             # Optionally reset statistics for clean recalibration
             # self.running_min.zero_()
