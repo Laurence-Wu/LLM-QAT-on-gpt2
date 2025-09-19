@@ -231,8 +231,9 @@ def check_lora_initialization(model):
     for name, module in model.named_modules():
         if hasattr(module, 'lora_adapters'):
             for bit_key, adapter in module.lora_adapters.items():
-                lora_a = adapter['A']
-                lora_b = adapter['B']
+                # adapter is a LoRALayer object, not a dict
+                lora_a = adapter.lora_A
+                lora_b = adapter.lora_B
 
                 # LoRA B should be initialized to zeros
                 b_mean = lora_b.data.mean().item()
