@@ -101,7 +101,7 @@ class DistillationManager:
                 cache_entry['hidden_states'] = [h.detach().clone() for h in teacher_outputs['hidden_states']]
 
             # Optionally move to CPU to save GPU memory
-            if self.config.get('move_cache_to_cpu', False):
+            if getattr(self.config, 'move_cache_to_cpu', False):
                 cache_entry['logits'] = cache_entry['logits'].cpu()
                 cache_entry['hidden_states'] = [h.cpu() for h in cache_entry['hidden_states']]
 
@@ -169,7 +169,7 @@ class DistillationManager:
             num_layers = min(len(teacher['hidden_states']), len(student_outputs['hidden_states']))
 
             # Match all layers or specified layers
-            layers_to_match = self.config.get('feature_layers') or list(range(num_layers))
+            layers_to_match = getattr(self.config, 'feature_layers', None) or list(range(num_layers))
             layers_to_match = [l for l in layers_to_match if l < num_layers]
 
             if layers_to_match:
@@ -204,7 +204,7 @@ class DistillationManager:
 
     def _add_to_cache(self, key, entry):
         """Add entry to cache with LRU eviction."""
-        cache_size_limit = self.config.get('cache_size', 32)
+        cache_size_limit = getattr(self.config, 'cache_size', 32)
 
         if len(self.cache_keys) >= cache_size_limit:
             # Remove oldest entry (LRU)
