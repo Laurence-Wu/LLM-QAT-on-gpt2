@@ -76,6 +76,15 @@ class CalibrationManager:
                     try:
                         outputs = self.model(tokens)
 
+                        # Check calibration status on first sample
+                        if i == 0 and bits < 16:
+                            calibrated_count = 0
+                            for name, module in self.model.named_modules():
+                                if isinstance(module, LearnableFakeQuantize) and f'{bits}bit' in name:
+                                    if module.calibrated:
+                                        calibrated_count += 1
+                            print(f"    After first sample: {calibrated_count}/{active_count} quantizers calibrated")
+
                         # Progress indicator
                         if (i + 1) % 4 == 0:
                             print(f"    🔄 Processed {i + 1}/{len(self.calibration_texts)} calibration samples")
@@ -83,6 +92,16 @@ class CalibrationManager:
                     except Exception as e:
                         print(f"    ⚠️ Warning: Calibration error on sample {i+1}: {e}")
                         continue
+
+            # Final check - print some quantizer statistics
+            if bits < 16:
+                sample_count = 0
+                for name, module in self.model.named_modules():
+                    if isinstance(module, LearnableFakeQuantize) and f'{bits}bit' in name:
+                        if sample_count < 2:  # Just show first 2 as examples
+                            scale_val = module.scale.mean().item() if module.scale.numel() > 1 else module.scale.item()
+                            print(f"    Sample {name}: scale={scale_val:.6f}, calibrated={module.calibrated}")
+                            sample_count += 1
 
             print(f"    ✅ {bits}-bit calibration complete")
 
