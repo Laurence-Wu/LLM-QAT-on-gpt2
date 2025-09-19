@@ -121,8 +121,8 @@ def analyze_switchable_linear(model):
         print(f"           ├── lora_A: {lora.lora_A.shape}")
         print(f"           ├── lora_B: {lora.lora_B.shape}")
         print(f"           ├── rank: {lora.rank}")
-        print(f"           ├── alpha: {lora.alpha}")
-        print(f"           └── scaling: {lora.scaling}")
+        print(f"           ├── alpha: {getattr(lora, 'alpha', 'N/A')}")
+        print(f"           └── scaling: {getattr(lora, 'scaling', 'N/A')}")
 
 
 def count_parameters(model):

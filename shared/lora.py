@@ -16,6 +16,7 @@ class LoRALayer(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         self.rank = rank
+        self.alpha = alpha
 
         # Handle rank=0 case (no LoRA)
         if rank <= 0:
