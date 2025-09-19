@@ -58,6 +58,7 @@ class CyclicTrainingConfig:
 class CyclicPrecisionConfig:
     """Cyclic precision specific configuration for Step 5 of Algorithm Test 2."""
     def __init__(self):
+        self.bit_widths = [2, 4, 6, 8]  # Available bit widths
         self.cycle_length = 100
         self.bit_width_pattern = [8, 6, 4, 2, 4, 6, 8]
 

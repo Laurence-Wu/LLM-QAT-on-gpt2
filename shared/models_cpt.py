@@ -231,6 +231,10 @@ class CPTModel(nn.Module):
         for block in self.h:
             block.set_precision(bits, bits, activation_bits, bits)
 
+    def set_precision(self, weight_bits, activation_bits):
+        """Alias for set_global_precision for compatibility."""
+        self.set_global_precision(weight_bits, activation_bits)
+
     def get_current_precision(self):
         """Get current global precision setting."""
         return self.current_bits
@@ -308,7 +312,11 @@ class CPTLMHeadModel(nn.Module):
         """Set global precision for all layers."""
         self.transformer.set_global_precision(bits, activation_bits)
 
-    def get_current_precision(self):
+    def set_precision(self, weight_bits, activation_bits):
+        """Alias for set_global_precision for compatibility."""
+        self.set_global_precision(weight_bits, activation_bits)
+
+    def get_current_precision(self)
         """Get current precision setting."""
         return self.transformer.get_current_precision()
 

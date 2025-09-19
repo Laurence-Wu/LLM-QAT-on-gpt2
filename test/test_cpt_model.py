@@ -15,9 +15,9 @@ from transformers import GPT2Config, GPT2TokenizerFast
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.models_cpt import CPTModel, CPTLMHeadModel, CPTAttention, CPTMLP, CPTBlock
-from shared.models_cpt import CyclicPrecisionScheduler
 from shared.lora import LinearWithLoRA
 from part2_cyclic_precision.config_cyclic import ModelConfig, CyclicTrainingConfig, CyclicPrecisionConfig
+from part2_cyclic_precision.train_cyclic import CyclicPrecisionScheduler
 
 def test_basic_components():
     """Test basic CPT model components."""
@@ -175,7 +175,8 @@ def test_cpt_block():
     assert output.shape == (2, 10, 768), f"Wrong block output shape: {output.shape}"
 
     # Test precision setting
-    block.set_precision(4, 4)
+    # CPTBlock.set_precision needs 4 arguments: attn_bits, mlp_bits, activation_bits, kv_bits
+    block.set_precision(4, 4, 4, 4)
     output = block(hidden_states, use_checkpoint=False)
     assert output.shape == (2, 10, 768), f"Wrong output shape after precision change"
 

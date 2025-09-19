@@ -22,9 +22,10 @@ from part1_switchable_precision.config_sp import TrainingConfig as SPTrainingCon
 from part1_switchable_precision.train_sp import get_next_bitwidth
 
 # Import CPT components
-from shared.models_cpt import CPTLMHeadModel, CyclicPrecisionScheduler
+from shared.models_cpt import CPTLMHeadModel
 from part2_cyclic_precision.config_cyclic import ModelConfig as CPTModelConfig
 from part2_cyclic_precision.config_cyclic import CyclicTrainingConfig, CyclicPrecisionConfig
+from part2_cyclic_precision.train_cyclic import CyclicPrecisionScheduler
 
 # Import shared components
 from shared.dataset import create_dataloaders
