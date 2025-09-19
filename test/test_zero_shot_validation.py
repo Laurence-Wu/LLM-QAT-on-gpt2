@@ -46,6 +46,7 @@ def load_models():
     print("\n3. Loading tokenizer...")
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.pad_token_id = tokenizer.eos_token_id
 
     print("\n✅ All models loaded successfully!")
     return sp_model, gpt2_model, tokenizer, sp_config, device
