@@ -316,7 +316,7 @@ class CPTLMHeadModel(nn.Module):
         """Alias for set_global_precision for compatibility."""
         self.set_global_precision(weight_bits, activation_bits)
 
-    def get_current_precision(self)
+    def get_current_precision(self):
         """Get current precision setting."""
         return self.transformer.get_current_precision()
 

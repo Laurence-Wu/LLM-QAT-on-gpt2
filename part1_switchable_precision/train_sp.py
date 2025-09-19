@@ -33,10 +33,6 @@ def get_next_bitwidth(iteration, model_config):
 def train_sp(model, train_loader, val_loader, config, model_config):
     """SP training with switchable precision support."""
 
-    # Force CUDA - no fallback
-    if not torch.cuda.is_available():
-        raise RuntimeError('CUDA is not available. Training requires CUDA.')
-
     device = torch.device('cuda')
     model = model.to(device)
 
@@ -69,15 +65,13 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     print(f"Gradient accumulation: {config.gradient_accumulation_steps}")
 
     # Initialize training statistics dictionary
-    # Create losses_per_bit for all configured bit widths
-    losses_per_bit = {bit: [] for bit in model_config.bit_widths}
     training_stats = {
         'iteration_losses': [],
         'validation_losses': [],
         'bit_width_usage': [],
         'learning_rates': [],
         'memory_usage': [],
-        'losses_per_bit': losses_per_bit
+        'losses_per_bit': {4: [], 8: [], 16: []}
     }
 
     # Create data iterator
@@ -89,7 +83,9 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     for iteration in progress_bar:
         model.train()
 
-        # Switch bit-width for switchable precision training
+        # Switch bit-width if using switchable model
+        current_bits = model_config.quantization_bits  # Default
+
         current_bits = get_next_bitwidth(iteration, model_config)
         model.set_precision(current_bits)
 
@@ -153,9 +149,9 @@ def train_sp(model, train_loader, val_loader, config, model_config):
         training_stats['learning_rates'].append(optimizer.param_groups[0]['lr'])
         training_stats['memory_usage'].append(torch.cuda.memory_allocated() / 1024**2)  # MB
 
-        # Track loss per bit-width
-        if current_bits in training_stats['losses_per_bit']:
-            training_stats['losses_per_bit'][current_bits].append(total_loss)
+        # Track loss per bit-width if switchable
+
+        training_stats['losses_per_bit'][current_bits].append(total_loss)
 
         # Periodic memory cleanup to prevent accumulation
         if iteration % 10 == 0:
