@@ -191,6 +191,7 @@ class ComprehensiveTrainingMonitor:
             self._track_shapes(model, input_ids, step)
 
         # Track gradients
+        grad_info = None
         if step % 10 == 0:
             grad_info = self._analyze_gradients(model)
             step_info["gradient_norm"] = grad_info["total_norm"]
@@ -205,7 +206,9 @@ class ComprehensiveTrainingMonitor:
         # Check for issues
         if np.isnan(loss) or np.isinf(loss):
             self._log_issue(f"Invalid loss at step {step}: {loss}", "critical")
-        if grad_info.get("total_norm", 0) > 100:
+
+        # Only check gradient norm if we have grad_info
+        if grad_info and grad_info.get("total_norm", 0) > 100:
             self._log_issue(f"Large gradient norm at step {step}: {grad_info['total_norm']:.2f}", "warning")
 
         return step_info
