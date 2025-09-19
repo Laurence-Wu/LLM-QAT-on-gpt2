@@ -184,6 +184,13 @@ class SPLinearWithLoRA(nn.Module):
         input_quantizer = self.quantizers_input[bits_key]
         active_lora = self.lora_adapters[bits_key]
 
+        # For 16-bit precision, use exact FP32 computation (no quantization, no LoRA)
+        # This ensures perfect equivalence to GPT-2 for baseline comparison
+        if self.current_bits == 16:
+            # Pure FP32 computation - bypass quantization and LoRA for exact match
+            return F.linear(x, self.linear.weight, self.linear.bias)
+
+        # For lower precisions, use quantization + LoRA
         # Quantize inputs and weights for current bit-width
         x_quantized = input_quantizer(x)
         weight_quantized = weight_quantizer(self.linear.weight)
