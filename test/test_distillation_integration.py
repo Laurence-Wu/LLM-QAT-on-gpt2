@@ -256,7 +256,7 @@ def test_distillation_convergence():
     optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad],
                                    lr=5e-4, weight_decay=0.01)
 
-    num_iterations = 50  # More iterations for better convergence
+    num_iterations = 500  # More iterations for better convergence
     model.train()
 
     losses = []  # Track losses for trend analysis
