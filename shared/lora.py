@@ -189,6 +189,29 @@ class SPLinearWithLoRA(nn.Module):
             raise ValueError(f"Bit-width {bits} not supported. Choose from {self.bit_widths}")
         self.current_bits = bits
 
+        # CRITICAL: Update the num_bits for the active quantizers
+        # This ensures they actually quantize at the right precision
+        bits_key = f'{bits}bit'
+
+        # Ensure quantizers exist for this precision
+        if bits_key not in self.quantizers_weight:
+            raise ValueError(f"Weight quantizer for {bits}-bit not found. Available: {list(self.quantizers_weight.keys())}")
+        if bits_key not in self.quantizers_input:
+            raise ValueError(f"Input quantizer for {bits}-bit not found. Available: {list(self.quantizers_input.keys())}")
+        if bits_key not in self.lora_adapters:
+            raise ValueError(f"LoRA adapter for {bits}-bit not found. Available: {list(self.lora_adapters.keys())}")
+
+        # Update quantizers
+        self.quantizers_weight[bits_key].set_num_bits(bits)
+        self.quantizers_input[bits_key].set_num_bits(bits)
+
+        # Update LoRA adapter quantizers
+        lora = self.lora_adapters[bits_key]
+        if lora.quantize_A is not None:
+            lora.quantize_A.set_num_bits(bits)
+        if lora.quantize_B is not None:
+            lora.quantize_B.set_num_bits(bits)
+
     def get_active_lora(self):
         """Get the currently active LoRA adapter."""
         return self.lora_adapters[f'{self.current_bits}bit']
