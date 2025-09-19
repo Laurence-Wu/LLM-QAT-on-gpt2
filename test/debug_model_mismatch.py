@@ -143,7 +143,14 @@ def test_forward_pass_equivalence(sp_model, gpt2_model, tokenizer, device):
         # SP model forward pass (16-bit)
         sp_model.set_precision(16)
         sp_outputs = sp_model(input_ids)
-        sp_logits = sp_outputs['logits']
+
+        # Handle different output formats
+        if isinstance(sp_outputs, dict) and 'logits' in sp_outputs:
+            sp_logits = sp_outputs['logits']
+        elif isinstance(sp_outputs, dict) and 'prediction_scores' in sp_outputs:
+            sp_logits = sp_outputs['prediction_scores']
+        else:
+            sp_logits = sp_outputs  # Assume it's the logits tensor directly
 
         # GPT-2 forward pass
         gpt2_outputs = gpt2_model(input_ids)

@@ -127,7 +127,7 @@ def test_language_modeling_perplexity(sp_model, gpt2_model, tokenizer, device):
 
 
 def test_text_generation_quality(sp_model, gpt2_model, tokenizer, device):
-    """Test text generation quality."""
+    """Test text generation quality - simplified version."""
     print("\n" + "="*60)
     print("TEXT GENERATION QUALITY TEST")
     print("="*60)
@@ -139,15 +139,8 @@ def test_text_generation_quality(sp_model, gpt2_model, tokenizer, device):
         "Python programming language"
     ]
 
-    generation_params = {
-        'max_length': 50,
-        'temperature': 0.8,
-        'top_p': 0.9,
-        'do_sample': True,
-        'pad_token_id': tokenizer.eos_token_id
-    }
-
-    print(f"\nGenerating text for {len(prompts)} prompts...")
+    print(f"\nTesting next-token predictions for {len(prompts)} prompts...")
+    print("(Skipping full generation since SP model doesn't have generate() method)")
 
     for i, prompt in enumerate(prompts):
         print(f"\n{i+1}. Prompt: \"{prompt}\"")
@@ -157,24 +150,32 @@ def test_text_generation_quality(sp_model, gpt2_model, tokenizer, device):
         input_ids = inputs['input_ids'].to(device)
 
         with torch.no_grad():
-            # SP model generation at 16-bit
+            # SP model prediction at 16-bit
             sp_model.set_precision(16)
-            torch.manual_seed(42)  # For reproducible comparison
-            sp_outputs = sp_model.generate(input_ids, **generation_params)
-            sp_text = tokenizer.decode(sp_outputs[0], skip_special_tokens=True)
+            sp_outputs = sp_model(input_ids)
+            sp_logits = sp_outputs['logits'][0, -1, :]  # Last token logits
 
-            # GPT-2 generation
-            torch.manual_seed(42)  # Same seed
-            gpt2_outputs = gpt2_model.generate(input_ids, **generation_params)
-            gpt2_text = tokenizer.decode(gpt2_outputs[0], skip_special_tokens=True)
+            # GPT-2 prediction
+            gpt2_outputs = gpt2_model(input_ids)
+            gpt2_logits = gpt2_outputs['logits'][0, -1, :]
 
-        print(f"   SP (16-bit): {sp_text}")
-        print(f"   GPT-2:       {gpt2_text}")
+            # Get top predictions
+            sp_top3 = torch.topk(sp_logits, 3)
+            gpt2_top3 = torch.topk(gpt2_logits, 3)
 
-        # Simple quality metrics
-        sp_tokens = len(tokenizer.encode(sp_text))
-        gpt2_tokens = len(tokenizer.encode(gpt2_text))
-        print(f"   Token counts: SP={sp_tokens}, GPT-2={gpt2_tokens}")
+        print(f"   SP top-3 predictions:")
+        for j, (idx, score) in enumerate(zip(sp_top3.indices, sp_top3.values)):
+            token = tokenizer.decode(idx.item()).strip()
+            print(f"     {j+1}. '{token}' ({score.item():.2f})")
+
+        print(f"   GPT-2 top-3 predictions:")
+        for j, (idx, score) in enumerate(zip(gpt2_top3.indices, gpt2_top3.values)):
+            token = tokenizer.decode(idx.item()).strip()
+            print(f"     {j+1}. '{token}' ({score.item():.2f})")
+
+        # Check overlap
+        overlap = len(set(sp_top3.indices.cpu().numpy()) & set(gpt2_top3.indices.cpu().numpy()))
+        print(f"   Top-3 overlap: {overlap}/3")
 
 
 def test_different_precisions(sp_model, tokenizer, device):
