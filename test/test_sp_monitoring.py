@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Test script for SP training monitoring
-Verifies that all monitoring components work correctly
+Test script for SP training monitoring with distillation support
+Verifies that all monitoring components including distillation work correctly
 """
 
 import sys
 import os
 import torch
 import json
+import numpy as np
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -15,7 +16,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from transformers import GPT2Config, GPT2TokenizerFast
 from shared.models_sp import SPLMHeadModel
 from part1_switchable_precision.config_sp import ModelConfig, TrainingConfig
+from part1_switchable_precision.distillation import DistillationConfig, SelfDistillationTrainer
 from monitor_sp_complete_training import ComprehensiveTrainingMonitor
+from monitor_sp_training import TrainingMonitor
 
 
 def test_monitor_initialization():
@@ -198,9 +201,106 @@ def test_issue_detection():
     return True
 
 
+def test_distillation_monitoring():
+    """Test distillation monitoring functionality."""
+    print("\n6. Testing distillation monitoring...")
+
+    monitor = TrainingMonitor("test_distillation_monitor.json")
+
+    # Create test model
+    model_config = ModelConfig()
+    training_config = TrainingConfig()
+    model_config.n_layer = 2
+    model_config.n_embd = 128
+
+    gpt2_config = GPT2Config(
+        vocab_size=1000,
+        n_positions=256,
+        n_embd=model_config.n_embd,
+        n_layer=model_config.n_layer,
+        n_head=4
+    )
+
+    gpt2_config.bit_widths = model_config.bit_widths
+    gpt2_config.lora_rank_per_bit = model_config.lora_rank_per_bit
+    gpt2_config.lora_alpha_per_bit = model_config.lora_alpha_per_bit
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model = SPLMHeadModel(gpt2_config).to(device)
+
+    # Create distillation trainer
+    distill_config = DistillationConfig(
+        use_distillation=training_config.use_distillation,
+        alpha_output=training_config.distillation_alpha_output,
+        alpha_feature=training_config.distillation_alpha_feature,
+        temperature=training_config.distillation_temperature
+    )
+
+    distillation_trainer = SelfDistillationTrainer(model, distill_config, device)
+
+    # Test distillation metric logging
+    print("   Testing distillation metric logging...")
+
+    # Create test data
+    batch_size, seq_len = 2, 32
+    input_ids = torch.randint(0, 1000, (batch_size, seq_len), device=device)
+    labels = input_ids.clone()
+
+    # Test at different precisions
+    for step, bits in enumerate([8, 4, 16]):
+        model.set_precision(bits)
+
+        with torch.no_grad():
+            outputs = model(input_ids, output_hidden_states=True, return_dict=True)
+
+        loss, components = distillation_trainer.compute_distillation_loss(
+            outputs, labels, input_ids
+        )
+
+        # Log distillation metrics
+        monitor.log_distillation_metrics(step, components, distillation_trainer.get_stats())
+
+        # Log teacher-student agreement if not at full precision
+        if bits != 16:
+            teacher = distillation_trainer._get_from_cache(input_ids)
+            if teacher is not None:
+                monitor.log_teacher_student_agreement(
+                    step, teacher['logits'], outputs['logits']
+                )
+
+    # Verify metrics were logged
+    assert len(monitor.logs["distillation_metrics"]) > 0, "No distillation metrics logged"
+    print(f"   ✓ Logged {len(monitor.logs['distillation_metrics'])} distillation metrics")
+
+    if "teacher_student_agreement" in monitor.logs:
+        assert len(monitor.logs["teacher_student_agreement"]) > 0
+        print(f"   ✓ Logged {len(monitor.logs['teacher_student_agreement'])} agreement metrics")
+
+    # Check for warnings
+    if monitor.logs["warnings"]:
+        print(f"   ⚠️ {len(monitor.logs['warnings'])} warnings generated")
+        for warning in monitor.logs["warnings"][:2]:
+            print(f"      - {warning['message']}")
+
+    # Save and verify
+    monitor.save_logs()
+    assert os.path.exists("test_distillation_monitor.json")
+
+    with open("test_distillation_monitor.json", 'r') as f:
+        saved_logs = json.load(f)
+        assert "distillation_metrics" in saved_logs
+
+    print("   ✓ Distillation monitoring works correctly")
+
+    # Clean up
+    os.remove("test_distillation_monitor.json")
+
+    return True
+
+
 def test_log_saving():
     """Test log saving functionality."""
-    print("\n6. Testing log saving...")
+    print("\n7. Testing log saving...")
 
     monitor = ComprehensiveTrainingMonitor("test_monitor_output")
 
@@ -249,6 +349,7 @@ def run_all_tests():
         ("Training Step Monitoring", test_training_step_monitoring),
         ("Precision Switching Monitoring", test_precision_switching_monitoring),
         ("Issue Detection", test_issue_detection),
+        ("Distillation Monitoring", test_distillation_monitoring),
         ("Log Saving", test_log_saving)
     ]
 

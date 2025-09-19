@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Comprehensive SP Training Monitor
-Watches the entire training procedure and tracks shapes, memory, and potential issues
+Comprehensive SP Training Monitor with Distillation Support
+Watches the entire training procedure including distillation components
 """
 
 import sys
@@ -25,6 +25,7 @@ from shared.models_sp import SPModel, SPLMHeadModel
 from part1_switchable_precision.config_sp import ModelConfig, TrainingConfig
 from part1_switchable_precision.train_sp import train_sp, get_next_bitwidth
 from shared.dataset import create_dataloaders
+from part1_switchable_precision.distillation import DistillationConfig, SelfDistillationTrainer
 
 class TrainingMonitor:
     """Monitor for tracking training progress and diagnosing issues."""
@@ -40,7 +41,9 @@ class TrainingMonitor:
             "memory_tracking": [],
             "errors": [],
             "warnings": [],
-            "precision_switches": []
+            "precision_switches": [],
+            "distillation_metrics": [],  # NEW: Track distillation metrics
+            "teacher_cache_stats": []    # NEW: Track teacher cache usage
         }
 
     def _get_system_info(self):
@@ -175,6 +178,57 @@ class TrainingMonitor:
         }
 
         self.logs["precision_switches"].append(switch_info)
+
+    def log_distillation_metrics(self, step: int, loss_components: Dict[str, float],
+                                 teacher_stats: Optional[Dict] = None):
+        """Log distillation-specific metrics."""
+        metrics = {
+            "step": step,
+            "timestamp": datetime.now().isoformat(),
+            "loss_components": loss_components
+        }
+
+        if teacher_stats:
+            metrics["teacher_cache"] = teacher_stats
+
+        self.logs["distillation_metrics"].append(metrics)
+
+        # Check for distillation issues
+        if 'kl' in loss_components and loss_components['kl'] > 10:
+            self.add_warning(f"High KL divergence at step {step}: {loss_components['kl']:.4f}")
+
+        if 'feature' in loss_components and loss_components['feature'] > 1:
+            self.add_warning(f"High feature loss at step {step}: {loss_components['feature']:.4f}")
+
+    def log_teacher_student_agreement(self, step: int, teacher_logits: torch.Tensor,
+                                     student_logits: torch.Tensor):
+        """Log agreement between teacher and student predictions."""
+        with torch.no_grad():
+            teacher_preds = teacher_logits.argmax(dim=-1)
+            student_preds = student_logits.argmax(dim=-1)
+            agreement = (teacher_preds == student_preds).float().mean().item()
+
+            # KL divergence
+            teacher_probs = torch.nn.functional.softmax(teacher_logits, dim=-1)
+            student_probs = torch.nn.functional.softmax(student_logits, dim=-1)
+            kl_div = torch.nn.functional.kl_div(
+                student_probs.log(),
+                teacher_probs,
+                reduction='batchmean'
+            ).item()
+
+        agreement_info = {
+            "step": step,
+            "agreement": agreement,
+            "kl_divergence": kl_div
+        }
+
+        if "teacher_student_agreement" not in self.logs:
+            self.logs["teacher_student_agreement"] = []
+        self.logs["teacher_student_agreement"].append(agreement_info)
+
+        if agreement < 0.5:
+            self.add_warning(f"Low teacher-student agreement at step {step}: {agreement:.2%}")
 
     def add_error(self, error: str, traceback_str: Optional[str] = None):
         """Add error to log."""

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Diagnose High Loss Issue in SP Training
-Identifies why the model is producing extremely high loss values
+Diagnose High Loss Issue in SP Training with Distillation
+Identifies why the model is producing extremely high loss values and analyzes distillation impact
 """
 
 import sys
@@ -15,7 +15,8 @@ from transformers import GPT2Config, GPT2TokenizerFast, GPT2Model
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.models_sp import SPLMHeadModel
-from part1_switchable_precision.config_sp import ModelConfig
+from part1_switchable_precision.config_sp import ModelConfig, TrainingConfig
+from part1_switchable_precision.distillation import DistillationConfig, SelfDistillationTrainer
 
 
 def check_model_initialization():
@@ -316,8 +317,180 @@ load_pretrained_weights(model)
 if __name__ == "__main__":
     model = diagnose_and_fix()
 
+    # NEW: Diagnose distillation-related loss issues
+    diagnose_distillation_loss()
+
     print("\n" + "="*60)
     print("DIAGNOSIS COMPLETE")
     print("="*60)
-    print("\nKey finding: The high loss is likely due to random initialization.")
-    print("Solution: Always load pretrained GPT-2 weights before training.")
+    print("\nKey findings:")
+    print("1. High loss may be due to random initialization - always load pretrained weights")
+    print("2. With distillation, loss components should be balanced (check α weights)")
+    print("3. Temperature scaling affects KL divergence magnitude significantly")
+
+
+def diagnose_distillation_loss():
+    """Diagnose potential issues with distillation loss."""
+    print("\n" + "="*60)
+    print("DISTILLATION LOSS DIAGNOSIS")
+    print("="*60)
+
+    # Create configs
+    model_config = ModelConfig()
+    training_config = TrainingConfig()
+
+    # Create small model for testing
+    model_config.n_layer = 2
+    model_config.n_embd = 128
+    model_config.n_head = 4
+
+    gpt2_config = GPT2Config(
+        vocab_size=model_config.vocab_size,
+        n_positions=256,
+        n_embd=model_config.n_embd,
+        n_layer=model_config.n_layer,
+        n_head=model_config.n_head
+    )
+
+    gpt2_config.bit_widths = model_config.bit_widths
+    gpt2_config.lora_rank_per_bit = model_config.lora_rank_per_bit
+    gpt2_config.lora_alpha_per_bit = model_config.lora_alpha_per_bit
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model = SPLMHeadModel(gpt2_config).to(device)
+
+    # Initialize distillation
+    distill_config = DistillationConfig(
+        use_distillation=training_config.use_distillation,
+        alpha_output=training_config.distillation_alpha_output,
+        alpha_feature=training_config.distillation_alpha_feature,
+        temperature=training_config.distillation_temperature
+    )
+
+    trainer = SelfDistillationTrainer(model, distill_config, device)
+
+    # Create test data
+    batch_size, seq_len = 2, 64
+    input_ids = torch.randint(0, model_config.vocab_size, (batch_size, seq_len), device=device)
+    labels = input_ids.clone()
+
+    print("\n1. DISTILLATION LOSS COMPONENTS:")
+
+    # Test different scenarios
+    scenarios = [
+        ("Normal config", distill_config.alpha_output, distill_config.alpha_feature, distill_config.temperature),
+        ("High KL weight", 10.0, distill_config.alpha_feature, distill_config.temperature),
+        ("High feature weight", distill_config.alpha_output, 1.0, distill_config.temperature),
+        ("Low temperature", distill_config.alpha_output, distill_config.alpha_feature, 1.0),
+        ("High temperature", distill_config.alpha_output, distill_config.alpha_feature, 10.0)
+    ]
+
+    for scenario_name, alpha_out, alpha_feat, temp in scenarios:
+        print(f"\n   {scenario_name}:")
+        print(f"     α_out={alpha_out}, α_feat={alpha_feat}, T={temp}")
+
+        # Update config
+        trainer.config.alpha_output = alpha_out
+        trainer.config.alpha_feature = alpha_feat
+        trainer.config.temperature = temp
+
+        # Test at 8-bit precision (student mode)
+        model.set_precision(8)
+
+        with torch.no_grad():
+            outputs = model(input_ids, output_hidden_states=True, return_dict=True)
+
+        loss, components = trainer.compute_distillation_loss(outputs, labels, input_ids)
+
+        print(f"     Total loss: {components['total']:.4f}")
+        if 'kl' in components:
+            print(f"     KL component: {components['kl']:.4f}")
+        if 'feature' in components:
+            print(f"     Feature component: {components['feature']:.4f}")
+
+        # Check for abnormal values
+        if components['total'] > 100:
+            print(f"     ⚠️ WARNING: Extremely high loss detected!")
+        elif components['total'] < 0.01:
+            print(f"     ⚠️ WARNING: Suspiciously low loss detected!")
+
+    print("\n2. TEACHER-STUDENT AGREEMENT:")
+
+    # Check agreement at different bit widths
+    model.set_precision(16)  # Teacher
+    with torch.no_grad():
+        teacher_outputs = model(input_ids, return_dict=True)
+
+    for bits in [8, 4]:
+        model.set_precision(bits)
+        with torch.no_grad():
+            student_outputs = model(input_ids, return_dict=True)
+
+        # Calculate agreement
+        teacher_preds = teacher_outputs['logits'].argmax(dim=-1)
+        student_preds = student_outputs['logits'].argmax(dim=-1)
+        agreement = (teacher_preds == student_preds).float().mean()
+
+        print(f"\n   {bits}-bit student agreement with teacher: {agreement:.2%}")
+
+        # Check logit differences
+        logit_diff = (teacher_outputs['logits'] - student_outputs['logits']).abs().mean()
+        print(f"   Mean absolute logit difference: {logit_diff:.4f}")
+
+    print("\n3. LOSS SCALE ANALYSIS:")
+
+    # Compare loss magnitudes
+    print("\n   Loss magnitude comparison:")
+
+    # Standard cross-entropy (no distillation)
+    model.set_precision(16)
+    with torch.no_grad():
+        outputs = model(input_ids, labels=labels, return_dict=True)
+    ce_loss = outputs['loss'].item()
+    print(f"     Standard CE loss: {ce_loss:.4f}")
+
+    # Distillation loss at different precisions
+    for bits in [8, 4]:
+        model.set_precision(bits)
+        with torch.no_grad():
+            outputs = model(input_ids, output_hidden_states=True, return_dict=True)
+        loss, components = trainer.compute_distillation_loss(outputs, labels, input_ids)
+        print(f"     {bits}-bit distillation loss: {components['total']:.4f}")
+
+    print("\n4. GRADIENT FLOW CHECK:")
+
+    # Check if gradients flow properly with distillation
+    model.set_precision(4)  # Low precision for distillation
+    model.train()
+
+    # Zero gradients
+    model.zero_grad()
+
+    # Forward pass with distillation
+    outputs = model(input_ids, output_hidden_states=True, return_dict=True)
+    loss, _ = trainer.compute_distillation_loss(outputs, labels, input_ids)
+
+    # Backward pass
+    loss.backward()
+
+    # Check gradient statistics
+    grad_norms = []
+    zero_grad_params = 0
+    for name, param in model.named_parameters():
+        if param.grad is not None:
+            grad_norm = param.grad.norm().item()
+            grad_norms.append(grad_norm)
+            if grad_norm == 0:
+                zero_grad_params += 1
+
+    if grad_norms:
+        print(f"\n   Gradient statistics:")
+        print(f"     Mean gradient norm: {np.mean(grad_norms):.6f}")
+        print(f"     Max gradient norm: {np.max(grad_norms):.6f}")
+        print(f"     Min gradient norm: {np.min(grad_norms):.6f}")
+        print(f"     Parameters with zero gradients: {zero_grad_params}")
+
+        if np.mean(grad_norms) < 1e-6:
+            print(f"     ⚠️ WARNING: Vanishing gradients detected!")
+        elif np.max(grad_norms) > 10:
+            print(f"     ⚠️ WARNING: Exploding gradients detected!")

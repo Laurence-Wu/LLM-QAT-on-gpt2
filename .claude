@@ -6,5 +6,5 @@ For the current ptoject
 4. When printing out the debugging or error information, always use the data from the script or variables from the script, instead of the hardcoded inforamtion.
 5. you should not add more files unless its for testing and explictly specified
 6. Always has a test folder and save all the test files there
-7. 
+7. Do not generate any md files unless specified
 

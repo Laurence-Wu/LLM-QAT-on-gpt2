@@ -72,3 +72,13 @@ class TrainingConfig:
         self.use_amp = True
         self.empty_cache_interval = 25
         self.num_workers = 0  # For DataLoader
+
+        # Self-Distillation settings
+        self.use_distillation = True
+        self.distillation_alpha_output = 1.0  # Weight for KL divergence loss
+        self.distillation_alpha_feature = 1e-7  # Weight for feature matching loss
+        self.distillation_temperature = 3.0  # Temperature for KL divergence
+        self.teacher_update_freq = 10  # How often to update teacher cache
+        self.distillation_warmup = 100  # Warmup steps before starting distillation
+        self.distillation_feature_layers = None  # None means all layers
+        self.distillation_cache_size = 32  # Size of teacher cache

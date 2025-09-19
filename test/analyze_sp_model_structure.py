@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Analyze SP Model Structure
-Comprehensive analysis of the Switchable Precision model architecture
+Analyze SP Model Structure with Distillation Support
+Comprehensive analysis of the Switchable Precision model architecture including distillation components
 """
 
 import sys
@@ -14,7 +14,8 @@ from transformers import GPT2Config
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.models_sp import SPLMHeadModel, SPModel, SPBlock, SPAttention, SPMLP
-from part1_switchable_precision.config_sp import ModelConfig
+from part1_switchable_precision.config_sp import ModelConfig, TrainingConfig
+from part1_switchable_precision.distillation import DistillationConfig, SelfDistillationTrainer
 
 
 def analyze_model_structure():
@@ -35,6 +36,17 @@ def analyze_model_structure():
     print(f"   Supported bit widths: {model_config.bit_widths}")
     print(f"   LoRA rank per bit: {model_config.lora_rank_per_bit}")
     print(f"   LoRA alpha per bit: {model_config.lora_alpha_per_bit}")
+
+    # Display distillation configuration
+    training_config = TrainingConfig()
+    print(f"\n   DISTILLATION CONFIGURATION:")
+    print(f"   Distillation enabled: {training_config.use_distillation}")
+    print(f"   KL loss weight (α₁): {training_config.distillation_alpha_output}")
+    print(f"   Feature loss weight (α₂): {training_config.distillation_alpha_feature}")
+    print(f"   Temperature: {training_config.distillation_temperature}")
+    print(f"   Teacher update freq: {training_config.teacher_update_freq}")
+    print(f"   Warmup steps: {training_config.distillation_warmup}")
+    print(f"   Cache size: {training_config.distillation_cache_size}")
 
     # Create GPT-2 config
     gpt2_config = GPT2Config(
@@ -236,8 +248,77 @@ def analyze_memory_usage(model):
     print(f"   Total model memory: {total_memory:.1f} MB")
 
 
+def analyze_distillation_setup():
+    """Analyze the distillation setup for the model."""
+    print(f"\n" + "=" * 80)
+    print("DISTILLATION SETUP ANALYSIS")
+    print("=" * 80)
+
+    # Create configs
+    model_config = ModelConfig()
+    training_config = TrainingConfig()
+
+    # Create simplified model for testing
+    gpt2_config = GPT2Config(
+        vocab_size=1000,
+        n_positions=256,
+        n_embd=128,
+        n_layer=2,
+        n_head=4
+    )
+
+    gpt2_config.bit_widths = model_config.bit_widths
+    gpt2_config.lora_rank_per_bit = model_config.lora_rank_per_bit
+    gpt2_config.lora_alpha_per_bit = model_config.lora_alpha_per_bit
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model = SPLMHeadModel(gpt2_config).to(device)
+
+    # Setup distillation
+    distill_config = DistillationConfig(
+        use_distillation=training_config.use_distillation,
+        alpha_output=training_config.distillation_alpha_output,
+        alpha_feature=training_config.distillation_alpha_feature,
+        temperature=training_config.distillation_temperature
+    )
+
+    trainer = SelfDistillationTrainer(model, distill_config, device)
+
+    print(f"\n1. DISTILLATION CONFIGURATION:")
+    print(f"   Teacher precision: {trainer.full_precision_bits}-bit")
+    print(f"   Student precisions: {[b for b in model_config.bit_widths if b != trainer.full_precision_bits]}")
+    print(f"   Loss formula: L = {distill_config.alpha_output}*KL + {distill_config.alpha_feature}*MSE")
+
+    # Test distillation at different precisions
+    batch_size, seq_len = 2, 32
+    input_ids = torch.randint(0, 1000, (batch_size, seq_len), device=device)
+    labels = input_ids.clone()
+
+    print(f"\n2. LOSS COMPONENTS BY PRECISION:")
+    for bits in model_config.bit_widths:
+        model.set_precision(bits)
+        with torch.no_grad():
+            outputs = model(input_ids, output_hidden_states=True, return_dict=True)
+        loss, components = trainer.compute_distillation_loss(outputs, labels, input_ids)
+
+        print(f"\n   {bits}-bit:")
+        if bits == trainer.full_precision_bits:
+            print(f"     Mode: TEACHER (standard cross-entropy)")
+        else:
+            print(f"     Mode: STUDENT (distillation)")
+        for k, v in components.items():
+            if isinstance(v, float):
+                print(f"     {k}: {v:.6f}")
+
+    # Analyze cache behavior
+    print(f"\n3. TEACHER CACHE ANALYSIS:")
+    print(f"   Cache statistics: {trainer.get_stats()}")
+
+    return model, trainer
+
+
 def main():
-    """Main analysis function."""
+    """Main analysis function with distillation support."""
     # Analyze model structure
     model, model_config = analyze_model_structure()
 
@@ -259,6 +340,9 @@ def main():
     # Analyze memory usage
     analyze_memory_usage(model)
 
+    # NEW: Analyze distillation setup
+    analyze_distillation_setup()
+
     print(f"\n" + "=" * 80)
     print("ANALYSIS COMPLETE")
     print("=" * 80)
@@ -269,6 +353,8 @@ def main():
     print(f"• Base GPT-2 weights can be frozen while training only LoRA adapters")
     print(f"• Precision switching is done at the layer level")
     print(f"• Memory overhead is primarily from LoRA adapters (3x for 3 bit-widths)")
+    print(f"• NEW: Self-distillation uses full-precision as teacher for low-precision students")
+    print(f"• NEW: Distillation combines KL divergence and feature matching losses")
 
 
 if __name__ == "__main__":

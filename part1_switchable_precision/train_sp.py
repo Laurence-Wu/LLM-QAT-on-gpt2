@@ -1,5 +1,5 @@
 """
-Switchable Precision Training Module - Fixed memory leak version
+Switchable Precision Training Module with Self-Distillation
 """
 
 import torch
@@ -11,6 +11,7 @@ import gc
 import json
 import time
 import random
+from distillation import DistillationConfig, SelfDistillationTrainer
 
 
 def get_next_bitwidth(iteration, model_config):
@@ -31,7 +32,7 @@ def get_next_bitwidth(iteration, model_config):
 
 
 def train_sp(model, train_loader, val_loader, config, model_config):
-    """SP training with switchable precision support."""
+    """SP training with switchable precision and self-distillation support."""
 
     device = torch.device('cuda')
     model = model.to(device)
@@ -39,6 +40,21 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     # Clear cache before starting
     torch.cuda.empty_cache()
     gc.collect()
+
+    # Initialize self-distillation if enabled
+    distillation_trainer = None
+    if config.use_distillation:
+        distill_config = DistillationConfig(
+            use_distillation=config.use_distillation,
+            alpha_output=config.distillation_alpha_output,
+            alpha_feature=config.distillation_alpha_feature,
+            temperature=config.distillation_temperature,
+            teacher_update_freq=config.teacher_update_freq,
+            warmup_steps=config.distillation_warmup,
+            feature_layers=config.distillation_feature_layers,
+            cache_size=config.distillation_cache_size
+        )
+        distillation_trainer = SelfDistillationTrainer(model, distill_config, device)
 
     # Optimizer - only optimize trainable parameters (LoRA adapters)
     trainable_params = [p for p in model.parameters() if p.requires_grad]
@@ -63,7 +79,7 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     scaler = torch.amp.GradScaler('cuda') if config.use_amp else None
 
     # Training metrics
-    print(f"\nStarting SP training ({model_config.quantization_bits}-bit)")
+    print(f"\nStarting SP training with distillation" if config.use_distillation else f"\nStarting SP training")
     print(f"Iterations: {config.num_iterations}, Batch size: {config.batch_size}")
     print(f"Gradient accumulation: {config.gradient_accumulation_steps}")
 
@@ -87,9 +103,26 @@ def train_sp(model, train_loader, val_loader, config, model_config):
         model.train()
 
         # Switch bit-width if using switchable model
-        current_bits = model_config.quantization_bits  # Default
-
+        previous_bits = model.get_current_precision() if hasattr(model, 'get_current_precision') else model_config.quantization_bits
         current_bits = get_next_bitwidth(iteration, model_config)
+
+        # Update teacher cache before switching away from full precision
+        if distillation_trainer and previous_bits == distillation_trainer.full_precision_bits and current_bits != previous_bits:
+            # Force teacher update with current batch
+            try:
+                temp_batch = next(train_iter)
+            except StopIteration:
+                train_iter = iter(train_loader)
+                temp_batch = next(train_iter)
+            temp_input_ids = temp_batch['input_ids'].to(device)
+            temp_attention_mask = temp_batch.get('attention_mask')
+            if temp_attention_mask is not None:
+                temp_attention_mask = temp_attention_mask.to(device)
+            distillation_trainer.compute_teacher_outputs(temp_input_ids, temp_attention_mask)
+            del temp_batch, temp_input_ids
+            if temp_attention_mask is not None:
+                del temp_attention_mask
+
         model.set_precision(current_bits)
 
         # Clear gradients only at the start of accumulation
@@ -108,11 +141,36 @@ def train_sp(model, train_loader, val_loader, config, model_config):
             attention_mask = batch.get('attention_mask')
             if attention_mask is not None:
                 attention_mask = attention_mask.to(device, non_blocking=True)
+            labels = input_ids.clone()
+
+            # Check if we should use distillation
+            use_distillation = distillation_trainer and distillation_trainer.should_use_distillation(iteration)
+
+            # Update teacher periodically or when at full precision
+            if distillation_trainer and (current_bits == distillation_trainer.full_precision_bits or
+                                        iteration % config.teacher_update_freq == 0):
+                distillation_trainer.compute_teacher_outputs(input_ids, attention_mask)
 
             # Forward with AMP
             with torch.amp.autocast('cuda', enabled=config.use_amp):
-                outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
-                loss = outputs['loss'] / config.gradient_accumulation_steps
+                if use_distillation:
+                    # Get outputs with hidden states for distillation
+                    outputs = model(
+                        input_ids,
+                        labels=None,  # Compute loss separately in distillation
+                        attention_mask=attention_mask,
+                        output_hidden_states=True,
+                        return_dict=True
+                    )
+                    # Compute distillation loss
+                    loss, loss_components = distillation_trainer.compute_distillation_loss(
+                        outputs, labels, input_ids, attention_mask
+                    )
+                    loss = loss / config.gradient_accumulation_steps
+                else:
+                    # Standard training without distillation
+                    outputs = model(input_ids, labels=labels, attention_mask=attention_mask)
+                    loss = outputs['loss'] / config.gradient_accumulation_steps
 
             # Detach loss immediately to prevent graph retention
             loss_value = loss.detach().item()
@@ -125,7 +183,7 @@ def train_sp(model, train_loader, val_loader, config, model_config):
                 loss.backward(retain_graph=False)
 
             # Clean up intermediate tensors immediately
-            del outputs, loss, input_ids
+            del outputs, loss, input_ids, labels
             if attention_mask is not None:
                 del attention_mask
             batch.clear()
@@ -186,6 +244,10 @@ def train_sp(model, train_loader, val_loader, config, model_config):
             gc.collect()
 
     print(f"\nTraining complete.")
+
+    # Clean up distillation trainer
+    if distillation_trainer:
+        distillation_trainer.clear_cache()
 
     # Save training statistics to JSON file
     timestamp = time.strftime('%Y%m%d_%H%M%S')

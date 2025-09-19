@@ -218,7 +218,21 @@ class SPModel(nn.Module):
         """Get current precision setting."""
         return self.current_bit_width
 
-    def forward(self, input_ids, attention_mask=None, use_checkpoint=False):
+    def forward(self, input_ids, attention_mask=None, use_checkpoint=False,
+                output_hidden_states=False):
+        """
+        Modified forward pass to support feature extraction for distillation.
+
+        Args:
+            input_ids: Input token IDs
+            attention_mask: Optional attention mask
+            use_checkpoint: Use gradient checkpointing
+            output_hidden_states: Return intermediate hidden states
+
+        Returns:
+            If output_hidden_states=False: final hidden states
+            If output_hidden_states=True: (final hidden states, all hidden states list)
+        """
         device = input_ids.device
         B, T = input_ids.shape
 
@@ -229,12 +243,30 @@ class SPModel(nn.Module):
 
         hidden_states = self.drop(token_embeddings + position_embeddings)
 
+        # Collect hidden states if requested
+        all_hidden_states = [] if output_hidden_states else None
+
         # Pass through transformer blocks
-        for block in self.h:
+        for i, block in enumerate(self.h):
+            if output_hidden_states:
+                # Store hidden state AFTER each block
+                # Clone and detach to prevent gradient accumulation
+                all_hidden_states.append(hidden_states.clone().detach())
+
             hidden_states = block(hidden_states, attention_mask, use_checkpoint)
 
+            # Memory cleanup
+            if i % 4 == 3 and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
         hidden_states = self.ln_f(hidden_states)
-        return hidden_states
+
+        if output_hidden_states:
+            # Add final hidden state
+            all_hidden_states.append(hidden_states.clone().detach())
+            return hidden_states, all_hidden_states
+        else:
+            return hidden_states
 
     def load_pretrained_weights(self, pretrained_model, device='cuda'):
         """Load weights from pretrained GPT-2 model."""
@@ -309,27 +341,52 @@ class SPLMHeadModel(nn.Module):
         """Get current precision setting."""
         return self.transformer.get_current_precision()
 
-    def forward(self, input_ids, labels=None, attention_mask=None, use_checkpoint=False):
-        # Get transformer outputs
-        hidden_states = self.transformer(input_ids, attention_mask, use_checkpoint)
+    def forward(self, input_ids, labels=None, attention_mask=None,
+                use_checkpoint=False, output_hidden_states=False,
+                return_dict=False):
+        """
+        Enhanced forward pass supporting distillation.
 
-        # Get logits from language model head
+        Returns:
+            Dictionary with 'loss', 'logits', and optionally 'hidden_states'
+        """
+        # Get transformer outputs
+        if output_hidden_states:
+            hidden_states, all_hidden_states = self.transformer(
+                input_ids, attention_mask, use_checkpoint,
+                output_hidden_states=True
+            )
+        else:
+            hidden_states = self.transformer(
+                input_ids, attention_mask, use_checkpoint,
+                output_hidden_states=False
+            )
+            all_hidden_states = None
+
+        # Language model head
         logits = self.lm_head(hidden_states)
 
+        # Compute loss if labels provided
         loss = None
         if labels is not None:
-            # Shift logits and labels for next-token prediction
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
-
-            # Compute loss
             loss_fct = nn.CrossEntropyLoss()
             loss = loss_fct(
                 shift_logits.view(-1, shift_logits.size(-1)),
                 shift_labels.view(-1)
             )
 
-        return {'loss': loss, 'logits': logits} if loss is not None else logits
+        # Return format for distillation compatibility
+        if return_dict or output_hidden_states:
+            return {
+                'loss': loss,
+                'logits': logits,
+                'hidden_states': all_hidden_states
+            }
+        else:
+            # Backward compatibility
+            return {'loss': loss, 'logits': logits} if loss is not None else logits
 
     def generate(self, input_ids, max_length=100, temperature=1.0,
                  do_sample=True, top_k=50, top_p=0.95, eos_token_id=None):
