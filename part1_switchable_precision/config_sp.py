@@ -6,12 +6,12 @@ Simplified and unified configuration.
 class ModelConfig:
     """Model architecture configuration."""
     def __init__(self):
-        # GPT-2 architecture
+        # GPT-2 architecture - using exact GPT-2 small dimensions
         self.vocab_size = 50257
         self.n_positions = 1024  # Match GPT-2's position embeddings
-        self.n_embd = 768
-        self.n_layer = 6  # Can be reduced for smaller models
-        self.n_head = 12
+        self.n_embd = 768        # GPT-2 small embedding dimension
+        self.n_layer = 12        # GPT-2 small number of layers (full model)
+        self.n_head = 12         # GPT-2 small number of attention heads
 
         # Regularization
         self.layer_norm_epsilon = 1e-5

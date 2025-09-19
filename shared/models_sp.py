@@ -285,6 +285,22 @@ class SPLMHeadModel(nn.Module):
         # Tie weights between token embeddings and lm_head
         self.lm_head.weight = self.transformer.wte.weight
 
+        # Initialize weights properly
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        """Initialize weights following GPT-2 paper."""
+        if isinstance(module, nn.Linear):
+            # Use normal distribution with std=0.02 like GPT-2
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        elif isinstance(module, nn.LayerNorm):
+            nn.init.zeros_(module.bias)
+            nn.init.ones_(module.weight)
+
     def set_precision(self, bits):
         """Set precision for the model."""
         self.transformer.set_precision(bits)
