@@ -38,8 +38,8 @@ def create_properly_initialized_model(use_pretrained=True):
     if use_pretrained:
         model_config.n_embd = 768  # GPT-2 small uses 768
         model_config.n_head = 12   # GPT-2 small uses 12 heads
-        model_config.n_layer = 2   # Use fewer layers for testing
-        print("\n✓ Using GPT-2 compatible dimensions")
+        model_config.n_layer = 12  # Use exact same as GPT-2 small (12 layers)
+        print("\n✓ Using exact GPT-2 dimensions")
     else:
         model_config.n_layer = 2
         model_config.n_embd = 256
@@ -103,7 +103,7 @@ def load_pretrained_weights_properly(model, config):
 
     # 2. Copy transformer blocks
     num_layers = min(len(model.transformer.h), len(pretrained.h))
-    print(f"   - Copying {num_layers} transformer blocks...")
+    print(f"   - Copying {num_layers} transformer blocks (model has {len(model.transformer.h)}, pretrained has {len(pretrained.h)})...")
 
     for i in range(num_layers):
         # Layer normalizations
@@ -138,6 +138,12 @@ def load_pretrained_weights_properly(model, config):
                 nn.init.kaiming_uniform_(lora_layer.lora_A, a=5**0.5)
                 # LoRA B: initialize to zeros (no initial contribution)
                 nn.init.zeros_(lora_layer.lora_B)
+
+    # Verify weight tying
+    if model.lm_head.weight is model.transformer.wte.weight:
+        print("   ✓ LM head weight tying verified")
+    else:
+        print("   ⚠️ LM head weight tying not working!")
 
     print("   ✓ Pretrained weights loaded successfully")
 
