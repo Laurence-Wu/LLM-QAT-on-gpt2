@@ -91,6 +91,23 @@ class CalibrationManager:
                 module.running_min.fill_(float('inf'))
                 module.running_max.fill_(float('-inf'))
 
+            # Handle LoRA quantizers - they might be None for 16-bit
+            try:
+                if module.quantize_A is not None:
+                    module.quantize_A.calibrated = False
+                    module.quantize_A.running_min.fill_(float('inf'))
+                    module.quantize_A.running_max.fill_(float('-inf'))
+            except AttributeError:
+                print(f"    Module {name} does not have quantize_A attribute")
+
+            try:
+                if module.quantize_B is not None:
+                    module.quantize_B.calibrated = False
+                    module.quantize_B.running_min.fill_(float('inf'))
+                    module.quantize_B.running_max.fill_(float('-inf'))
+            except AttributeError:
+                print(f"    Module {name} does not have quantize_B attribute")
+
     def validate_calibration(self) -> bool:
         """Check if quantizers are properly calibrated"""
         print("\n🔍 Validating quantizer calibration...")
@@ -103,14 +120,18 @@ class CalibrationManager:
             if isinstance(module, LearnableFakeQuantize):
                 total_quantizers += 1
 
-                if not hasattr(module, 'calibrated') or not module.calibrated:
-                    issues.append(f"{name} not calibrated")
-                elif torch.all(module.scale == 1.0) and torch.all(module.zero_point == 0.0):
-                    issues.append(f"{name} has default parameters (not calibrated)")
-                elif torch.any(torch.isinf(module.running_min)) or torch.any(torch.isinf(module.running_max)):
-                    issues.append(f"{name} has invalid running statistics")
-                else:
-                    calibrated_quantizers += 1
+                try:
+                    if not module.calibrated:
+                        issues.append(f"{name} not calibrated")
+                    elif torch.all(module.scale == 1.0) and torch.all(module.zero_point == 0.0):
+                        issues.append(f"{name} has default parameters (not calibrated)")
+                    elif torch.any(torch.isinf(module.running_min)) or torch.any(torch.isinf(module.running_max)):
+                        issues.append(f"{name} has invalid running statistics")
+                    else:
+                        calibrated_quantizers += 1
+                except AttributeError as e:
+                    issues.append(f"{name} missing calibration attributes: {e}")
+                    print(f"    Calibration validation error for {name}: {e}")
 
         if issues:
             print("⚠️ Calibration issues found:")
@@ -134,13 +155,18 @@ class CalibrationManager:
         for name, module in self.model.named_modules():
             if isinstance(module, LearnableFakeQuantize):
                 stats['quantizers'].append(name)
-                stats['scales'][name] = module.scale.detach().cpu()
-                stats['zero_points'][name] = module.zero_point.detach().cpu()
+                try:
+                    stats['scales'][name] = module.scale.detach().cpu()
+                    stats['zero_points'][name] = module.zero_point.detach().cpu()
 
-                if hasattr(module, 'running_min') and hasattr(module, 'running_max'):
                     min_val = module.running_min.detach().cpu()
                     max_val = module.running_max.detach().cpu()
                     stats['ranges'][name] = (min_val, max_val)
+                except AttributeError as e:
+                    print(f"    Stats collection error for {name}: {e}")
+                    stats['scales'][name] = None
+                    stats['zero_points'][name] = None
+                    stats['ranges'][name] = None
 
         return stats
 

@@ -19,35 +19,39 @@ class LoRALayer(nn.Module):
         self.alpha = alpha
         self.bits = bits
 
-        # For 16-bit, disable LoRA entirely
+        # CRITICAL: For 16-bit, disable LoRA entirely to ensure exact GPT-2 behavior
         if bits >= 16 or rank <= 0:
             self.enabled = False
             self.scaling = 0
-            # Create dummy parameters to avoid issues
+            # Create dummy parameters to avoid parameter counting issues
             self.register_buffer('lora_A', torch.zeros(1, 1))
             self.register_buffer('lora_B', torch.zeros(1, 1))
-            # Dummy quantizers for 16-bit
+            # No quantizers for 16-bit (saves memory and avoids calibration issues)
             self.quantize_A = None
             self.quantize_B = None
         else:
             self.enabled = True
             self.scaling = alpha / rank
 
-            # Initialize LoRA matrices
+            # Initialize LoRA matrices - CRITICAL: Must start with zero contribution
             self.lora_A = nn.Parameter(torch.zeros(in_features, rank))
             self.lora_B = nn.Parameter(torch.zeros(rank, out_features))
 
-            # CRITICAL: Initialize A with small values, B with zeros
+            # CRITICAL: Initialize A with small values, B with zeros for zero initial contribution
             nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
-            nn.init.zeros_(self.lora_B)
+            nn.init.zeros_(self.lora_B)  # This ensures zero contribution initially
 
-            # Quantizers for LoRA weights (only for low-bit)
+            # Quantizers for LoRA weights (only for low-bit modes)
             self.quantize_A = LearnableFakeQuantize(num_bits=bits, symmetric=True)
             self.quantize_B = LearnableFakeQuantize(num_bits=bits, symmetric=True)
 
-        # Pre-allocate buffers for quantized weights to avoid creating new tensors
-        self.register_buffer('lora_A_quantized', torch.empty(in_features, rank))
-        self.register_buffer('lora_B_quantized', torch.empty(rank, out_features))
+        # Only allocate buffers if LoRA is enabled to save memory
+        if self.enabled:
+            self.register_buffer('lora_A_quantized', torch.empty(in_features, rank))
+            self.register_buffer('lora_B_quantized', torch.empty(rank, out_features))
+        else:
+            self.register_buffer('lora_A_quantized', torch.empty(1, 1))
+            self.register_buffer('lora_B_quantized', torch.empty(1, 1))
 
     def forward(self, x):
         if not self.enabled or self.scaling == 0:
@@ -164,10 +168,11 @@ class SPLinearWithLoRA(nn.Module):
         })
 
         # Create separate LoRA adapters for each bit-width
+        # CRITICAL: 16-bit LoRA must be disabled to ensure exact GPT-2 behavior
         self.lora_adapters = nn.ModuleDict({
             f'{bits}bit': LoRALayer(
                 in_features, out_features,
-                rank=lora_rank_per_bit.get(bits, 16),
+                rank=lora_rank_per_bit.get(bits, 16) if bits < 16 else 0,  # Force rank=0 for 16-bit
                 alpha=lora_alpha_per_bit.get(bits, 32),
                 bits=bits
             )
