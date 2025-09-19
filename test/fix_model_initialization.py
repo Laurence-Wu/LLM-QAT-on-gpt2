@@ -133,11 +133,11 @@ def load_pretrained_weights_properly(model, config):
     print("   - Initializing LoRA adapters...")
     for name, module in model.named_modules():
         if hasattr(module, 'lora_adapters'):
-            for bit_key, adapter in module.lora_adapters.items():
+            for bit_key, lora_layer in module.lora_adapters.items():
                 # LoRA A: small random initialization
-                nn.init.kaiming_uniform_(adapter['A'], a=5**0.5)
+                nn.init.kaiming_uniform_(lora_layer.lora_A, a=5**0.5)
                 # LoRA B: initialize to zeros (no initial contribution)
-                nn.init.zeros_(adapter['B'])
+                nn.init.zeros_(lora_layer.lora_B)
 
     print("   ✓ Pretrained weights loaded successfully")
 
@@ -165,11 +165,11 @@ def initialize_weights_properly(model):
     # Special initialization for LoRA
     for name, module in model.named_modules():
         if hasattr(module, 'lora_adapters'):
-            for bit_key, adapter in module.lora_adapters.items():
+            for bit_key, lora_layer in module.lora_adapters.items():
                 # LoRA A: small random initialization
-                nn.init.kaiming_uniform_(adapter['A'], a=5**0.5)
+                nn.init.kaiming_uniform_(lora_layer.lora_A, a=5**0.5)
                 # LoRA B: zeros
-                nn.init.zeros_(adapter['B'])
+                nn.init.zeros_(lora_layer.lora_B)
 
     print("   ✓ Weights initialized with Xavier/Kaiming initialization")
 
@@ -202,8 +202,8 @@ def verify_initialization(model):
     # Check LoRA initialization
     for name, module in model.named_modules():
         if hasattr(module, 'lora_adapters'):
-            for bit_key, adapter in module.lora_adapters.items():
-                b_max = adapter['B'].data.abs().max().item()
+            for bit_key, lora_layer in module.lora_adapters.items():
+                b_max = lora_layer.lora_B.data.abs().max().item()
                 if b_max > 0.01:
                     issues.append(f"{name}.{bit_key} LoRA B not initialized to zero")
 

@@ -166,14 +166,14 @@ def load_pretrained_weights(model):
     # Initialize LoRA adapters properly (they remain trainable)
     for name, module in model.named_modules():
         if hasattr(module, 'lora_adapters'):
-            for bit_key, adapter in module.lora_adapters.items():
+            for bit_key, lora_layer in module.lora_adapters.items():
                 # LoRA A: small random initialization
-                nn.init.kaiming_uniform_(adapter['A'], a=5**0.5)
+                nn.init.kaiming_uniform_(lora_layer.lora_A, a=5**0.5)
                 # LoRA B: initialize to zeros (no initial contribution)
-                nn.init.zeros_(adapter['B'])
+                nn.init.zeros_(lora_layer.lora_B)
                 # Keep LoRA adapters trainable
-                adapter['A'].requires_grad = True
-                adapter['B'].requires_grad = True
+                lora_layer.lora_A.requires_grad = True
+                lora_layer.lora_B.requires_grad = True
 
     # Delete pretrained model to free memory immediately
     del pretrained
