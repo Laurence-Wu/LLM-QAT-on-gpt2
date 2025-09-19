@@ -186,13 +186,13 @@ class ComprehensiveTrainingMonitor:
             "timestamp": datetime.now().isoformat()
         }
 
-        # Track shapes
-        if step % 10 == 0:  # Sample every 10 steps
+        # Track shapes (only if model is provided)
+        if step % 10 == 0 and model is not None:  # Sample every 10 steps
             self._track_shapes(model, input_ids, step)
 
-        # Track gradients
+        # Track gradients (only if model is provided)
         grad_info = None
-        if step % 10 == 0:
+        if step % 10 == 0 and model is not None:
             grad_info = self._analyze_gradients(model)
             step_info["gradient_norm"] = grad_info["total_norm"]
             step_info["gradient_stats"] = grad_info
@@ -373,12 +373,16 @@ class ComprehensiveTrainingMonitor:
             f.write(f"PyTorch: {self.log['system_info']['pytorch_version']}\n\n")
 
             # Model Architecture
-            f.write("MODEL ARCHITECTURE:\n")
-            f.write("-"*40 + "\n")
-            arch = self.log["model_architecture"]
-            f.write(f"Total Parameters: {arch['total_parameters']:,}\n")
-            f.write(f"Trainable Parameters: {arch['trainable_parameters']:,}\n")
-            f.write(f"Model Size: {arch['model_size_mb']:.1f} MB\n\n")
+            if self.log["model_architecture"]:  # Only write if we have architecture data
+                f.write("MODEL ARCHITECTURE:\n")
+                f.write("-"*40 + "\n")
+                arch = self.log["model_architecture"]
+                if "total_parameters" in arch:
+                    f.write(f"Total Parameters: {arch['total_parameters']:,}\n")
+                if "trainable_parameters" in arch:
+                    f.write(f"Trainable Parameters: {arch['trainable_parameters']:,}\n")
+                if "model_size_mb" in arch:
+                    f.write(f"Model Size: {arch['model_size_mb']:.1f} MB\n\n")
 
             # Training Performance
             if "performance_metrics" in self.log:
