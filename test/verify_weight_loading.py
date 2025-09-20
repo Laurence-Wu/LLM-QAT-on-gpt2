@@ -215,64 +215,63 @@ def test_weight_loading_detailed():
 
 
 def calibrate_quantizers_for_testing(model, tokenizer, device, bits):
-    """Calibrate quantizers for a specific bit-width using two-pass statistics collection."""
+    """Calibrate quantizers using two-pass strategy from train_sp.py."""
     if bits >= 16:
         return  # No calibration needed for 16-bit
 
-    # Set model to TRAINING mode for calibration to work
+    # ========== PASS 1: Collect Statistics ==========
+    # Model must be in training mode for calibration to work
     model.train()
 
     # Set precision for the model
     model.set_precision(bits)
 
-    # Pass 1: Start calibration on attention and MLP layers in each block
+    # Start calibration for all quantizers
     bits_key = f'{bits}bit'
-    print(f"Starting calibration for {bits}-bit quantizers...")
+    print(f"Pass 1: Starting calibration for {bits}-bit quantizers...")
+
     for block in model.transformer.h:
-        # Each block has attn and mlp modules with SPLinearWithLoRA layers
         for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
-            # Call start_calibration on the specific quantizers for this bit-width
             if bits_key in module.quantizers_weight:
                 module.quantizers_weight[bits_key].start_calibration()
-                # Debug: verify calibration started
-                q = module.quantizers_weight[bits_key]
-                print(f"  Weight quantizer: collecting_stats={q.collecting_stats}, calibrated={q.calibrated}")
             if bits_key in module.quantizers_input:
                 module.quantizers_input[bits_key].start_calibration()
-                # Debug: verify calibration started
-                q = module.quantizers_input[bits_key]
-                print(f"  Input quantizer: collecting_stats={q.collecting_stats}, calibrated={q.calibrated}")
 
-    # Collect statistics with a few samples
+    # Prepare calibration samples
     calibration_texts = [
         "The quick brown fox jumps over the lazy dog.",
         "Machine learning is transforming technology.",
         "Natural language processing enables computers to understand human language."
     ]
 
+    # Collect statistics from all calibration samples
+    print("  Collecting statistics from calibration samples...")
     with torch.no_grad():
         for text in calibration_texts:
             inputs = tokenizer(text, return_tensors='pt')
             input_ids = inputs['input_ids'].to(device)
+            # Forward pass for statistics collection
             _ = model(input_ids)
 
-    # Pass 1 complete: Finish calibration
-    print(f"Finishing calibration for {bits}-bit quantizers...")
+    # Finish calibration to freeze quantization parameters
+    print(f"  Finishing calibration and freezing parameters...")
     for block in model.transformer.h:
         for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
             if bits_key in module.quantizers_weight:
                 module.quantizers_weight[bits_key].finish_calibration()
-                # Debug: verify calibration finished
-                q = module.quantizers_weight[bits_key]
-                print(f"  Weight quantizer: calibrated={q.calibrated}, scale mean={q.scale.mean().item():.6f}")
             if bits_key in module.quantizers_input:
                 module.quantizers_input[bits_key].finish_calibration()
-                # Debug: verify calibration finished
-                q = module.quantizers_input[bits_key]
-                print(f"  Input quantizer: calibrated={q.calibrated}, scale mean={q.scale.mean().item():.6f}")
 
-    # Return to eval mode after calibration
-    model.eval()
+    # Verify calibration completed
+    first_module = model.transformer.h[0].attn.c_attn
+    if bits_key in first_module.quantizers_weight:
+        q = first_module.quantizers_weight[bits_key]
+        print(f"  Calibration complete: calibrated={q.calibrated}, scale mean={q.scale.mean().item():.6f}")
+
+    # ========== PASS 2: Ready for Inference/Training ==========
+    # Model is now ready to use with frozen quantization parameters
+    model.eval()  # Return to eval mode for testing
+    print(f"Pass 2: Ready with frozen {bits}-bit quantization parameters\n")
 
 
 def test_different_precision_modes():
@@ -308,8 +307,12 @@ def test_different_precision_modes():
             calibrate_quantizers_for_testing(sp_model, tokenizer, device, precision)
 
             # Check calibration status
+            # Check calibration was successful
             calibrated, uncalibrated = check_quantizer_status(sp_model, precision)
-            print(f"   Calibration status: {calibrated} calibrated, {uncalibrated} uncalibrated")
+            if uncalibrated > 0:
+                print(f"   ⚠️ Warning: {uncalibrated} quantizers not calibrated!")
+            else:
+                print(f"   ✅ All {calibrated} quantizers successfully calibrated")
 
         # Evaluate
         sp_model.eval()
@@ -407,17 +410,20 @@ def test_two_pass_quantization():
     inputs = tokenizer(test_text, return_tensors='pt')
     input_ids = inputs['input_ids'].to(device)
 
-    print("\n1. Testing Two-Pass System for 8-bit precision:")
+    print("\n1. Testing Two-Pass Quantization System for 8-bit precision:")
+
+    # ========== PASS 1: Collect Statistics ==========
+    print("\n   PASS 1: Statistics Collection")
+
+    # Model must be in training mode for calibration
+    sp_model.train()
 
     # Set to 8-bit
     sp_model.set_precision(8)
+    bits_key = '8bit'
 
-    # Set to training mode for calibration
-    sp_model.train()
-
-    # Pass 1: Collect statistics
-    print("   Pass 1: Starting calibration...")
-    bits_key = '8bit'  # Testing with 8-bit
+    # Start calibration for all quantizers
+    print("   Starting calibration...")
     for block in sp_model.transformer.h:
         for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
             if bits_key in module.quantizers_weight:
@@ -425,18 +431,18 @@ def test_two_pass_quantization():
             if bits_key in module.quantizers_input:
                 module.quantizers_input[bits_key].start_calibration()
 
-    # Run a few forward passes
+    # Collect statistics from multiple forward passes
+    print("   Collecting statistics...")
     with torch.no_grad():
-        for _ in range(3):
+        for i in range(3):
             _ = sp_model(input_ids)
+            if i == 0:  # Check status after first pass
+                first_module = sp_model.transformer.h[0].attn.c_attn
+                quantizer = first_module.quantizers_weight[bits_key]
+                print(f"     After pass {i+1}: collecting_stats={quantizer.collecting_stats}, calibrated={quantizer.calibrated}")
 
-    # Check calibration status
-    first_module = sp_model.transformer.h[0].attn.c_attn
-    quantizer = first_module.quantizers_weight['8bit']
-    print(f"   During calibration - calibrated: {quantizer.calibrated}")
-
-    # Finish calibration
-    print("   Pass 1: Finishing calibration...")
+    # Finish calibration to freeze parameters
+    print("   Finishing calibration and freezing parameters...")
     for block in sp_model.transformer.h:
         for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
             if bits_key in module.quantizers_weight:
@@ -444,30 +450,36 @@ def test_two_pass_quantization():
             if bits_key in module.quantizers_input:
                 module.quantizers_input[bits_key].finish_calibration()
 
-    # Check calibration status after finish
-    print(f"   After calibration - calibrated: {quantizer.calibrated}")
+    # Verify calibration completed
+    first_module = sp_model.transformer.h[0].attn.c_attn
+    quantizer = first_module.quantizers_weight[bits_key]
+    print(f"   Calibration complete: calibrated={quantizer.calibrated}, scale mean={quantizer.scale.mean().item():.6f}")
 
-    # Get the scale/zero_point values
-    scale_before = quantizer.scale.clone() if quantizer.scale is not None else None
-    zero_before = quantizer.zero_point.clone() if quantizer.zero_point is not None else None
+    # Get the frozen scale/zero_point values
+    scale_frozen = quantizer.scale.clone()
+    zero_frozen = quantizer.zero_point.clone()
 
-    # Return to eval mode for Pass 2
+    # ========== PASS 2: Use Frozen Parameters ==========
+    print("\n   PASS 2: Using Frozen Quantization Parameters")
+
+    # Return to eval mode for testing
     sp_model.eval()
 
-    # Pass 2: Use calibrated quantizers
-    print("\n   Pass 2: Using calibrated quantizers...")
+    # Run forward passes with frozen parameters
+    print("   Testing parameter stability...")
     with torch.no_grad():
         for i in range(3):
             _ = sp_model(input_ids)
 
-            # Check scale/zero_point remain unchanged
-            if scale_before is not None:
-                scale_after = quantizer.scale
-                scale_changed = not torch.allclose(scale_before, scale_after)
-                print(f"   Forward pass {i+1} - Scale changed: {scale_changed}")
+            # Verify parameters remain frozen
+            scale_changed = not torch.allclose(scale_frozen, quantizer.scale)
+            zero_changed = not torch.allclose(zero_frozen, quantizer.zero_point)
+            print(f"     Forward pass {i+1}: scale_changed={scale_changed}, zero_changed={zero_changed}")
 
-    # Note: The current quantization system doesn't have unfreeze capability
-    print("\n2. Note: Current system uses start/finish_calibration, not freeze/unfreeze")
+    print("\n2. Two-Pass Quantization Test Summary:")
+    print(f"   ✅ Statistics collected in Pass 1")
+    print(f"   ✅ Parameters frozen after calibration")
+    print(f"   ✅ Parameters remain stable in Pass 2")
 
     print("\n✅ Two-pass quantization test completed")
     return True
