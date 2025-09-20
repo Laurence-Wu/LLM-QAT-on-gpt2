@@ -1001,8 +1001,18 @@ def run_comprehensive_test():
     else:
         print("❌ Test 1 (16-bit equivalence): FAILED")
 
-    if (test_results['degradation'].get(8, 999) < 50 and
-            test_results['degradation'].get(4, 9999) < 300):
+    # Check degradation results - handle both old and new format
+    degradation = test_results.get('degradation', {})
+    if isinstance(degradation.get(8), dict):
+        # New format with mean and median
+        deg_8bit = degradation.get(8, {}).get('mean_degradation', 999)
+        deg_4bit = degradation.get(4, {}).get('mean_degradation', 9999)
+    else:
+        # Old format with just numbers
+        deg_8bit = degradation.get(8, 999)
+        deg_4bit = degradation.get(4, 9999)
+
+    if deg_8bit < 50 and deg_4bit < 300:
         print("✅ Test 2 (quantization degradation): PASSED")
         passed_tests += 1
     else:
