@@ -27,7 +27,7 @@ from shared.deploy import save_int8_checkpoint
 # Use try/except to handle both direct execution and import cases
 try:
     from config_sp import ModelConfig, TrainingConfig
-    from train_sp import train_sp
+    from part1_switchable_precision.train_sp_lagacy import train_sp
 except ImportError:
     from .config_sp import ModelConfig, TrainingConfig
     from .train_sp import train_sp
