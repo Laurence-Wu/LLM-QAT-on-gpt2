@@ -17,12 +17,13 @@ from shared.models_sp import SPLMHeadModel
 from part1_switchable_precision.config_sp import ModelConfig
 
 
-def create_properly_initialized_model(use_pretrained=True):
+def create_properly_initialized_model(use_pretrained=True, num_layers=None):
     """
     Create SP model with proper initialization.
 
     Args:
         use_pretrained: If True, load pretrained GPT-2 weights
+        num_layers: Override number of layers (for memory-constrained testing)
 
     Returns:
         Properly initialized SPLMHeadModel
@@ -38,8 +39,11 @@ def create_properly_initialized_model(use_pretrained=True):
     if use_pretrained:
         model_config.n_embd = 768  # GPT-2 small uses 768
         model_config.n_head = 12   # GPT-2 small uses 12 heads
-        model_config.n_layer = 12  # Use exact same as GPT-2 small (12 layers)
-        print("\n✓ Using exact GPT-2 dimensions")
+        model_config.n_layer = num_layers if num_layers is not None else 12  # Allow override
+        if num_layers is not None and num_layers < 12:
+            print(f"\n✓ Using reduced GPT-2 dimensions ({num_layers} layers)")
+        else:
+            print("\n✓ Using exact GPT-2 dimensions")
     else:
         model_config.n_layer = 2
         model_config.n_embd = 256

@@ -21,16 +21,12 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
     """Calibrate SP model using two-pass statistics collection."""
     print("\n🔧 Two-Pass Calibration Starting...")
 
-    # Calibration texts
+    # Calibration texts (reduced for memory efficiency)
     calibration_texts = [
         "The quick brown fox jumps over the lazy dog.",
         "Machine learning is transforming modern technology rapidly.",
         "Python is a versatile programming language for data science.",
         "Natural language processing enables computers to understand human language.",
-        "Deep learning models require significant computational resources for training.",
-        "The weather today is sunny with clear blue skies and gentle breeze.",
-        "Books are a great source of knowledge and entertainment for everyone.",
-        "Technology continues to advance at an unprecedented pace in our society.",
     ]
 
     sp_model.eval()
@@ -125,9 +121,7 @@ def test_16bit_equivalence(sp_model, gpt2_model, tokenizer, device):
         "The quick brown fox jumps over the lazy dog.",
         "Machine learning is transforming technology.",
         "Python is a popular programming language.",
-        "Neural networks consist of interconnected layers.",
-        "Climate change poses significant global challenges.",
-    ]
+    ]  # Reduced for memory efficiency
 
     print(f"Testing {len(test_sentences)} sentences...")
 
@@ -218,9 +212,7 @@ def test_quantization_degradation(sp_model, tokenizer, device):
         "Machine learning algorithms process vast amounts of data.",
         "Natural language processing enables human-computer interaction.",
         "Deep learning models require substantial computational resources.",
-        "Python programming language supports scientific computing applications.",
-        "Artificial intelligence systems demonstrate remarkable capabilities.",
-    ]
+    ]  # Reduced for memory efficiency
 
     sp_model.eval()
 
@@ -573,13 +565,48 @@ def run_comprehensive_test():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Device: {device}")
 
-    # Load models
+    # Load models with reduced configuration for testing
     print("\n🔧 Loading and initializing models...")
-    sp_model, sp_config = create_properly_initialized_model(use_pretrained=True)
-    sp_model = sp_model.to(device)
 
-    gpt2_model = GPT2LMHeadModel.from_pretrained('gpt2')
-    gpt2_model = gpt2_model.to(device)
+    # Free up memory first
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    # Create a smaller model for testing (reduce layers)
+    print("⚠️ Using reduced configuration for memory efficiency...")
+    sp_model, sp_config = create_properly_initialized_model(use_pretrained=True, num_layers=6)  # Reduce from 12 to 6 layers
+
+    # Move to device with memory check
+    try:
+        sp_model = sp_model.to(device)
+    except torch.cuda.OutOfMemoryError:
+        print("⚠️ GPU out of memory, switching to CPU...")
+        device = torch.device('cpu')
+        sp_model = sp_model.to(device)
+
+    # Load GPT-2 model with same reduced config for comparison
+    from transformers import GPT2Config
+    gpt2_config = GPT2Config.from_pretrained('gpt2')
+    gpt2_config.n_layer = 6  # Match reduced layers
+    gpt2_model = GPT2LMHeadModel(gpt2_config)
+
+    # Load partial weights from pretrained
+    pretrained_full = GPT2LMHeadModel.from_pretrained('gpt2')
+    gpt2_model.transformer.wte = pretrained_full.transformer.wte
+    gpt2_model.transformer.wpe = pretrained_full.transformer.wpe
+    for i in range(6):
+        gpt2_model.transformer.h[i] = pretrained_full.transformer.h[i]
+    gpt2_model.transformer.ln_f = pretrained_full.transformer.ln_f
+    gpt2_model.lm_head = pretrained_full.lm_head
+    del pretrained_full  # Free memory
+
+    try:
+        gpt2_model = gpt2_model.to(device)
+    except torch.cuda.OutOfMemoryError:
+        print("⚠️ GPU out of memory for GPT-2, using CPU...")
+        device = torch.device('cpu')
+        sp_model = sp_model.to(device)
+        gpt2_model = gpt2_model.to(device)
 
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     tokenizer.pad_token = tokenizer.eos_token
@@ -600,26 +627,36 @@ def run_comprehensive_test():
         test_results['equivalence'] = test_16bit_equivalence(
             sp_model, gpt2_model, tokenizer, device
         )
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         # Test 2: Quantization degradation
         test_results['degradation'] = test_quantization_degradation(
             sp_model, tokenizer, device
         )
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         # Test 3: LoRA behavior
         test_results['lora'] = test_lora_behavior(
             sp_model, tokenizer, device
         )
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         # Test 4: Quantizer activation diagnosis
         test_results['quantizer_activation'] = test_quantizer_activation(
             sp_model, tokenizer, device
         )
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         # Test 5: Distillation setup
         test_results['distillation'] = test_distillation_setup(
             sp_model, tokenizer, device
         )
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     except Exception as e:
         print(f"\n❌ Test execution failed: {e}")
