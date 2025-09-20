@@ -1162,7 +1162,14 @@ def run_comprehensive_test():
     else:
         print("❌ Test 2 (quantization degradation): FAILED")
 
-    if test_results['lora'][16]['enabled'] == 0:
+    # Check that 32-bit has LoRA disabled (teacher) and others have it enabled (students)
+    lora_correct = (
+        test_results['lora'][32]['enabled'] == 0 and  # 32-bit teacher: no LoRA
+        test_results['lora'][16]['enabled'] > 0 and   # 16-bit student: has LoRA
+        test_results['lora'][8]['enabled'] > 0 and    # 8-bit student: has LoRA
+        test_results['lora'][4]['enabled'] > 0        # 4-bit student: has LoRA
+    )
+    if lora_correct:
         print("✅ Test 3 (LoRA behavior): PASSED")
         passed_tests += 1
     else:

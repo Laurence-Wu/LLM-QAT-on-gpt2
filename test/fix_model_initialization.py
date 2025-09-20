@@ -36,8 +36,26 @@ def create_properly_initialized_model(use_pretrained=True, num_layers=None):
     if num_layers is not None:
         sp_config.n_layer = num_layers
 
-    # Create model
-    sp_model = SPLMHeadModel(sp_config)
+    # Create GPT2Config with SP-specific attributes
+    from transformers import GPT2Config
+    gpt2_config = GPT2Config(
+        vocab_size=sp_config.vocab_size,
+        n_positions=sp_config.n_positions,
+        n_embd=sp_config.n_embd,
+        n_layer=sp_config.n_layer,
+        n_head=sp_config.n_head,
+        layer_norm_epsilon=sp_config.layer_norm_epsilon,
+        embd_pdrop=sp_config.embd_pdrop
+    )
+
+    # Add SP-specific attributes
+    gpt2_config.bit_widths = sp_config.bit_widths  # [4, 8, 16, 32]
+    gpt2_config.lora_rank_per_bit = sp_config.lora_rank_per_bit
+    gpt2_config.lora_alpha_per_bit = sp_config.lora_alpha_per_bit
+    gpt2_config.activation_bits_per_bit = sp_config.activation_bits_per_bit
+
+    # Create model with proper config
+    sp_model = SPLMHeadModel(gpt2_config)
 
     # Load pretrained weights if requested
     if use_pretrained:
@@ -46,9 +64,9 @@ def create_properly_initialized_model(use_pretrained=True, num_layers=None):
         # Load GPT-2 state dict
         from transformers import GPT2LMHeadModel
 
-        # Create a GPT-2 config matching our SP config
-        # ModelConfig from part1 folder has these attributes
-        gpt2_config = GPT2Config(
+        # Create a GPT-2 config for loading pretrained weights
+        # (We already have gpt2_config from above, but need one for loading GPT-2)
+        gpt2_load_config = GPT2Config(
             vocab_size=sp_config.vocab_size,
             n_positions=sp_config.n_positions,
             n_ctx=sp_config.n_positions,  # Use n_positions for context
@@ -69,7 +87,7 @@ def create_properly_initialized_model(use_pretrained=True, num_layers=None):
         else:
             # For reduced layer models, load full model and copy only needed layers
             gpt2_full = GPT2LMHeadModel.from_pretrained('gpt2')
-            gpt2_model = GPT2LMHeadModel(gpt2_config)
+            gpt2_model = GPT2LMHeadModel(gpt2_load_config)
 
             # Copy embeddings and head
             gpt2_model.transformer.wte = gpt2_full.transformer.wte
@@ -93,8 +111,8 @@ def create_properly_initialized_model(use_pretrained=True, num_layers=None):
         del gpt2_model
         torch.cuda.empty_cache()
 
-    # Set default precision to 16-bit (no quantization)
-    sp_model.set_precision(16)
+    # Set default precision to 32-bit (teacher, no quantization)
+    sp_model.set_precision(32)
 
     return sp_model, sp_config
 
