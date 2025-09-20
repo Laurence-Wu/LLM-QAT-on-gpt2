@@ -103,64 +103,64 @@ def load_pretrained_weights(model):
 
     import torch.nn as nn
 
-    # Copy embeddings - keep them TRAINABLE for the teacher
+    # Copy embeddings - frozen (never trained)
     model.transformer.wte.weight.data = pretrained.transformer.wte.weight.data.clone()
-    model.transformer.wte.weight.requires_grad = True  # Keep embeddings trainable for teacher
+    model.transformer.wte.weight.requires_grad = False  # Keep frozen
 
     # Only copy the position embeddings we need (model might have fewer positions than pretrained)
     min_positions = min(model.transformer.wpe.weight.shape[0], pretrained.transformer.wpe.weight.shape[0])
     model.transformer.wpe.weight.data[:min_positions] = pretrained.transformer.wpe.weight.data[:min_positions].clone()
-    model.transformer.wpe.weight.requires_grad = True  # Keep position embeddings trainable for teacher
+    model.transformer.wpe.weight.requires_grad = False  # Keep frozen
 
     if model.transformer.wpe.weight.shape[0] != pretrained.transformer.wpe.weight.shape[0]:
         print(f"Adjusted position embeddings from {pretrained.transformer.wpe.weight.shape[0]} to {model.transformer.wpe.weight.shape[0]}")
 
-    # Copy LM head weights - keep TRAINABLE for teacher
+    # Copy LM head weights - frozen by default (will be unfrozen for 32-bit teacher)
     model.lm_head.weight.data = pretrained.lm_head.weight.data.clone()
-    model.lm_head.weight.requires_grad = True  # Keep LM head trainable for teacher
+    model.lm_head.weight.requires_grad = False  # Frozen by default
 
-    # Copy transformer blocks - keep TRAINABLE for teacher
+    # Copy transformer blocks - frozen by default (will be unfrozen for 32-bit teacher)
     for i in range(min(len(model.transformer.h), len(pretrained.transformer.h))):
-        # Layer normalizations - keep trainable
+        # Layer normalizations - frozen by default
         model.transformer.h[i].ln_1.weight.data = pretrained.transformer.h[i].ln_1.weight.data.clone()
         model.transformer.h[i].ln_1.bias.data = pretrained.transformer.h[i].ln_1.bias.data.clone()
-        model.transformer.h[i].ln_1.weight.requires_grad = True
-        model.transformer.h[i].ln_1.bias.requires_grad = True
+        model.transformer.h[i].ln_1.weight.requires_grad = False
+        model.transformer.h[i].ln_1.bias.requires_grad = False
 
         model.transformer.h[i].ln_2.weight.data = pretrained.transformer.h[i].ln_2.weight.data.clone()
         model.transformer.h[i].ln_2.bias.data = pretrained.transformer.h[i].ln_2.bias.data.clone()
-        model.transformer.h[i].ln_2.weight.requires_grad = True
-        model.transformer.h[i].ln_2.bias.requires_grad = True
+        model.transformer.h[i].ln_2.weight.requires_grad = False
+        model.transformer.h[i].ln_2.bias.requires_grad = False
 
-        # Attention QKV weights - transpose and keep trainable
+        # Attention QKV weights - transpose and freeze by default
         model.transformer.h[i].attn.c_attn.linear.weight.data = pretrained.transformer.h[i].attn.c_attn.weight.data.t().contiguous()
         model.transformer.h[i].attn.c_attn.linear.bias.data = pretrained.transformer.h[i].attn.c_attn.bias.data.clone()
-        model.transformer.h[i].attn.c_attn.linear.weight.requires_grad = True
-        model.transformer.h[i].attn.c_attn.linear.bias.requires_grad = True
+        model.transformer.h[i].attn.c_attn.linear.weight.requires_grad = False
+        model.transformer.h[i].attn.c_attn.linear.bias.requires_grad = False
 
-        # Attention projection - transpose and keep trainable
+        # Attention projection - transpose and freeze by default
         model.transformer.h[i].attn.c_proj.linear.weight.data = pretrained.transformer.h[i].attn.c_proj.weight.data.t().contiguous()
         model.transformer.h[i].attn.c_proj.linear.bias.data = pretrained.transformer.h[i].attn.c_proj.bias.data.clone()
-        model.transformer.h[i].attn.c_proj.linear.weight.requires_grad = True
-        model.transformer.h[i].attn.c_proj.linear.bias.requires_grad = True
+        model.transformer.h[i].attn.c_proj.linear.weight.requires_grad = False
+        model.transformer.h[i].attn.c_proj.linear.bias.requires_grad = False
 
-        # MLP feedforward projection to higher dimension - transpose and keep trainable
+        # MLP feedforward projection to higher dimension - transpose and freeze by default
         model.transformer.h[i].mlp.c_fc.linear.weight.data = pretrained.transformer.h[i].mlp.c_fc.weight.data.t().contiguous()
         model.transformer.h[i].mlp.c_fc.linear.bias.data = pretrained.transformer.h[i].mlp.c_fc.bias.data.clone()
-        model.transformer.h[i].mlp.c_fc.linear.weight.requires_grad = True
-        model.transformer.h[i].mlp.c_fc.linear.bias.requires_grad = True
+        model.transformer.h[i].mlp.c_fc.linear.weight.requires_grad = False
+        model.transformer.h[i].mlp.c_fc.linear.bias.requires_grad = False
 
-        # MLP feedforward projection from higher dimension - transpose and keep trainable
+        # MLP feedforward projection from higher dimension - transpose and freeze by default
         model.transformer.h[i].mlp.c_proj.linear.weight.data = pretrained.transformer.h[i].mlp.c_proj.weight.data.t().contiguous()
         model.transformer.h[i].mlp.c_proj.linear.bias.data = pretrained.transformer.h[i].mlp.c_proj.bias.data.clone()
-        model.transformer.h[i].mlp.c_proj.linear.weight.requires_grad = True
-        model.transformer.h[i].mlp.c_proj.linear.bias.requires_grad = True
+        model.transformer.h[i].mlp.c_proj.linear.weight.requires_grad = False
+        model.transformer.h[i].mlp.c_proj.linear.bias.requires_grad = False
 
-    # Final layer normalization - keep trainable
+    # Final layer normalization - frozen by default
     model.transformer.ln_f.weight.data = pretrained.transformer.ln_f.weight.data.clone()
     model.transformer.ln_f.bias.data = pretrained.transformer.ln_f.bias.data.clone()
-    model.transformer.ln_f.weight.requires_grad = True
-    model.transformer.ln_f.bias.requires_grad = True
+    model.transformer.ln_f.weight.requires_grad = False
+    model.transformer.ln_f.bias.requires_grad = False
 
     # LoRA initialization - TEMPORARY: Commenting out to preserve zero initialization
     # TODO: Revisit this initialization strategy after tests pass
@@ -197,7 +197,7 @@ def load_pretrained_weights(model):
     frozen_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
     total_params = trainable_params + frozen_params
 
-    print(f"Pretrained weights loaded and frozen successfully (including LM head)")
+    print(f"Pretrained weights loaded and frozen successfully")
     print(f"  Total parameters: {total_params:,}")
     print(f"  Frozen parameters: {frozen_params:,} ({100*frozen_params/total_params:.1f}%)")
     print(f"  Trainable (LoRA) parameters: {trainable_params:,} ({100*trainable_params/total_params:.1f}%)")

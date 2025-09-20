@@ -209,8 +209,62 @@ class SPModel(nn.Module):
         if bits not in self.bit_widths:
             raise ValueError(f"Bit width {bits} not in configured widths {self.bit_widths}")
         self.current_bit_width = bits
+
+        # Set precision for all blocks
         for block in self.h:
             block.set_precision(bits)
+
+        # Handle weight freezing/unfreezing based on precision
+        # 32-bit teacher: Unfreeze all base weights (but not embeddings)
+        # Other precisions: Keep base weights frozen, only train LoRA
+        if bits == 32:
+            # Unfreeze transformer block weights for teacher training
+            for block in self.h:
+                # Layer normalizations
+                block.ln_1.weight.requires_grad = True
+                block.ln_1.bias.requires_grad = True
+                block.ln_2.weight.requires_grad = True
+                block.ln_2.bias.requires_grad = True
+
+                # Attention weights
+                block.attn.c_attn.linear.weight.requires_grad = True
+                block.attn.c_attn.linear.bias.requires_grad = True
+                block.attn.c_proj.linear.weight.requires_grad = True
+                block.attn.c_proj.linear.bias.requires_grad = True
+
+                # MLP weights
+                block.mlp.c_fc.linear.weight.requires_grad = True
+                block.mlp.c_fc.linear.bias.requires_grad = True
+                block.mlp.c_proj.linear.weight.requires_grad = True
+                block.mlp.c_proj.linear.bias.requires_grad = True
+
+            # Final layer norm
+            self.ln_f.weight.requires_grad = True
+            self.ln_f.bias.requires_grad = True
+        else:
+            # Freeze all base weights for student modes (only LoRA trains)
+            for block in self.h:
+                # Layer normalizations
+                block.ln_1.weight.requires_grad = False
+                block.ln_1.bias.requires_grad = False
+                block.ln_2.weight.requires_grad = False
+                block.ln_2.bias.requires_grad = False
+
+                # Attention weights
+                block.attn.c_attn.linear.weight.requires_grad = False
+                block.attn.c_attn.linear.bias.requires_grad = False
+                block.attn.c_proj.linear.weight.requires_grad = False
+                block.attn.c_proj.linear.bias.requires_grad = False
+
+                # MLP weights
+                block.mlp.c_fc.linear.weight.requires_grad = False
+                block.mlp.c_fc.linear.bias.requires_grad = False
+                block.mlp.c_proj.linear.weight.requires_grad = False
+                block.mlp.c_proj.linear.bias.requires_grad = False
+
+            # Final layer norm
+            self.ln_f.weight.requires_grad = False
+            self.ln_f.bias.requires_grad = False
 
     def get_current_precision(self):
         """Get current precision setting."""
@@ -360,6 +414,14 @@ class SPLMHeadModel(nn.Module):
     def set_precision(self, bits):
         """Set precision for the model."""
         self.transformer.set_precision(bits)
+
+        # Also handle LM head weight freezing/unfreezing
+        # 32-bit teacher: Unfreeze LM head weights
+        # Other precisions: Keep frozen (only LoRA trains)
+        if bits == 32:
+            self.lm_head.weight.requires_grad = True
+        else:
+            self.lm_head.weight.requires_grad = False
 
     def get_current_precision(self):
         """Get current precision setting."""
