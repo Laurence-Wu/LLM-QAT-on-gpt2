@@ -219,8 +219,8 @@ def calibrate_quantizers_for_testing(model, tokenizer, device, bits):
     if bits >= 16:
         return  # No calibration needed for 16-bit
 
-    # Set model to eval mode for statistics collection (Pass 1)
-    model.eval()
+    # Set model to TRAINING mode for calibration to work
+    model.train()
 
     # Set precision for the model
     model.set_precision(bits)
@@ -257,7 +257,7 @@ def calibrate_quantizers_for_testing(model, tokenizer, device, bits):
             if bits_key in module.quantizers_input:
                 module.quantizers_input[bits_key].finish_calibration()
 
-    # The model is now ready for Pass 2 with frozen quantization parameters
+    # Return to eval mode after calibration
     model.eval()
 
 
@@ -397,7 +397,9 @@ def test_two_pass_quantization():
 
     # Set to 8-bit
     sp_model.set_precision(8)
-    sp_model.eval()
+
+    # Set to training mode for calibration
+    sp_model.train()
 
     # Pass 1: Collect statistics
     print("   Pass 1: Starting calibration...")
@@ -435,8 +437,11 @@ def test_two_pass_quantization():
     scale_before = quantizer.scale.clone() if quantizer.scale is not None else None
     zero_before = quantizer.zero_point.clone() if quantizer.zero_point is not None else None
 
-    # Pass 2: Use frozen statistics
-    print("\n   Pass 2: Using frozen statistics...")
+    # Return to eval mode for Pass 2
+    sp_model.eval()
+
+    # Pass 2: Use calibrated quantizers
+    print("\n   Pass 2: Using calibrated quantizers...")
     with torch.no_grad():
         for i in range(3):
             _ = sp_model(input_ids)
