@@ -238,9 +238,11 @@ def calibrate_quantizers_for_testing(model, tokenizer, device, bits):
     # Set precision for the model
     model.set_precision(bits)
 
-    # Pass 1: Start statistics collection directly on transformer blocks
+    # Pass 1: Start statistics collection on attention and MLP layers in each block
     for block in model.transformer.h:
-        block.start_stats_collection()
+        # Each block has attn and mlp modules with SPLinearWithLoRA layers
+        for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
+            module.start_stats_collection()
 
     # Collect statistics with a few samples
     calibration_texts = [
@@ -257,7 +259,8 @@ def calibrate_quantizers_for_testing(model, tokenizer, device, bits):
 
     # Pass 1 complete: Stop statistics collection (freezes the stats)
     for block in model.transformer.h:
-        block.stop_stats_collection()
+        for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
+            module.stop_stats_collection()
 
     # The model is now ready for Pass 2 with frozen quantization parameters
     model.eval()
@@ -404,7 +407,8 @@ def test_two_pass_quantization():
     # Pass 1: Collect statistics
     print("   Pass 1: Starting statistics collection...")
     for block in sp_model.transformer.h:
-        block.start_stats_collection()
+        for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
+            module.start_stats_collection()
 
     # Run a few forward passes
     with torch.no_grad():
@@ -419,7 +423,8 @@ def test_two_pass_quantization():
     # Stop collection (should freeze stats)
     print("   Pass 1: Stopping statistics collection...")
     for block in sp_model.transformer.h:
-        block.stop_stats_collection()
+        for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
+            module.stop_stats_collection()
 
     # Check that stats are frozen after collection
     print(f"   After collection - stats_frozen: {quantizer.stats_frozen}")
@@ -443,7 +448,8 @@ def test_two_pass_quantization():
     # Test unfreeze
     print("\n2. Testing Statistics Unfreezing:")
     for block in sp_model.transformer.h:
-        block.unfreeze_stats()
+        for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
+            module.unfreeze_stats()
     print(f"   After unfreeze - stats_frozen: {quantizer.stats_frozen}")
 
     print("\n✅ Two-pass quantization test completed")
