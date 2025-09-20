@@ -35,21 +35,7 @@ def get_next_batch(train_iter, train_loader):
         return next(train_iter)
 
 
-def get_next_bitwidth(iteration, model_config):
-    """Determine next bit-width based on switching strategy."""
-    if model_config.switch_strategy == 'cyclic':
-        # Cycle through bit-widths
-        cycle_position = (iteration // model_config.switch_interval) % len(model_config.bit_widths)
-        return model_config.bit_widths[cycle_position]
-    elif model_config.switch_strategy == 'random':
-        # Random selection
-        return random.choice(model_config.bit_widths)
-    elif model_config.switch_strategy == 'curriculum':
-        # Curriculum learning - start high, go low
-        schedule_idx = min(iteration // 50, len(model_config.curriculum_schedule) - 1)
-        return model_config.curriculum_schedule[schedule_idx]
-    else:
-        raise ValueError(f"Unknown switch_strategy: {model_config.switch_strategy}")
+# Removed get_next_bitwidth - using fixed precision for distillation-based training
 
 
 def should_evaluate(iteration, config):
@@ -217,44 +203,50 @@ class StatsTracker:
 # LOSS COMPUTATION
 # ============================================================================
 
-def compute_loss(model, batch, current_bits, distill_mgr, config, iteration):
-    """Unified loss computation with cleaner logic."""
+def compute_loss_for_all_students(model, batch, teacher_bits, student_bits_list, distill_mgr, config, iteration):
+    """Compute loss for teacher and all student precisions."""
     device = next(model.parameters()).device
     input_ids = batch['input_ids'].to(device, non_blocking=True)
     attention_mask = batch.get('attention_mask')
     if attention_mask is not None:
         attention_mask = attention_mask.to(device, non_blocking=True)
 
-    # Determine if we should use distillation
-    use_distillation = (
-        distill_mgr and
-        config.use_distillation and
-        iteration >= config.distill_warmup_steps and
-        current_bits != distill_mgr.full_precision_bits
-    )
+    total_loss = 0
+    num_students = 0
 
+    # First, compute teacher outputs and update cache (using FP32)
+    model.set_precision(teacher_bits)
     with torch.amp.autocast('cuda', enabled=config.use_amp):
-        if use_distillation:
-            # Student mode: compute distillation loss
-            outputs = model(input_ids, output_hidden_states=True, return_dict=True)
-            loss = distill_mgr.compute_distillation_loss(outputs, input_ids)
-        else:
-            # Standard mode: compute cross-entropy loss
-            outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
-            loss = outputs['loss']
+        # Teacher forward pass to update cache
+        if distill_mgr and distill_mgr.should_update_teacher(teacher_bits, iteration):
+            distill_mgr.update_teacher(input_ids, attention_mask)
 
-            # Update teacher if this is full precision
-            if (distill_mgr and
-                current_bits == distill_mgr.full_precision_bits and
-                distill_mgr.should_update_teacher(current_bits, iteration)):
-                distill_mgr.update_teacher(input_ids, attention_mask)
+    # Now compute distillation loss for each student precision
+    for student_bits in student_bits_list:
+        model.set_precision(student_bits)
+
+        with torch.amp.autocast('cuda', enabled=config.use_amp):
+            if student_bits == teacher_bits:
+                # Teacher trains with standard loss
+                outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
+                loss = outputs['loss']
+            else:
+                # Students train with distillation loss
+                outputs = model(input_ids, output_hidden_states=True, return_dict=True)
+                loss = distill_mgr.compute_distillation_loss(outputs, input_ids)
+
+            total_loss += loss
+            num_students += 1
+
+    # Average loss across all precisions
+    avg_loss = total_loss / num_students
 
     # Clean up
     del outputs, input_ids
     if attention_mask is not None:
         del attention_mask
 
-    return loss / config.gradient_accumulation_steps
+    return avg_loss / config.gradient_accumulation_steps
 
 
 # ============================================================================
@@ -262,112 +254,52 @@ def compute_loss(model, batch, current_bits, distill_mgr, config, iteration):
 # ============================================================================
 
 def train_step(model, train_iter, train_loader, optimizer, scaler,
-               current_bits, distill_mgr, config, iteration):
-    """Execute a single training step with gradient accumulation and two-pass quantization."""
+               teacher_bits, student_bits_list, distill_mgr, config, iteration):
+    """Execute a single training step for all student precisions with distillation."""
     optimizer.zero_grad(set_to_none=True)
     total_loss = 0
 
-    # For quantized modes (< 16 bit), we need two-pass quantization
-    if current_bits < 16:
-        # ========== PASS 1: Collect Statistics ==========
-        # Model must be in training mode for calibration to work
-        model.train()
+    # Ensure training mode
+    model.train()
+    torch.set_grad_enabled(True)
 
-        # Start calibration for all quantizers
-        bits_key = f'{current_bits}bit'
-        for block in model.transformer.h:
-            for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
-                if bits_key in module.quantizers_weight:
-                    module.quantizers_weight[bits_key].start_calibration()
-                if bits_key in module.quantizers_input:
-                    module.quantizers_input[bits_key].start_calibration()
+    # Process gradient accumulation steps
+    for step in range(config.gradient_accumulation_steps):
+        # Get batch
+        batch = get_next_batch(train_iter, train_loader)
 
-        # Collect statistics from all gradient accumulation batches
-        # This records the global min/max across ALL accumulated batches
-        accumulated_batches = []
-        for step in range(config.gradient_accumulation_steps):
-            batch = get_next_batch(train_iter, train_loader)
-            accumulated_batches.append(batch)
+        # Compute loss for teacher and all students
+        loss = compute_loss_for_all_students(
+            model, batch, teacher_bits, student_bits_list,
+            distill_mgr, config, iteration
+        )
+        total_loss += loss.detach().item()
 
-            # Forward pass for statistics collection (no gradients)
-            # Each forward pass updates the running min/max statistics
-            with torch.no_grad():
-                _ = model(batch['input_ids'].to(next(model.parameters()).device))
+        # Backward pass
+        if scaler:
+            scaler.scale(loss).backward()
+        else:
+            loss.backward()
 
-        # Finish calibration to compute scale/zero_point from collected min/max
-        # This uses the global min/max from ALL gradient_accumulation_steps batches
-        # to compute a single scale that will be used for all accumulated gradients
-        for block in model.transformer.h:
-            for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
-                if bits_key in module.quantizers_weight:
-                    module.quantizers_weight[bits_key].finish_calibration()
-                if bits_key in module.quantizers_input:
-                    module.quantizers_input[bits_key].finish_calibration()
-
-        # ========== PASS 2: Training with Frozen Quantization ==========
-        # Ensure training mode for gradient computation
-        model.train()
-
-        # Now do actual training with frozen quantization parameters
-        for step, batch in enumerate(accumulated_batches):
-            # Compute loss with frozen quantization
-            loss = compute_loss(model, batch, current_bits, distill_mgr, config, iteration)
-            total_loss += loss.detach().item()
-
-            # Backward pass
-            if scaler:
-                scaler.scale(loss).backward()
-            else:
-                loss.backward()
-
-            # Clean up
-            del batch, loss
-
-    else:
-        # For 16-bit (no quantization), standard gradient accumulation
-        model.train()
-
-        # Ensure model parameters require gradients
-        for param in model.parameters():
-            param.requires_grad = True
-
-        for step in range(config.gradient_accumulation_steps):
-            # Get batch
-            batch = get_next_batch(train_iter, train_loader)
-
-            # Compute loss (ensure we're not in no_grad context)
-            if torch.is_grad_enabled():
-                loss = compute_loss(model, batch, current_bits, distill_mgr, config, iteration)
-            else:
-                print(f"ERROR: Gradients are disabled at iteration {iteration}, step {step}")
-                print(f"  Attempting to enable gradients...")
-                torch.set_grad_enabled(True)
-                loss = compute_loss(model, batch, current_bits, distill_mgr, config, iteration)
-
-            # Verify loss has grad_fn before backward
-            if not loss.requires_grad:
-                print(f"WARNING: Loss doesn't require grad at iteration {iteration}, step {step}")
-                print(f"  current_bits: {current_bits}")
-                print(f"  loss.requires_grad: {loss.requires_grad}")
-                print(f"  loss.grad_fn: {loss.grad_fn}")
-
-            total_loss += loss.detach().item()
-
-            # Backward pass
-            if scaler:
-                scaler.scale(loss).backward()
-            else:
-                loss.backward()
-
-            # Clean up
-            del batch, loss
+        # Clean up
+        del batch, loss
 
     # Optimizer step
     if scaler:
-        scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
-        scaler.step(optimizer)
-        scaler.update()
+        # Check if any gradients were computed
+        has_gradients = any(p.grad is not None for p in model.parameters() if p.requires_grad)
+
+        if has_gradients:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            print(f"ERROR: No gradients computed at iteration {iteration}")
+            print(f"  current_bits: {current_bits}")
+            print(f"  total_loss: {total_loss}")
+            # Skip optimizer step but update scaler to prevent assertion error
+            scaler.update()
     else:
         torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
         optimizer.step()
@@ -431,9 +363,10 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     # Initialize distillation manager if enabled
     distill_mgr = None
     if config.use_distillation:
+        teacher_bits = model_config.teacher_bits if hasattr(model_config, 'teacher_bits') else 32
         distill_mgr = DistillationManager(
             model=model,
-            full_precision_bits=max(model_config.bit_widths),
+            full_precision_bits=teacher_bits,  # Use FP32 as teacher
             config=config
         )
 
@@ -454,16 +387,19 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     train_iter = iter(train_loader)
     progress_bar = tqdm(range(config.num_iterations), desc="SP Training")
 
-    for iteration in progress_bar:
-        # Determine and set precision
-        current_bits = get_next_bitwidth(iteration, model_config)
-        model.set_precision(current_bits)
-        calib_mgr.ensure_calibrated(current_bits)
+    # Get teacher and student bit-widths from config
+    teacher_bits = model_config.teacher_bits if hasattr(model_config, 'teacher_bits') else 32
+    student_bits_list = model_config.bit_widths  # [4, 8, 16]
 
-        # Execute training step
+    # Ensure all student precisions are calibrated
+    for bits in student_bits_list:
+        calib_mgr.ensure_calibrated(bits)
+
+    for iteration in progress_bar:
+        # Execute training step for all precisions
         total_loss = train_step(
             model, train_iter, train_loader, optimizer, scaler,
-            current_bits, distill_mgr, config, iteration
+            teacher_bits, student_bits_list, distill_mgr, config, iteration
         )
 
         # Update learning rate
@@ -473,8 +409,8 @@ def train_sp(model, train_loader, val_loader, config, model_config):
         if distill_mgr:
             distill_mgr.step()
 
-        # Track statistics
-        stats.update(iteration, total_loss, current_bits, optimizer)
+        # Track statistics (use teacher bits for tracking)
+        stats.update(iteration, total_loss, teacher_bits, optimizer)
 
         # Update progress bar
         if iteration % 20 == 0:
@@ -482,7 +418,7 @@ def train_sp(model, train_loader, val_loader, config, model_config):
             reserved = torch.cuda.memory_reserved() / 1024**3
             progress_bar.set_postfix({
                 'loss': f'{total_loss:.4f}',
-                'bits': current_bits,
+                'bits': f'{student_bits_list}',
                 'gpu_alloc': f'{allocated:.1f}GB',
                 'gpu_res': f'{reserved:.1f}GB'
             })
@@ -491,7 +427,7 @@ def train_sp(model, train_loader, val_loader, config, model_config):
         if should_evaluate(iteration, config):
             val_loss = evaluate(model, val_loader, device, config.use_amp)
             stats.add_validation(val_loss)
-            print(f"\n[Iter {iteration}] Train: {total_loss:.4f}, Val: {val_loss:.4f}, Bits: {current_bits}")
+            print(f"\n[Iter {iteration}] Train: {total_loss:.4f}, Val: {val_loss:.4f}, Training bits: {student_bits_list}")
             model.train()  # Return to training mode
 
         # Periodic memory cleanup

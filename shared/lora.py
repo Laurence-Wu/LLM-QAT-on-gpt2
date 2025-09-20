@@ -19,8 +19,8 @@ class LoRALayer(nn.Module):
         self.alpha = alpha
         self.bits = bits
 
-        # CRITICAL: For 16-bit, disable LoRA entirely to ensure exact GPT-2 behavior
-        if bits >= 16 or rank <= 0:
+        # CRITICAL: For 32-bit teacher, disable LoRA entirely (no quantization compensation needed)
+        if bits >= 32 or rank <= 0:
             self.enabled = False
             self.scaling = 0
             # Create dummy parameters to avoid parameter counting issues
@@ -55,7 +55,7 @@ class LoRALayer(nn.Module):
 
     def forward(self, x):
         if not self.enabled or self.scaling == 0:
-            # Return zeros for disabled LoRA (16-bit mode)
+            # Return zeros for disabled LoRA (32-bit teacher mode)
             batch_shape = x.shape[:-1]  # All dims except last
             return torch.zeros(*batch_shape, self.out_features, device=x.device, dtype=x.dtype)
 
@@ -168,11 +168,11 @@ class SPLinearWithLoRA(nn.Module):
         })
 
         # Create separate LoRA adapters for each bit-width
-        # CRITICAL: 16-bit LoRA must be disabled to ensure exact GPT-2 behavior
+        # CRITICAL: 32-bit LoRA must be disabled for teacher (no quantization)
         self.lora_adapters = nn.ModuleDict({
             f'{bits}bit': LoRALayer(
                 in_features, out_features,
-                rank=lora_rank_per_bit.get(bits, 16) if bits < 16 else 0,  # Force rank=0 for 16-bit
+                rank=lora_rank_per_bit.get(bits, 16),  # Use config value directly
                 alpha=lora_alpha_per_bit.get(bits, 32),
                 bits=bits
             )
@@ -185,6 +185,11 @@ class SPLinearWithLoRA(nn.Module):
 
     def set_precision(self, bits):
         """Switch to specified bit-width."""
+        # Allow 32-bit for FP32 teacher mode (no quantization)
+        if bits == 32:
+            self.current_bits = bits
+            return
+
         if bits not in self.bit_widths:
             raise ValueError(f"Bit-width {bits} not supported. Choose from {self.bit_widths}")
         self.current_bits = bits
@@ -220,15 +225,16 @@ class SPLinearWithLoRA(nn.Module):
     def forward(self, x):
         """
         Forward pass with bit-width-specific behavior:
-        - 16-bit: Direct computation (no quantization, no LoRA)
-        - 8/4-bit: Quantization + LoRA compensation
+        - 32-bit: Pure FP32 teacher (no quantization, no LoRA)
+        - 16-bit: Student with mild quantization and LoRA
+        - 8/4-bit: Student with stronger quantization and LoRA
         """
-        # CRITICAL: 16-bit uses pure FP32 weights without modifications
-        if self.current_bits >= 16:
+        # CRITICAL: 32-bit teacher uses pure FP32 weights without any modifications
+        if self.current_bits >= 32:
             output = F.linear(x, self.linear.weight, self.linear.bias)
-            # Debug check for 16-bit gradient flow
+            # Debug check for 32-bit gradient flow
             if not output.requires_grad and x.requires_grad:
-                print(f"WARNING: 16-bit forward lost gradient!")
+                print(f"WARNING: 32-bit forward lost gradient!")
                 print(f"  x.requires_grad: {x.requires_grad}")
                 print(f"  weight.requires_grad: {self.linear.weight.requires_grad}")
                 print(f"  output.requires_grad: {output.requires_grad}")

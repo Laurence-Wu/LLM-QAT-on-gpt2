@@ -29,19 +29,20 @@ class ModelConfig:
         self.lora_dropout = 0.1
 
         # Switchable precision settings
-        self.bit_widths = [4, 8, 16]  # Supported bit-widths
+        self.bit_widths = [4, 8, 16]  # Student bit-widths to train
+        self.teacher_bits = 32  # Teacher uses FP32 (no quantization)
+
+        # Training precision - set this to the desired bit-width for training
+        self.training_bits = 8  # Default to 8-bit training
 
         # Lower precision uses lower rank for efficiency
-        # CRITICAL: 16-bit must have rank=0 to match GPT-2 exactly
-        self.lora_rank_per_bit = {4: 8, 8: 16, 16: 0}  # 16-bit has rank=0 (disabled)
-        self.lora_alpha_per_bit = {4: 16, 8: 32, 16: 0}  # 16-bit has alpha=0 (disabled)
-        
+        # CRITICAL: 32-bit must have rank=0 (no LoRA for teacher)
+        self.lora_rank_per_bit = {4: 8, 8: 16, 16: 16, 32: 0}  # 32-bit has rank=0 (disabled)
+        self.lora_alpha_per_bit = {4: 16, 8: 32, 16: 32, 32: 0}  # 32-bit has alpha=0 (disabled)
+
         # Activation and KV cache bits per weight precision
         self.activation_bits_per_bit = {4: 4, 8: 8, 16: 16}  # Match weight precision
         self.kv_cache_bits_per_bit = {4: 4, 8: 8, 16: 16}  # Match weight precision
-        self.switch_strategy = 'cyclic'  # Options: 'cyclic', 'random', 'curriculum'
-        self.switch_interval = 10  # Switch every N iterations (for cyclic)
-        self.curriculum_schedule = [16, 16, 8, 8, 4]  # For curriculum strategy
 
 
 class TrainingConfig:
