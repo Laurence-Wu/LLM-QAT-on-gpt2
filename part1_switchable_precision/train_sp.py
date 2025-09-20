@@ -112,17 +112,51 @@ def train_sp(model, train_loader, val_loader, config, model_config):
 
         model.set_precision(current_bits)
 
-        # Clear gradients only at the start of accumulation
-        optimizer.zero_grad(set_to_none=True)
-        total_loss = 0
+        # Two-pass implementation for quantized modes (4-bit and 8-bit)
+        batches_for_accumulation = []
 
-        # Accumulate gradients over multiple steps
+        # Pre-load all batches for this iteration to use in both passes
         for step in range(config.gradient_accumulation_steps):
             try:
                 batch = next(train_iter)
             except StopIteration:
                 train_iter = iter(train_loader)
                 batch = next(train_iter)
+            batches_for_accumulation.append(batch)
+
+        # Pass 1: Collect statistics (only for quantized modes)
+        if current_bits < 16:
+            print(f"\n[Iteration {iteration}] Pass 1: Collecting statistics for {current_bits}-bit mode")
+            model.eval()  # Set to eval mode to avoid dropout during statistics collection
+            model.start_stats_collection()
+
+            with torch.no_grad():
+                for batch_idx, batch in enumerate(batches_for_accumulation):
+                    input_ids = batch['input_ids'].to(device, non_blocking=True)
+                    attention_mask = batch.get('attention_mask')
+                    if attention_mask is not None:
+                        attention_mask = attention_mask.to(device, non_blocking=True)
+
+                    # Forward pass just to collect statistics
+                    _ = model(input_ids, attention_mask=attention_mask)
+
+                    # Clean up
+                    del input_ids
+                    if attention_mask is not None:
+                        del attention_mask
+
+            model.stop_stats_collection()
+            print(f"[Iteration {iteration}] Statistics collected and quantization parameters frozen")
+
+        # Pass 2: Training with fixed quantization parameters
+        model.train()  # Back to training mode
+
+        # Clear gradients only at the start of accumulation
+        optimizer.zero_grad(set_to_none=True)
+        total_loss = 0
+
+        # Accumulate gradients over multiple steps with FIXED quantization
+        for step, batch in enumerate(batches_for_accumulation):
 
             input_ids = batch['input_ids'].to(device, non_blocking=True)
             attention_mask = batch.get('attention_mask')
@@ -184,6 +218,10 @@ def train_sp(model, train_loader, val_loader, config, model_config):
 
         # Clear gradients after optimizer step to free memory
         optimizer.zero_grad(set_to_none=True)
+
+        # Unfreeze statistics after Pass 2 is complete (only for quantized modes)
+        if current_bits < 16:
+            model.unfreeze_stats()
 
         # Update distillation manager iteration count
         if distill_mgr:

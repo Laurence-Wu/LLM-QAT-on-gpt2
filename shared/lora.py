@@ -216,6 +216,33 @@ class SPLinearWithLoRA(nn.Module):
         """Get the currently active LoRA adapter."""
         return self.lora_adapters[f'{self.current_bits}bit']
 
+    def start_stats_collection(self):
+        """Start Pass 1: Begin collecting statistics for current bit-width."""
+        if self.current_bits >= 16:
+            return  # No quantization for 16-bit
+
+        bits_key = f'{self.current_bits}bit'
+        self.quantizers_weight[bits_key].start_stats_collection()
+        self.quantizers_input[bits_key].start_stats_collection()
+
+    def stop_stats_collection(self):
+        """End Pass 1: Finalize statistics and freeze quantization parameters."""
+        if self.current_bits >= 16:
+            return  # No quantization for 16-bit
+
+        bits_key = f'{self.current_bits}bit'
+        self.quantizers_weight[bits_key].stop_stats_collection()
+        self.quantizers_input[bits_key].stop_stats_collection()
+
+    def unfreeze_stats(self):
+        """End Pass 2: Allow statistics to be updated again."""
+        if self.current_bits >= 16:
+            return  # No quantization for 16-bit
+
+        bits_key = f'{self.current_bits}bit'
+        self.quantizers_weight[bits_key].unfreeze_stats()
+        self.quantizers_input[bits_key].unfreeze_stats()
+
     def forward(self, x):
         """
         Forward pass with bit-width-specific behavior:

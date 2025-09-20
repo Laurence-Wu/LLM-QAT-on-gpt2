@@ -51,6 +51,15 @@ class LearnableFakeQuantize(nn.Module):
 
         self.calibrated = False  # Should be False initially, will be set True after first calibration
 
+        # Two-pass mode support
+        self.collecting_stats = False  # True during Pass 1 (statistics collection)
+        self.stats_frozen = False  # True during Pass 2 (fixed parameters)
+        self.num_batches_collected = 0
+
+        # Temporary statistics for two-pass mode
+        self.register_buffer('temp_min', torch.zeros(1))
+        self.register_buffer('temp_max', torch.zeros(1))
+
     def set_num_bits(self, value):
         """Update num_bits and recalculate quantization ranges."""
         old_bits = self.num_bits
@@ -66,6 +75,89 @@ class LearnableFakeQuantize(nn.Module):
             # self.running_min.zero_()
             # self.running_max.zero_()
 
+    def start_stats_collection(self):
+        """Start Pass 1: Statistics collection mode."""
+        self.collecting_stats = True
+        self.stats_frozen = False
+        self.num_batches_collected = 0
+        # Reset temporary statistics
+        self.temp_min.zero_()
+        self.temp_max.zero_()
+
+    def stop_stats_collection(self):
+        """End Pass 1: Finalize statistics and compute quantization parameters."""
+        if self.collecting_stats and self.num_batches_collected > 0:
+            # Copy collected stats to running buffers
+            self.running_min.resize_as_(self.temp_min).copy_(self.temp_min)
+            self.running_max.resize_as_(self.temp_max).copy_(self.temp_max)
+            # Compute scale and zero_point
+            self._compute_scale_zero_point()
+            self.calibrated = True
+            self.stats_frozen = True
+        self.collecting_stats = False
+
+    def unfreeze_stats(self):
+        """End Pass 2: Allow statistics to be updated again."""
+        self.stats_frozen = False
+
+    def _collect_statistics_batch(self, x):
+        """Collect min/max statistics for current batch (Pass 1)."""
+        with torch.no_grad():
+            if self.per_channel:
+                # Per-channel statistics
+                dims_to_reduce = list(range(x.dim()))
+                dims_to_reduce.remove(self.channel_dim)
+
+                min_val = x
+                max_val = x
+                for dim in sorted(dims_to_reduce, reverse=True):
+                    min_val = min_val.min(dim=dim, keepdim=True)[0]
+                    max_val = max_val.max(dim=dim, keepdim=True)[0]
+
+                if self.num_batches_collected == 0:
+                    # First batch: initialize
+                    self.temp_min.resize_as_(min_val).copy_(min_val)
+                    self.temp_max.resize_as_(max_val).copy_(max_val)
+                else:
+                    # Subsequent batches: track global min/max
+                    self.temp_min = torch.minimum(self.temp_min, min_val)
+                    self.temp_max = torch.maximum(self.temp_max, max_val)
+            else:
+                # Per-tensor statistics
+                min_val = x.min()
+                max_val = x.max()
+
+                if self.num_batches_collected == 0:
+                    self.temp_min.copy_(min_val)
+                    self.temp_max.copy_(max_val)
+                else:
+                    self.temp_min = torch.minimum(self.temp_min, min_val)
+                    self.temp_max = torch.maximum(self.temp_max, max_val)
+
+            self.num_batches_collected += 1
+
+    def _compute_scale_zero_point(self):
+        """Compute scale and zero_point from statistics."""
+        with torch.no_grad():
+            if self.symmetric:
+                # Symmetric quantization
+                max_abs = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
+                max_abs = torch.clamp(max_abs, min=self.eps)
+                self.scale.resize_as_(max_abs)
+                self.scale.copy_(max_abs / (2**(self.num_bits-1) - 1))
+                self.zero_point.resize_as_(max_abs)
+                self.zero_point.zero_()
+            else:
+                # Asymmetric quantization
+                range_val = torch.clamp(self.running_max - self.running_min, min=self.eps)
+                self.scale.resize_as_(range_val)
+                self.scale.copy_(range_val / (self.quant_max - self.quant_min))
+                self.zero_point.resize_as_(range_val)
+                if torch.any(self.scale > 0):
+                    self.zero_point.copy_(torch.round(self.quant_min - self.running_min / self.scale))
+                else:
+                    self.zero_point.zero_()
+
     def _update_quant_range(self):
         """Update quantization range based on current num_bits."""
         self.quant_min = 0
@@ -80,6 +172,11 @@ class LearnableFakeQuantize(nn.Module):
         # 16-bit provides sufficient precision without quantization artifacts
         if self.num_bits >= 16:
             return x
+
+        # Two-pass mode: Pass 1 - Statistics Collection
+        if self.collecting_stats:
+            self._collect_statistics_batch(x)
+            return x  # Return original tensor during collection
 
         # If uncalibrated in eval mode, do one-shot calibration on first input
         if not self.calibrated and not self.training:
@@ -147,8 +244,8 @@ class LearnableFakeQuantize(nn.Module):
                         self.running_min.mul_(0.9).add_(min_val, alpha=0.1)
                         self.running_max.mul_(0.9).add_(max_val, alpha=0.1)
         
-        # Only update scale and zero_point if we have valid statistics
-        if self.calibrated or self.training:
+        # Only update scale and zero_point if not in frozen state (Pass 2)
+        if not self.stats_frozen and (self.calibrated or self.training):
             with torch.no_grad():
                 if self.symmetric:
                     # Paper formula: α = max(|X_R|)/(2^(N-1) - 1)
