@@ -13,7 +13,10 @@ import gc
 import json
 import time
 import random
-from distillation_manager import DistillationManager
+try:
+    from .distillation_manager import DistillationManager
+except ImportError:
+    from distillation_manager import DistillationManager
 
 
 # ============================================================================
