@@ -283,16 +283,20 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
                     module.quantizers_input[bits_key].start_calibration()
 
         # Collect statistics from all gradient accumulation batches
+        # This records the global min/max across ALL accumulated batches
         accumulated_batches = []
         for step in range(config.gradient_accumulation_steps):
             batch = get_next_batch(train_iter, train_loader)
             accumulated_batches.append(batch)
 
             # Forward pass for statistics collection (no gradients)
+            # Each forward pass updates the running min/max statistics
             with torch.no_grad():
                 _ = model(batch['input_ids'].to(next(model.parameters()).device))
 
-        # Finish calibration to freeze quantization parameters
+        # Finish calibration to compute scale/zero_point from collected min/max
+        # This uses the global min/max from ALL gradient_accumulation_steps batches
+        # to compute a single scale that will be used for all accumulated gradients
         for block in model.transformer.h:
             for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
                 if bits_key in module.quantizers_weight:

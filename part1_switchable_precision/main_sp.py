@@ -209,14 +209,18 @@ def main():
     # Use configuration from config_qat.py
     model_config = ModelConfig()
     training_config = TrainingConfig()
-    
+
+    # Add calibration configuration if not present
+    if not hasattr(training_config, 'calibration_samples'):
+        training_config.calibration_samples = 10  # Default calibration samples
+
     # Initialize model to gpu
     model = initialize_model(model_config, device)
 
     # Setup tokenizer to cpu
     tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
     tokenizer.pad_token = tokenizer.eos_token #use the end token as the padding to each sentences
-    
+
     # Create data loaders in cpu
     print("\nDatasets")
     train_loader, val_loader = create_dataloaders(
@@ -227,10 +231,11 @@ def main():
         max_length=training_config.max_seq_length,
         doc_stride=training_config.doc_stride
     )
-    
+
     ## print the current gpu
     print(f"GPU: {torch.cuda.get_device_name(0)}")
     print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+    print(f"Calibration samples per bit-width: {training_config.calibration_samples}")
 
     trained_model, training_stats = train_sp(
         model,
