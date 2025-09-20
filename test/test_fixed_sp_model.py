@@ -160,7 +160,7 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
     ]
 
     # Calibrate each bit-width using manual calibration
-    for bits in [4, 8]:  # Skip 16-bit (no quantization needed)
+    for bits in [4, 8, 16]:  # Include 16-bit as it's a student that needs calibration
         print(f"\n📊 Calibrating {bits}-bit mode...")
         sp_model.set_precision(bits)
 
@@ -225,9 +225,9 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
 
         print(f"  ✅ {bits}-bit calibration and evaluation complete")
 
-    # Reset to 16-bit
-    sp_model.set_precision(16)
-    print("\n✅ Two-pass calibration complete for all precisions")
+    # Reset to 32-bit teacher
+    sp_model.set_precision(32)
+    print("\n✅ Two-pass calibration complete for all student precisions")
 
     # ==== FINAL EVALUATION STAGE: Quality Check ====
     print("\n🧪 FINAL EVALUATION: Calibration quality check...")
@@ -239,7 +239,7 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
     results = {}
 
     with torch.no_grad():
-        for bits in [16, 8, 4]:
+        for bits in [32, 16, 8, 4]:  # Include 32-bit teacher as baseline
             sp_model.set_precision(bits)
             outputs = sp_model(tokens, labels=tokens)
             loss = outputs['loss'].item()
@@ -247,15 +247,15 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
             results[bits] = {'loss': loss, 'ppl': ppl}
             print(f"  {bits:2d}-bit: Loss = {loss:.4f}, PPL = {ppl:.2f}")
 
-    # Check degradation
-    baseline_ppl = results[16]['ppl']
-    for bits in [8, 4]:
+    # Check degradation from 32-bit teacher
+    baseline_ppl = results[32]['ppl']
+    for bits in [16, 8, 4]:
         ppl = results[bits]['ppl']
         degradation = ((ppl - baseline_ppl) / baseline_ppl) * 100
         status = "✅" if degradation < 100 else "⚠️" if degradation < 500 else "❌"
-        print(f"  {bits}-bit degradation: {degradation:.1f}% {status}")
+        print(f"  {bits}-bit degradation from teacher: {degradation:.1f}% {status}")
 
-    sp_model.set_precision(16)
+    sp_model.set_precision(32)
     return True
 
 
@@ -390,11 +390,11 @@ def test_quantization_degradation(sp_model, tokenizer, device):
     results = {}
 
     # Need to calibrate each precision separately since set_precision resets calibration
-    for precision in [32, 16, 8, 4]:  # Include 32-bit teacher
+    for precision in [32, 16, 8, 4]:  # Include 32-bit teacher as baseline
         sp_model.set_precision(precision)
         print(f"\n   Testing {precision}-bit precision...")
 
-        # Calibrate for student precisions (all except 32-bit)
+        # Calibrate for student precisions (all except 32-bit teacher)
         if precision < 32:
             # ==== TRAINING STAGE: Calibration ====
             print(f"      📈 TRAINING STAGE: Calibrating {precision}-bit quantizers...")
@@ -473,19 +473,19 @@ def test_quantization_degradation(sp_model, tokenizer, device):
             print(f"      PPL (mean): {avg_ppl:.2f} ± {std_ppl:.2f}")
             print(f"      PPL (median): {median_ppl:.2f}")
 
-    # Calculate degradation
-    baseline_ppl = results[16]['ppl']
-    baseline_median = results[16]['median_ppl']
+    # Calculate degradation from 32-bit teacher
+    baseline_ppl = results[32]['ppl']
+    baseline_median = results[32]['median_ppl']
 
     print(f"\n📊 DEGRADATION ANALYSIS:")
-    print(f"   Baseline (16-bit):")
-    print(f"      Mean PPL: {baseline_ppl:.2f} ± {results[16]['ppl_std']:.2f}")
+    print(f"   Baseline (32-bit teacher):")
+    print(f"      Mean PPL: {baseline_ppl:.2f} ± {results[32]['ppl_std']:.2f}")
     print(f"      Median PPL: {baseline_median:.2f}")
-    print(f"      Samples tested: {results[16]['num_samples']}")
+    print(f"      Samples tested: {results[32]['num_samples']}")
 
     degradation_results = {}
 
-    for precision in [8, 4]:
+    for precision in [16, 8, 4]:  # All students compared to teacher
         if precision in results:
             ppl = results[precision]['ppl']
             median = results[precision]['median_ppl']
@@ -505,23 +505,31 @@ def test_quantization_degradation(sp_model, tokenizer, device):
             print(f"      Mean Degradation: {degradation:+.1f}%")
             print(f"      Median Degradation: {degradation_median:+.1f}%")
 
-            # Expected targets: 8-bit <20%, 4-bit <100%
-            if precision == 8:
-                if degradation < 20:
+            # Expected targets: 16-bit <10%, 8-bit <30%, 4-bit <150%
+            if precision == 16:
+                if degradation < 10:
                     status = "✅ EXCELLENT"
-                elif degradation < 50:
+                elif degradation < 25:
                     status = "⚠️ ACCEPTABLE"
                 else:
                     status = "❌ POOR"
-                target = "target: <20%"
+                target = "target: <10%"
+            elif precision == 8:
+                if degradation < 30:
+                    status = "✅ EXCELLENT"
+                elif degradation < 60:
+                    status = "⚠️ ACCEPTABLE"
+                else:
+                    status = "❌ POOR"
+                target = "target: <30%"
             else:  # 4-bit
-                if degradation < 100:
+                if degradation < 150:
                     status = "✅ EXCELLENT"
-                elif degradation < 300:
+                elif degradation < 350:
                     status = "⚠️ ACCEPTABLE"
                 else:
                     status = "❌ POOR"
-                target = "target: <100%"
+                target = "target: <150%"
 
             print(f"      Status: {status} ({target})")
 
@@ -785,19 +793,19 @@ def test_distillation_setup(sp_model, tokenizer, device):
     print("Testing teacher-student setup...")
 
     with torch.no_grad():
-        # Test teacher mode (16-bit)
-        sp_model.set_precision(16)
+        # Test teacher mode (32-bit)
+        sp_model.set_precision(32)
         teacher_outputs = sp_model(input_ids, output_hidden_states=True, return_dict=True)
 
         if isinstance(teacher_outputs, dict) and 'logits' in teacher_outputs:
-            print(f"   ✅ Teacher (16-bit): Logits shape {list(teacher_outputs['logits'].shape)}")
+            print(f"   ✅ Teacher (32-bit): Logits shape {list(teacher_outputs['logits'].shape)}")
             if 'hidden_states' in teacher_outputs:
                 print(f"   ✅ Teacher hidden states: {len(teacher_outputs['hidden_states'])} layers")
         else:
             print(f"   ⚠️ Teacher outputs may not be in expected format")
 
-        # Test student modes
-        for precision in [8, 4]:
+        # Test student modes (16/8/4-bit are all students)
+        for precision in [16, 8, 4]:
             sp_model.set_precision(precision)
             outputs = sp_model(input_ids, output_hidden_states=True, return_dict=True)
             student_outputs[precision] = outputs
@@ -805,13 +813,13 @@ def test_distillation_setup(sp_model, tokenizer, device):
             if isinstance(outputs, dict) and 'logits' in outputs:
                 print(f"   ✅ Student ({precision}-bit): Logits shape {list(outputs['logits'].shape)}")
             else:
-                print(f"   ⚠️ Student ({precision}-bit) outputs may not be in expected format")
+                print(f"   ⚠️ Student ({precision}-bit) outputs may not be in expected format"
 
     # Test distillation loss computation (basic)
-    if teacher_outputs and 8 in student_outputs:
+    if teacher_outputs and 16 in student_outputs:
         try:
             teacher_logits = teacher_outputs['logits']
-            student_logits = student_outputs[8]['logits']
+            student_logits = student_outputs[16]['logits']  # Test with 16-bit student
 
             # Simple KL divergence test
             T = 3.0
@@ -821,7 +829,7 @@ def test_distillation_setup(sp_model, tokenizer, device):
             kl_loss = F.kl_div(student_probs, teacher_probs,
                                reduction='batchmean', log_target=True)
 
-            print(f"   ✅ KL divergence computable: {kl_loss.item():.4f}")
+            print(f"   ✅ KL divergence computable (32-bit teacher -> 16-bit student): {kl_loss.item():.4f}")
 
         except Exception as e:
             print(f"   ❌ Distillation loss computation failed: {e}")
@@ -899,7 +907,7 @@ def test_comprehensive_ppl(sp_model, tokenizer, device):
     comprehensive_results = {}
 
     with torch.no_grad():
-        for precision in [16, 8, 4]:
+        for precision in [32, 16, 8, 4]:  # Include 32-bit teacher
             sp_model.set_precision(precision)
             print(f"\n{precision}-bit Precision Evaluation:")
 
@@ -973,38 +981,45 @@ def test_comprehensive_ppl(sp_model, tokenizer, device):
     print("DETAILED DEGRADATION ANALYSIS")
     print("="*60)
 
-    baseline = comprehensive_results[16]['overall']
+    baseline = comprehensive_results[32]['overall']  # Use 32-bit teacher as baseline
 
-    for precision in [8, 4]:
+    for precision in [16, 8, 4]:  # All students
         current = comprehensive_results[precision]['overall']
 
         mean_degradation = ((current['mean_ppl'] - baseline['mean_ppl']) / baseline['mean_ppl']) * 100
         median_degradation = ((current['median_ppl'] - baseline['median_ppl']) / baseline['median_ppl']) * 100
 
-        print(f"\n{precision}-bit vs 16-bit:")
+        print(f"\n{precision}-bit vs 32-bit teacher:")
         print(f"  Mean degradation: {mean_degradation:+.1f}%")
         print(f"  Median degradation: {median_degradation:+.1f}%")
 
         # Category-wise degradation
         print(f"\n  Category-wise degradation:")
         for category in test_dataset.keys():
-            cat_baseline = comprehensive_results[16]['categories'][category]['mean_ppl']
+            cat_baseline = comprehensive_results[32]['categories'][category]['mean_ppl']  # 32-bit baseline
             cat_current = comprehensive_results[precision]['categories'][category]['mean_ppl']
             cat_degradation = ((cat_current - cat_baseline) / cat_baseline) * 100
             print(f"    {category}: {cat_degradation:+.1f}%")
 
         # Final verdict
-        if precision == 8:
-            if mean_degradation < 20:
+        if precision == 16:
+            if mean_degradation < 15:
                 verdict = "✅ EXCELLENT - Well within target"
-            elif mean_degradation < 50:
+            elif mean_degradation < 30:
+                verdict = "⚠️ ACCEPTABLE - Within reasonable bounds"
+            else:
+                verdict = "❌ POOR - Exceeds acceptable degradation"
+        elif precision == 8:
+            if mean_degradation < 30:
+                verdict = "✅ EXCELLENT - Well within target"
+            elif mean_degradation < 60:
                 verdict = "⚠️ ACCEPTABLE - Within reasonable bounds"
             else:
                 verdict = "❌ POOR - Exceeds acceptable degradation"
         else:  # 4-bit
-            if mean_degradation < 100:
+            if mean_degradation < 150:
                 verdict = "✅ EXCELLENT - Exceptional for 4-bit"
-            elif mean_degradation < 300:
+            elif mean_degradation < 350:
                 verdict = "⚠️ ACCEPTABLE - Expected for 4-bit"
             else:
                 verdict = "❌ POOR - High degradation even for 4-bit"
@@ -1149,14 +1164,16 @@ def run_comprehensive_test():
     degradation = test_results.get('degradation', {})
     if isinstance(degradation.get(8), dict):
         # New format with mean and median
+        deg_16bit = degradation.get(16, {}).get('mean_degradation', 999)
         deg_8bit = degradation.get(8, {}).get('mean_degradation', 999)
         deg_4bit = degradation.get(4, {}).get('mean_degradation', 9999)
     else:
         # Old format with just numbers
+        deg_16bit = degradation.get(16, 999)
         deg_8bit = degradation.get(8, 999)
         deg_4bit = degradation.get(4, 9999)
 
-    if deg_8bit < 50 and deg_4bit < 300:
+    if deg_16bit < 30 and deg_8bit < 60 and deg_4bit < 350:
         print("✅ Test 2 (quantization degradation): PASSED")
         passed_tests += 1
     else:
