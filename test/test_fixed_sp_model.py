@@ -813,7 +813,7 @@ def test_distillation_setup(sp_model, tokenizer, device):
             if isinstance(outputs, dict) and 'logits' in outputs:
                 print(f"   ✅ Student ({precision}-bit): Logits shape {list(outputs['logits'].shape)}")
             else:
-                print(f"   ⚠️ Student ({precision}-bit) outputs may not be in expected format"
+                print(f"   ⚠️ Student ({precision}-bit) outputs may not be in expected format")
 
     # Test distillation loss computation (basic)
     if teacher_outputs and 16 in student_outputs:
