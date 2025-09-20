@@ -263,26 +263,82 @@ def compute_loss(model, batch, current_bits, distill_mgr, config, iteration):
 
 def train_step(model, train_iter, train_loader, optimizer, scaler,
                current_bits, distill_mgr, config, iteration):
-    """Execute a single training step with gradient accumulation."""
+    """Execute a single training step with gradient accumulation and two-pass quantization."""
     optimizer.zero_grad(set_to_none=True)
     total_loss = 0
 
-    for step in range(config.gradient_accumulation_steps):
-        # Get batch
-        batch = get_next_batch(train_iter, train_loader)
+    # For quantized modes (< 16 bit), we need two-pass quantization
+    if current_bits < 16:
+        # ========== PASS 1: Collect Statistics ==========
+        # Model must be in training mode for calibration to work
+        model.train()
 
-        # Compute loss
-        loss = compute_loss(model, batch, current_bits, distill_mgr, config, iteration)
-        total_loss += loss.detach().item()
+        # Start calibration for all quantizers
+        bits_key = f'{current_bits}bit'
+        for block in model.transformer.h:
+            for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
+                if bits_key in module.quantizers_weight:
+                    module.quantizers_weight[bits_key].start_calibration()
+                if bits_key in module.quantizers_input:
+                    module.quantizers_input[bits_key].start_calibration()
 
-        # Backward pass
-        if scaler:
-            scaler.scale(loss).backward()
-        else:
-            loss.backward()
+        # Collect statistics from all gradient accumulation batches
+        accumulated_batches = []
+        for step in range(config.gradient_accumulation_steps):
+            batch = get_next_batch(train_iter, train_loader)
+            accumulated_batches.append(batch)
 
-        # Clean up
-        del batch, loss
+            # Forward pass for statistics collection (no gradients)
+            with torch.no_grad():
+                _ = model(batch['input_ids'].to(next(model.parameters()).device))
+
+        # Finish calibration to freeze quantization parameters
+        for block in model.transformer.h:
+            for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
+                if bits_key in module.quantizers_weight:
+                    module.quantizers_weight[bits_key].finish_calibration()
+                if bits_key in module.quantizers_input:
+                    module.quantizers_input[bits_key].finish_calibration()
+
+        # ========== PASS 2: Training with Frozen Quantization ==========
+        # Ensure training mode for gradient computation
+        model.train()
+
+        # Now do actual training with frozen quantization parameters
+        for step, batch in enumerate(accumulated_batches):
+            # Compute loss with frozen quantization
+            loss = compute_loss(model, batch, current_bits, distill_mgr, config, iteration)
+            total_loss += loss.detach().item()
+
+            # Backward pass
+            if scaler:
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
+
+            # Clean up
+            del batch, loss
+
+    else:
+        # For 16-bit (no quantization), standard gradient accumulation
+        model.train()
+
+        for step in range(config.gradient_accumulation_steps):
+            # Get batch
+            batch = get_next_batch(train_iter, train_loader)
+
+            # Compute loss
+            loss = compute_loss(model, batch, current_bits, distill_mgr, config, iteration)
+            total_loss += loss.detach().item()
+
+            # Backward pass
+            if scaler:
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
+
+            # Clean up
+            del batch, loss
 
     # Optimizer step
     if scaler:
@@ -381,9 +437,6 @@ def train_sp(model, train_loader, val_loader, config, model_config):
         current_bits = get_next_bitwidth(iteration, model_config)
         model.set_precision(current_bits)
         calib_mgr.ensure_calibrated(current_bits)
-
-        # Ensure training mode
-        model.train()
 
         # Execute training step
         total_loss = train_step(
