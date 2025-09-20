@@ -19,42 +19,29 @@ import numpy as np
 
 
 def check_quantizer_status(model, bits):
-    """Check if quantizers have frozen statistics for a given precision."""
-    frozen_count = 0
-    unfrozen_count = 0
+    """Check if quantizers are calibrated for a given precision."""
+    calibrated_count = 0
+    uncalibrated_count = 0
     try:
         # Check through the transformer layers
         for i, block in enumerate(model.transformer.h):
-            # Check attention layers
-            for module in [block.attn.c_attn, block.attn.c_proj]:
+            # Check attention and MLP layers
+            for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
                 bits_key = f'{bits}bit'
                 try:
                     if module.quantizers_weight and bits_key in module.quantizers_weight:
                         quantizer = module.quantizers_weight[bits_key]
-                        if quantizer.stats_frozen:
-                            frozen_count += 1
+                        if quantizer.calibrated:
+                            calibrated_count += 1
                         else:
-                            unfrozen_count += 1
-                except:
-                    pass  # Module might not have quantizers
-
-            # Check MLP layers
-            for module in [block.mlp.c_fc, block.mlp.c_proj]:
-                bits_key = f'{bits}bit'
-                try:
-                    if module.quantizers_weight and bits_key in module.quantizers_weight:
-                        quantizer = module.quantizers_weight[bits_key]
-                        if quantizer.stats_frozen:
-                            frozen_count += 1
-                        else:
-                            unfrozen_count += 1
+                            uncalibrated_count += 1
                 except:
                     pass  # Module might not have quantizers
 
     except Exception as e:
         print(f"Error checking quantizer status: {e}")
 
-    return frozen_count, unfrozen_count
+    return calibrated_count, uncalibrated_count
 
 
 def test_weight_loading_detailed():
@@ -238,16 +225,16 @@ def calibrate_quantizers_for_testing(model, tokenizer, device, bits):
     # Set precision for the model
     model.set_precision(bits)
 
-    # Pass 1: Start statistics collection on attention and MLP layers in each block
+    # Pass 1: Start calibration on attention and MLP layers in each block
     bits_key = f'{bits}bit'
     for block in model.transformer.h:
         # Each block has attn and mlp modules with SPLinearWithLoRA layers
         for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
-            # Call start_stats_collection on the specific quantizers for this bit-width
+            # Call start_calibration on the specific quantizers for this bit-width
             if bits_key in module.quantizers_weight:
-                module.quantizers_weight[bits_key].start_stats_collection()
+                module.quantizers_weight[bits_key].start_calibration()
             if bits_key in module.quantizers_input:
-                module.quantizers_input[bits_key].start_stats_collection()
+                module.quantizers_input[bits_key].start_calibration()
 
     # Collect statistics with a few samples
     calibration_texts = [
@@ -262,13 +249,13 @@ def calibrate_quantizers_for_testing(model, tokenizer, device, bits):
             input_ids = inputs['input_ids'].to(device)
             _ = model(input_ids)
 
-    # Pass 1 complete: Stop statistics collection (freezes the stats)
+    # Pass 1 complete: Finish calibration
     for block in model.transformer.h:
         for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
             if bits_key in module.quantizers_weight:
-                module.quantizers_weight[bits_key].stop_stats_collection()
+                module.quantizers_weight[bits_key].finish_calibration()
             if bits_key in module.quantizers_input:
-                module.quantizers_input[bits_key].stop_stats_collection()
+                module.quantizers_input[bits_key].finish_calibration()
 
     # The model is now ready for Pass 2 with frozen quantization parameters
     model.eval()
@@ -307,8 +294,8 @@ def test_different_precision_modes():
             calibrate_quantizers_for_testing(sp_model, tokenizer, device, precision)
 
             # Check calibration status
-            frozen, unfrozen = check_quantizer_status(sp_model, precision)
-            print(f"   Stats status: {frozen} frozen, {unfrozen} unfrozen")
+            calibrated, uncalibrated = check_quantizer_status(sp_model, precision)
+            print(f"   Calibration status: {calibrated} calibrated, {uncalibrated} uncalibrated")
 
         # Evaluate
         sp_model.eval()
@@ -413,36 +400,36 @@ def test_two_pass_quantization():
     sp_model.eval()
 
     # Pass 1: Collect statistics
-    print("   Pass 1: Starting statistics collection...")
+    print("   Pass 1: Starting calibration...")
     bits_key = '8bit'  # Testing with 8-bit
     for block in sp_model.transformer.h:
         for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
             if bits_key in module.quantizers_weight:
-                module.quantizers_weight[bits_key].start_stats_collection()
+                module.quantizers_weight[bits_key].start_calibration()
             if bits_key in module.quantizers_input:
-                module.quantizers_input[bits_key].start_stats_collection()
+                module.quantizers_input[bits_key].start_calibration()
 
     # Run a few forward passes
     with torch.no_grad():
         for _ in range(3):
             _ = sp_model(input_ids)
 
-    # Check that stats are not frozen during collection
+    # Check calibration status
     first_module = sp_model.transformer.h[0].attn.c_attn
     quantizer = first_module.quantizers_weight['8bit']
-    print(f"   During collection - stats_frozen: {quantizer.stats_frozen}")
+    print(f"   During calibration - calibrated: {quantizer.calibrated}")
 
-    # Stop collection (should freeze stats)
-    print("   Pass 1: Stopping statistics collection...")
+    # Finish calibration
+    print("   Pass 1: Finishing calibration...")
     for block in sp_model.transformer.h:
         for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
             if bits_key in module.quantizers_weight:
-                module.quantizers_weight[bits_key].stop_stats_collection()
+                module.quantizers_weight[bits_key].finish_calibration()
             if bits_key in module.quantizers_input:
-                module.quantizers_input[bits_key].stop_stats_collection()
+                module.quantizers_input[bits_key].finish_calibration()
 
-    # Check that stats are frozen after collection
-    print(f"   After collection - stats_frozen: {quantizer.stats_frozen}")
+    # Check calibration status after finish
+    print(f"   After calibration - calibrated: {quantizer.calibrated}")
 
     # Get the scale/zero_point values
     scale_before = quantizer.scale.clone() if quantizer.scale is not None else None
@@ -460,15 +447,8 @@ def test_two_pass_quantization():
                 scale_changed = not torch.allclose(scale_before, scale_after)
                 print(f"   Forward pass {i+1} - Scale changed: {scale_changed}")
 
-    # Test unfreeze
-    print("\n2. Testing Statistics Unfreezing:")
-    for block in sp_model.transformer.h:
-        for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
-            if bits_key in module.quantizers_weight:
-                module.quantizers_weight[bits_key].unfreeze_stats()
-            if bits_key in module.quantizers_input:
-                module.quantizers_input[bits_key].unfreeze_stats()
-    print(f"   After unfreeze - stats_frozen: {quantizer.stats_frozen}")
+    # Note: The current quantization system doesn't have unfreeze capability
+    print("\n2. Note: Current system uses start/finish_calibration, not freeze/unfreeze")
 
     print("\n✅ Two-pass quantization test completed")
     return True
