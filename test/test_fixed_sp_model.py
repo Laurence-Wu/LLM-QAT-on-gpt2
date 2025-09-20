@@ -435,75 +435,80 @@ def test_quantization_degradation(sp_model, tokenizer, device):
 
         # CRITICAL: Switch to EVAL mode for actual testing
         sp_model.eval()
-        losses = []
-        perplexities = []
+        total_loss = 0
+        total_tokens = 0
+        texts_processed = 0
 
         with torch.no_grad():
             for i, sentence in enumerate(test_sentences):
                 inputs = tokenizer(sentence, return_tensors='pt')
                 input_ids = inputs['input_ids'].to(device)
 
-                outputs = sp_model(input_ids, labels=input_ids)
-                loss = outputs['loss'].item()
-                ppl = np.exp(loss)
+                # Skip very short sequences
+                if input_ids.size(1) < 2:
+                    continue
 
-                losses.append(loss)
-                perplexities.append(ppl)
+                outputs = sp_model(input_ids, labels=input_ids)
+
+                # Correctly accumulate loss
+                seq_length = input_ids.size(1) - 1  # -1 because we can't predict first token
+                total_loss += outputs['loss'].item() * seq_length
+                total_tokens += seq_length
+                texts_processed += 1
 
                 if (i + 1) % 5 == 0:
                     print(f"      Processed {i + 1}/{len(test_sentences)} samples")
 
-            avg_loss = np.mean(losses)
-            std_loss = np.std(losses)
-            avg_ppl = np.mean(perplexities)
-            std_ppl = np.std(perplexities)
-            median_ppl = np.median(perplexities)
+            # Compute perplexity correctly
+            if total_tokens > 0:
+                avg_loss = total_loss / total_tokens
+                ppl = np.exp(avg_loss)
+            else:
+                avg_loss = float('inf')
+                ppl = float('inf')
 
             results[precision] = {
-                'loss': avg_loss,
-                'loss_std': std_loss,
-                'ppl': avg_ppl,
-                'ppl_std': std_ppl,
-                'median_ppl': median_ppl,
-                'num_samples': len(losses)
+                'avg_loss': avg_loss,
+                'ppl': ppl,
+                'total_tokens': total_tokens,
+                'texts_processed': texts_processed
             }
 
             print(f"   {precision:2d}-bit Results:")
-            print(f"      Loss: {avg_loss:.4f} ± {std_loss:.4f}")
-            print(f"      PPL (mean): {avg_ppl:.2f} ± {std_ppl:.2f}")
-            print(f"      PPL (median): {median_ppl:.2f}")
+            print(f"      Loss: {avg_loss:.4f}")
+            print(f"      PPL: {ppl:.2f}")
+            print(f"      Tokens: {total_tokens}, Texts: {texts_processed}")
 
     # Calculate degradation from 32-bit teacher
     baseline_ppl = results[32]['ppl']
-    baseline_median = results[32]['median_ppl']
+    baseline_loss = results[32]['avg_loss']
 
     print(f"\n📊 DEGRADATION ANALYSIS:")
     print(f"   Baseline (32-bit teacher):")
-    print(f"      Mean PPL: {baseline_ppl:.2f} ± {results[32]['ppl_std']:.2f}")
-    print(f"      Median PPL: {baseline_median:.2f}")
-    print(f"      Samples tested: {results[32]['num_samples']}")
+    print(f"      PPL: {baseline_ppl:.2f}")
+    print(f"      Avg Loss: {baseline_loss:.4f}")
+    print(f"      Tokens tested: {results[32]['total_tokens']}")
 
     degradation_results = {}
 
     for precision in [16, 8, 4]:  # All students compared to teacher
         if precision in results:
             ppl = results[precision]['ppl']
-            median = results[precision]['median_ppl']
-            std = results[precision]['ppl_std']
+            avg_loss = results[precision]['avg_loss']
 
             degradation = ((ppl - baseline_ppl) / baseline_ppl) * 100
-            degradation_median = ((median - baseline_median) / baseline_median) * 100
+            loss_diff = avg_loss - baseline_loss
 
             degradation_results[precision] = {
-                'mean_degradation': degradation,
-                'median_degradation': degradation_median
+                'ppl_degradation': degradation,
+                'loss_diff': loss_diff
             }
 
             print(f"\n   {precision}-bit Performance:")
-            print(f"      Mean PPL: {ppl:.2f} ± {std:.2f}")
-            print(f"      Median PPL: {median:.2f}")
-            print(f"      Mean Degradation: {degradation:+.1f}%")
-            print(f"      Median Degradation: {degradation_median:+.1f}%")
+            print(f"      PPL: {ppl:.2f}")
+            print(f"      Avg Loss: {avg_loss:.4f}")
+            print(f"      PPL Degradation: {degradation:+.1f}%")
+            print(f"      Loss Difference: {loss_diff:+.4f}")
 
             # Expected targets: 16-bit <10%, 8-bit <30%, 4-bit <150%
             if precision == 16:
@@ -912,12 +917,13 @@ def test_comprehensive_ppl(sp_model, tokenizer, device):
             print(f"\n{precision}-bit Precision Evaluation:")
 
             precision_results = {}
-            all_losses = []
-            all_ppls = []
+            all_total_loss = 0
+            all_total_tokens = 0
 
             for category, texts in test_dataset.items():
-                category_losses = []
-                category_ppls = []
+                category_total_loss = 0
+                category_total_tokens = 0
+                texts_processed = 0
 
                 print(f"  Testing {category} texts...")
 
@@ -926,55 +932,63 @@ def test_comprehensive_ppl(sp_model, tokenizer, device):
                                      max_length=128, truncation=True)
                     input_ids = inputs['input_ids'].to(device)
 
+                    # Skip very short sequences
+                    if input_ids.size(1) < 2:
+                        continue
+
                     outputs = sp_model(input_ids, labels=input_ids)
-                    loss = outputs['loss'].item()
-                    ppl = np.exp(loss)
 
-                    category_losses.append(loss)
-                    category_ppls.append(ppl)
-                    all_losses.append(loss)
-                    all_ppls.append(ppl)
+                    # The model internally handles label shifting
+                    # Loss is mean loss per token, so multiply by sequence length to get total
+                    seq_length = input_ids.size(1) - 1  # -1 because we can't predict first token
+                    total_loss_for_seq = outputs['loss'].item() * seq_length
 
-                # Category statistics
-                cat_mean_loss = np.mean(category_losses)
-                cat_mean_ppl = np.mean(category_ppls)
-                cat_median_ppl = np.median(category_ppls)
-                cat_std_ppl = np.std(category_ppls)
+                    category_total_loss += total_loss_for_seq
+                    category_total_tokens += seq_length
+                    all_total_loss += total_loss_for_seq
+                    all_total_tokens += seq_length
+                    texts_processed += 1
+
+                # Compute category perplexity correctly
+                if category_total_tokens > 0:
+                    cat_avg_loss = category_total_loss / category_total_tokens
+                    cat_ppl = np.exp(cat_avg_loss)
+                else:
+                    cat_avg_loss = float('inf')
+                    cat_ppl = float('inf')
 
                 precision_results[category] = {
-                    'mean_loss': cat_mean_loss,
-                    'mean_ppl': cat_mean_ppl,
-                    'median_ppl': cat_median_ppl,
-                    'std_ppl': cat_std_ppl,
-                    'samples': len(category_ppls)
+                    'avg_loss': cat_avg_loss,
+                    'ppl': cat_ppl,
+                    'total_tokens': category_total_tokens,
+                    'texts_processed': texts_processed
                 }
 
-                print(f"    {category}: PPL={cat_mean_ppl:.2f} (median={cat_median_ppl:.2f}, std={cat_std_ppl:.2f})")
+                print(f"    {category}: PPL={cat_ppl:.2f} (loss={cat_avg_loss:.4f}, tokens={category_total_tokens})")
 
-            # Overall statistics for this precision
-            overall_mean_ppl = np.mean(all_ppls)
-            overall_median_ppl = np.median(all_ppls)
-            overall_std_ppl = np.std(all_ppls)
-            overall_min_ppl = np.min(all_ppls)
-            overall_max_ppl = np.max(all_ppls)
+            # Overall statistics for this precision - computed correctly
+            if all_total_tokens > 0:
+                overall_avg_loss = all_total_loss / all_total_tokens
+                overall_ppl = np.exp(overall_avg_loss)
+            else:
+                overall_avg_loss = float('inf')
+                overall_ppl = float('inf')
 
             comprehensive_results[precision] = {
                 'categories': precision_results,
                 'overall': {
-                    'mean_ppl': overall_mean_ppl,
-                    'median_ppl': overall_median_ppl,
-                    'std_ppl': overall_std_ppl,
-                    'min_ppl': overall_min_ppl,
-                    'max_ppl': overall_max_ppl,
-                    'total_samples': len(all_ppls)
+                    'avg_loss': overall_avg_loss,
+                    'ppl': overall_ppl,
+                    'total_tokens': all_total_tokens,
+                    'total_texts': sum(r['texts_processed'] for r in precision_results.values())
                 }
             }
 
             print(f"\n  Overall {precision}-bit Statistics:")
-            print(f"    Mean PPL: {overall_mean_ppl:.2f} ± {overall_std_ppl:.2f}")
-            print(f"    Median PPL: {overall_median_ppl:.2f}")
-            print(f"    Range: [{overall_min_ppl:.2f}, {overall_max_ppl:.2f}]")
-            print(f"    Total samples: {len(all_ppls)}")
+            print(f"    Perplexity: {overall_ppl:.2f}")
+            print(f"    Average loss: {overall_avg_loss:.4f}")
+            print(f"    Total tokens: {all_total_tokens}")
+            print(f"    Total texts: {comprehensive_results[precision]['overall']['total_texts']}")
 
     # Detailed degradation analysis
     print("\n" + "="*60)
@@ -986,40 +1000,44 @@ def test_comprehensive_ppl(sp_model, tokenizer, device):
     for precision in [16, 8, 4]:  # All students
         current = comprehensive_results[precision]['overall']
 
-        mean_degradation = ((current['mean_ppl'] - baseline['mean_ppl']) / baseline['mean_ppl']) * 100
-        median_degradation = ((current['median_ppl'] - baseline['median_ppl']) / baseline['median_ppl']) * 100
+        ppl_degradation = ((current['ppl'] - baseline['ppl']) / baseline['ppl']) * 100
+        loss_diff = current['avg_loss'] - baseline['avg_loss']
 
         print(f"\n{precision}-bit vs 32-bit teacher:")
-        print(f"  Mean degradation: {mean_degradation:+.1f}%")
-        print(f"  Median degradation: {median_degradation:+.1f}%")
+        print(f"  Perplexity degradation: {ppl_degradation:+.1f}%")
+        print(f"  Loss difference: {loss_diff:+.4f}")
+        print(f"  Tokens evaluated: {current['total_tokens']}")
 
         # Category-wise degradation
         print(f"\n  Category-wise degradation:")
         for category in test_dataset.keys():
-            cat_baseline = comprehensive_results[32]['categories'][category]['mean_ppl']  # 32-bit baseline
-            cat_current = comprehensive_results[precision]['categories'][category]['mean_ppl']
-            cat_degradation = ((cat_current - cat_baseline) / cat_baseline) * 100
-            print(f"    {category}: {cat_degradation:+.1f}%")
+            cat_baseline = comprehensive_results[32]['categories'][category]['ppl']  # 32-bit baseline
+            cat_current = comprehensive_results[precision]['categories'][category]['ppl']
+            if cat_baseline != float('inf') and cat_current != float('inf'):
+                cat_degradation = ((cat_current - cat_baseline) / cat_baseline) * 100
+                print(f"    {category}: {cat_degradation:+.1f}%")
+            else:
+                print(f"    {category}: N/A (insufficient data)")
 
         # Final verdict
         if precision == 16:
-            if mean_degradation < 15:
+            if ppl_degradation < 15:
                 verdict = "✅ EXCELLENT - Well within target"
-            elif mean_degradation < 30:
+            elif ppl_degradation < 30:
                 verdict = "⚠️ ACCEPTABLE - Within reasonable bounds"
             else:
                 verdict = "❌ POOR - Exceeds acceptable degradation"
         elif precision == 8:
-            if mean_degradation < 30:
+            if ppl_degradation < 30:
                 verdict = "✅ EXCELLENT - Well within target"
-            elif mean_degradation < 60:
+            elif ppl_degradation < 60:
                 verdict = "⚠️ ACCEPTABLE - Within reasonable bounds"
             else:
                 verdict = "❌ POOR - Exceeds acceptable degradation"
         else:  # 4-bit
-            if mean_degradation < 150:
+            if ppl_degradation < 150:
                 verdict = "✅ EXCELLENT - Exceptional for 4-bit"
-            elif mean_degradation < 350:
+            elif ppl_degradation < 350:
                 verdict = "⚠️ ACCEPTABLE - Expected for 4-bit"
             else:
                 verdict = "❌ POOR - High degradation even for 4-bit"
@@ -1160,15 +1178,15 @@ def run_comprehensive_test():
     else:
         print("❌ Test 1 (32-bit teacher equivalence): FAILED")
 
-    # Check degradation results - handle both old and new format
+    # Check degradation results
     degradation = test_results.get('degradation', {})
     if isinstance(degradation.get(8), dict):
-        # New format with mean and median
-        deg_16bit = degradation.get(16, {}).get('mean_degradation', 999)
-        deg_8bit = degradation.get(8, {}).get('mean_degradation', 999)
-        deg_4bit = degradation.get(4, {}).get('mean_degradation', 9999)
+        # Dictionary format
+        deg_16bit = degradation.get(16, {}).get('ppl_degradation', 999)
+        deg_8bit = degradation.get(8, {}).get('ppl_degradation', 999)
+        deg_4bit = degradation.get(4, {}).get('ppl_degradation', 9999)
     else:
-        # Old format with just numbers
+        # Simple number format (backward compatibility)
         deg_16bit = degradation.get(16, 999)
         deg_8bit = degradation.get(8, 999)
         deg_4bit = degradation.get(4, 9999)
