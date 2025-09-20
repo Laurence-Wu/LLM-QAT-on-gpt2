@@ -239,10 +239,15 @@ def calibrate_quantizers_for_testing(model, tokenizer, device, bits):
     model.set_precision(bits)
 
     # Pass 1: Start statistics collection on attention and MLP layers in each block
+    bits_key = f'{bits}bit'
     for block in model.transformer.h:
         # Each block has attn and mlp modules with SPLinearWithLoRA layers
         for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
-            module.start_stats_collection()
+            # Call start_stats_collection on the specific quantizers for this bit-width
+            if bits_key in module.quantizers_weight:
+                module.quantizers_weight[bits_key].start_stats_collection()
+            if bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].start_stats_collection()
 
     # Collect statistics with a few samples
     calibration_texts = [
@@ -260,7 +265,10 @@ def calibrate_quantizers_for_testing(model, tokenizer, device, bits):
     # Pass 1 complete: Stop statistics collection (freezes the stats)
     for block in model.transformer.h:
         for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
-            module.stop_stats_collection()
+            if bits_key in module.quantizers_weight:
+                module.quantizers_weight[bits_key].stop_stats_collection()
+            if bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].stop_stats_collection()
 
     # The model is now ready for Pass 2 with frozen quantization parameters
     model.eval()
@@ -406,9 +414,13 @@ def test_two_pass_quantization():
 
     # Pass 1: Collect statistics
     print("   Pass 1: Starting statistics collection...")
+    bits_key = '8bit'  # Testing with 8-bit
     for block in sp_model.transformer.h:
         for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
-            module.start_stats_collection()
+            if bits_key in module.quantizers_weight:
+                module.quantizers_weight[bits_key].start_stats_collection()
+            if bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].start_stats_collection()
 
     # Run a few forward passes
     with torch.no_grad():
@@ -424,7 +436,10 @@ def test_two_pass_quantization():
     print("   Pass 1: Stopping statistics collection...")
     for block in sp_model.transformer.h:
         for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
-            module.stop_stats_collection()
+            if bits_key in module.quantizers_weight:
+                module.quantizers_weight[bits_key].stop_stats_collection()
+            if bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].stop_stats_collection()
 
     # Check that stats are frozen after collection
     print(f"   After collection - stats_frozen: {quantizer.stats_frozen}")
@@ -449,7 +464,10 @@ def test_two_pass_quantization():
     print("\n2. Testing Statistics Unfreezing:")
     for block in sp_model.transformer.h:
         for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
-            module.unfreeze_stats()
+            if bits_key in module.quantizers_weight:
+                module.quantizers_weight[bits_key].unfreeze_stats()
+            if bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].unfreeze_stats()
     print(f"   After unfreeze - stats_frozen: {quantizer.stats_frozen}")
 
     print("\n✅ Two-pass quantization test completed")
