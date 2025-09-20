@@ -225,7 +225,14 @@ class SPLinearWithLoRA(nn.Module):
         """
         # CRITICAL: 16-bit uses pure FP32 weights without modifications
         if self.current_bits >= 16:
-            return F.linear(x, self.linear.weight, self.linear.bias)
+            output = F.linear(x, self.linear.weight, self.linear.bias)
+            # Debug check for 16-bit gradient flow
+            if not output.requires_grad and x.requires_grad:
+                print(f"WARNING: 16-bit forward lost gradient!")
+                print(f"  x.requires_grad: {x.requires_grad}")
+                print(f"  weight.requires_grad: {self.linear.weight.requires_grad}")
+                print(f"  output.requires_grad: {output.requires_grad}")
+            return output
 
         # Lower precision: Apply quantization and LoRA
         bits_key = f'{self.current_bits}bit'

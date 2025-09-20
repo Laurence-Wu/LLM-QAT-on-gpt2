@@ -336,7 +336,13 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
             batch = get_next_batch(train_iter, train_loader)
 
             # Compute loss (ensure we're not in no_grad context)
-            loss = compute_loss(model, batch, current_bits, distill_mgr, config, iteration)
+            if torch.is_grad_enabled():
+                loss = compute_loss(model, batch, current_bits, distill_mgr, config, iteration)
+            else:
+                print(f"ERROR: Gradients are disabled at iteration {iteration}, step {step}")
+                print(f"  Attempting to enable gradients...")
+                torch.set_grad_enabled(True)
+                loss = compute_loss(model, batch, current_bits, distill_mgr, config, iteration)
 
             # Verify loss has grad_fn before backward
             if not loss.requires_grad:
