@@ -47,18 +47,19 @@ def create_properly_initialized_model(use_pretrained=True, num_layers=None):
         from transformers import GPT2LMHeadModel
 
         # Create a GPT-2 config matching our SP config
+        # ModelConfig from part1 folder has these attributes
         gpt2_config = GPT2Config(
             vocab_size=sp_config.vocab_size,
             n_positions=sp_config.n_positions,
-            n_ctx=sp_config.n_ctx,
+            n_ctx=sp_config.n_positions,  # Use n_positions for context
             n_embd=sp_config.n_embd,
             n_layer=sp_config.n_layer,
             n_head=sp_config.n_head,
-            n_inner=sp_config.n_inner,
-            activation_function=sp_config.activation_function,
-            resid_pdrop=sp_config.resid_pdrop,
+            n_inner=4 * sp_config.n_embd,  # GPT-2 default: 4 * n_embd = 3072
+            activation_function="gelu_new",  # GPT-2 default
+            resid_pdrop=0.1,  # GPT-2 default dropout
             embd_pdrop=sp_config.embd_pdrop,
-            attn_pdrop=sp_config.attn_pdrop,
+            attn_pdrop=0.1,  # GPT-2 default attention dropout
             layer_norm_epsilon=sp_config.layer_norm_epsilon,
         )
 
