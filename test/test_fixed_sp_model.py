@@ -386,14 +386,17 @@ def test_lora_behavior(sp_model, tokenizer, device):
         for precision in [16, 8, 4]:
             sp_model.set_precision(precision)
 
-            # Count enabled LoRA layers
+            # Count enabled LoRA layers for the CURRENT precision only
             enabled_loras = 0
             disabled_loras = 0
             total_loras = 0
 
             for name, module in sp_model.named_modules():
                 if hasattr(module, 'lora_adapters'):
-                    for bit_key, lora in module.lora_adapters.items():
+                    # Only check the LoRA adapter for the current bit-width
+                    bit_key = f'{precision}bit'
+                    if bit_key in module.lora_adapters:
+                        lora = module.lora_adapters[bit_key]
                         total_loras += 1
                         if hasattr(lora, 'enabled') and lora.enabled:
                             enabled_loras += 1
