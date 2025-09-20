@@ -84,8 +84,8 @@ def create_properly_initialized_model(use_pretrained=True, num_layers=None):
             del gpt2_full  # Free memory
 
         # Load the state dict into SP model
-        # This will handle the mapping from GPT2 to SP architecture
-        sp_model.load_pretrained_weights(gpt2_model.state_dict())
+        # Pass the model object, not the state dict
+        sp_model.load_pretrained_weights(gpt2_model)
 
         print("✅ Weights loaded successfully")
 
