@@ -238,8 +238,9 @@ def calibrate_quantizers_for_testing(model, tokenizer, device, bits):
     # Set precision for the model
     model.set_precision(bits)
 
-    # Pass 1: Start statistics collection
-    model.start_stats_collection()
+    # Pass 1: Start statistics collection directly on transformer blocks
+    for block in model.transformer.h:
+        block.start_stats_collection()
 
     # Collect statistics with a few samples
     calibration_texts = [
@@ -255,7 +256,8 @@ def calibrate_quantizers_for_testing(model, tokenizer, device, bits):
             _ = model(input_ids)
 
     # Pass 1 complete: Stop statistics collection (freezes the stats)
-    model.stop_stats_collection()
+    for block in model.transformer.h:
+        block.stop_stats_collection()
 
     # The model is now ready for Pass 2 with frozen quantization parameters
     model.eval()
@@ -401,7 +403,8 @@ def test_two_pass_quantization():
 
     # Pass 1: Collect statistics
     print("   Pass 1: Starting statistics collection...")
-    sp_model.start_stats_collection()
+    for block in sp_model.transformer.h:
+        block.start_stats_collection()
 
     # Run a few forward passes
     with torch.no_grad():
@@ -415,7 +418,8 @@ def test_two_pass_quantization():
 
     # Stop collection (should freeze stats)
     print("   Pass 1: Stopping statistics collection...")
-    sp_model.stop_stats_collection()
+    for block in sp_model.transformer.h:
+        block.stop_stats_collection()
 
     # Check that stats are frozen after collection
     print(f"   After collection - stats_frozen: {quantizer.stats_frozen}")
@@ -438,7 +442,8 @@ def test_two_pass_quantization():
 
     # Test unfreeze
     print("\n2. Testing Statistics Unfreezing:")
-    sp_model.unfreeze_stats()
+    for block in sp_model.transformer.h:
+        block.unfreeze_stats()
     print(f"   After unfreeze - stats_frozen: {quantizer.stats_frozen}")
 
     print("\n✅ Two-pass quantization test completed")
