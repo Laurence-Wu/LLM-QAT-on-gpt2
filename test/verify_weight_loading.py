@@ -19,22 +19,42 @@ import numpy as np
 
 
 def check_quantizer_status(model, bits):
-    """Check if quantizers are properly calibrated for a given precision."""
-    calibrated_count = 0
-    uncalibrated_count = 0
+    """Check if quantizers have frozen statistics for a given precision."""
+    frozen_count = 0
+    unfrozen_count = 0
+    try:
+        # Check through the transformer layers
+        for i, block in enumerate(model.transformer.h):
+            # Check attention layers
+            for module in [block.attn.c_attn, block.attn.c_proj]:
+                bits_key = f'{bits}bit'
+                try:
+                    if module.quantizers_weight and bits_key in module.quantizers_weight:
+                        quantizer = module.quantizers_weight[bits_key]
+                        if quantizer.stats_frozen:
+                            frozen_count += 1
+                        else:
+                            unfrozen_count += 1
+                except:
+                    pass  # Module might not have quantizers
 
-    for name, module in model.named_modules():
-        if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
-            bits_key = f'{bits}bit'
-            if bits_key in module.quantizers_weight:
-                quantizer = module.quantizers_weight[bits_key]
-                if hasattr(quantizer, 'calibrated'):
-                    if quantizer.calibrated:
-                        calibrated_count += 1
-                    else:
-                        uncalibrated_count += 1
+            # Check MLP layers
+            for module in [block.mlp.c_fc, block.mlp.c_proj]:
+                bits_key = f'{bits}bit'
+                try:
+                    if module.quantizers_weight and bits_key in module.quantizers_weight:
+                        quantizer = module.quantizers_weight[bits_key]
+                        if quantizer.stats_frozen:
+                            frozen_count += 1
+                        else:
+                            unfrozen_count += 1
+                except:
+                    pass  # Module might not have quantizers
 
-    return calibrated_count, uncalibrated_count
+    except Exception as e:
+        print(f"Error checking quantizer status: {e}")
+
+    return frozen_count, unfrozen_count
 
 
 def test_weight_loading_detailed():
@@ -208,21 +228,18 @@ def test_weight_loading_detailed():
 
 
 def calibrate_quantizers_for_testing(model, tokenizer, device, bits):
-    """Calibrate quantizers for a specific bit-width."""
+    """Calibrate quantizers for a specific bit-width using two-pass statistics collection."""
     if bits >= 16:
         return  # No calibration needed for 16-bit
 
-    # Set to training mode for calibration
-    model.train()
+    # Set model to eval mode for statistics collection (Pass 1)
+    model.eval()
 
-    # Start calibration
-    for name, module in model.named_modules():
-        if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
-            bits_key = f'{bits}bit'
-            if bits_key in module.quantizers_weight:
-                module.quantizers_weight[bits_key].start_calibration()
-            if bits_key in module.quantizers_input:
-                module.quantizers_input[bits_key].start_calibration()
+    # Set precision for the model
+    model.set_precision(bits)
+
+    # Pass 1: Start statistics collection
+    model.start_stats_collection()
 
     # Collect statistics with a few samples
     calibration_texts = [
@@ -237,16 +254,10 @@ def calibrate_quantizers_for_testing(model, tokenizer, device, bits):
             input_ids = inputs['input_ids'].to(device)
             _ = model(input_ids)
 
-    # Finish calibration
-    for name, module in model.named_modules():
-        if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
-            bits_key = f'{bits}bit'
-            if bits_key in module.quantizers_weight:
-                module.quantizers_weight[bits_key].finish_calibration()
-            if bits_key in module.quantizers_input:
-                module.quantizers_input[bits_key].finish_calibration()
+    # Pass 1 complete: Stop statistics collection (freezes the stats)
+    model.stop_stats_collection()
 
-    # Return to eval mode
+    # The model is now ready for Pass 2 with frozen quantization parameters
     model.eval()
 
 
@@ -283,8 +294,8 @@ def test_different_precision_modes():
             calibrate_quantizers_for_testing(sp_model, tokenizer, device, precision)
 
             # Check calibration status
-            calibrated, uncalibrated = check_quantizer_status(sp_model, precision)
-            print(f"   Calibration status: {calibrated} calibrated, {uncalibrated} uncalibrated")
+            frozen, unfrozen = check_quantizer_status(sp_model, precision)
+            print(f"   Stats status: {frozen} frozen, {unfrozen} unfrozen")
 
         # Evaluate
         sp_model.eval()
@@ -362,6 +373,78 @@ def verify_sp_linear_with_lora_structure():
     return True
 
 
+def test_two_pass_quantization():
+    """Test the two-pass quantization statistics collection."""
+    print("\n" + "="*80)
+    print("TWO-PASS QUANTIZATION TESTING")
+    print("="*80)
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # Load model
+    sp_model, sp_config = create_properly_initialized_model(use_pretrained=True, num_layers=2)  # Use 2 layers for speed
+    sp_model = sp_model.to(device)
+
+    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    tokenizer.pad_token = tokenizer.eos_token
+
+    # Test text
+    test_text = "The quick brown fox jumps over the lazy dog."
+    inputs = tokenizer(test_text, return_tensors='pt')
+    input_ids = inputs['input_ids'].to(device)
+
+    print("\n1. Testing Two-Pass System for 8-bit precision:")
+
+    # Set to 8-bit
+    sp_model.set_precision(8)
+    sp_model.eval()
+
+    # Pass 1: Collect statistics
+    print("   Pass 1: Starting statistics collection...")
+    sp_model.start_stats_collection()
+
+    # Run a few forward passes
+    with torch.no_grad():
+        for _ in range(3):
+            _ = sp_model(input_ids)
+
+    # Check that stats are not frozen during collection
+    first_module = sp_model.transformer.h[0].attn.c_attn
+    quantizer = first_module.quantizers_weight['8bit']
+    print(f"   During collection - stats_frozen: {quantizer.stats_frozen}")
+
+    # Stop collection (should freeze stats)
+    print("   Pass 1: Stopping statistics collection...")
+    sp_model.stop_stats_collection()
+
+    # Check that stats are frozen after collection
+    print(f"   After collection - stats_frozen: {quantizer.stats_frozen}")
+
+    # Get the scale/zero_point values
+    scale_before = quantizer.scale.clone() if quantizer.scale is not None else None
+    zero_before = quantizer.zero_point.clone() if quantizer.zero_point is not None else None
+
+    # Pass 2: Use frozen statistics
+    print("\n   Pass 2: Using frozen statistics...")
+    with torch.no_grad():
+        for i in range(3):
+            _ = sp_model(input_ids)
+
+            # Check scale/zero_point remain unchanged
+            if scale_before is not None:
+                scale_after = quantizer.scale
+                scale_changed = not torch.allclose(scale_before, scale_after)
+                print(f"   Forward pass {i+1} - Scale changed: {scale_changed}")
+
+    # Test unfreeze
+    print("\n2. Testing Statistics Unfreezing:")
+    sp_model.unfreeze_stats()
+    print(f"   After unfreeze - stats_frozen: {quantizer.stats_frozen}")
+
+    print("\n✅ Two-pass quantization test completed")
+    return True
+
+
 def main():
     """Main verification function."""
     print("\n" + "="*80)
@@ -379,6 +462,9 @@ def main():
 
     # Test 2: Precision mode testing
     precision_results = test_different_precision_modes()
+
+    # Test 3: Two-pass quantization
+    two_pass_ok = test_two_pass_quantization()
 
     # Summary
     print("\n" + "="*80)
