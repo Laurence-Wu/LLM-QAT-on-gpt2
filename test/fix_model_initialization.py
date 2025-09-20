@@ -13,7 +13,7 @@ from transformers import GPT2Config
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.models_sp import SPLMHeadModel
-from part1_switchable_precision.config_sp import ModelConfig as SPConfig
+from part1_switchable_precision.config_sp import ModelConfig
 
 
 def create_properly_initialized_model(use_pretrained=True, num_layers=None):
@@ -26,11 +26,11 @@ def create_properly_initialized_model(use_pretrained=True, num_layers=None):
 
     Returns:
         model: Initialized SPLMHeadModel
-        config: SPConfig object
+        config: ModelConfig object
     """
 
     # Create SP config
-    sp_config = SPConfig()
+    sp_config = ModelConfig()
 
     # Override number of layers if specified (for memory-limited testing)
     if num_layers is not None:
