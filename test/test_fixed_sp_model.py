@@ -10,11 +10,101 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
+import gc
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from test.fix_model_initialization import create_properly_initialized_model
+
+
+def get_memory_info(stage_name=""):
+    """Get current memory usage information."""
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated() / (1024**3)  # GB
+        reserved = torch.cuda.memory_reserved() / (1024**3)    # GB
+        max_allocated = torch.cuda.max_memory_allocated() / (1024**3)  # GB
+
+        print(f"\n📊 Memory Status - {stage_name}")
+        print(f"   Allocated: {allocated:.3f} GB")
+        print(f"   Reserved:  {reserved:.3f} GB")
+        print(f"   Max Used:  {max_allocated:.3f} GB")
+
+        # Get more detailed info
+        if allocated > 10:  # If using more than 10GB, show details
+            print("\n   ⚠️ High memory usage detected! Analyzing...")
+            # Force garbage collection
+            gc.collect()
+            torch.cuda.empty_cache()
+
+            new_allocated = torch.cuda.memory_allocated() / (1024**3)
+            print(f"   After cleanup: {new_allocated:.3f} GB")
+
+            if new_allocated > allocated * 0.9:
+                print("   ❌ Memory not freed by garbage collection - likely held by model")
+
+        return allocated
+    else:
+        import psutil
+        process = psutil.Process()
+        mem_info = process.memory_info()
+        print(f"\n📊 Memory Status - {stage_name}")
+        print(f"   RAM Used: {mem_info.rss / (1024**3):.3f} GB")
+        return mem_info.rss / (1024**3)
+
+
+def count_model_parameters(model, stage_name=""):
+    """Count and display model parameters."""
+    total_params = 0
+    trainable_params = 0
+
+    print(f"\n🔢 Parameter Count - {stage_name}")
+
+    # Count parameters by module type
+    param_by_type = {}
+
+    for name, param in model.named_parameters():
+        total_params += param.numel()
+        if param.requires_grad:
+            trainable_params += param.numel()
+
+        # Categorize by module type
+        if 'lora' in name.lower():
+            key = 'LoRA'
+        elif 'quantizer' in name.lower():
+            key = 'Quantizer'
+        elif 'wte' in name or 'wpe' in name:
+            key = 'Embeddings'
+        elif 'ln' in name:
+            key = 'LayerNorm'
+        else:
+            key = 'Linear'
+
+        if key not in param_by_type:
+            param_by_type[key] = 0
+        param_by_type[key] += param.numel()
+
+    print(f"   Total parameters: {total_params:,}")
+    print(f"   Trainable parameters: {trainable_params:,}")
+    print(f"   Parameter memory: {total_params * 4 / (1024**3):.3f} GB (FP32)")
+
+    print("\n   Parameters by type:")
+    for key, count in param_by_type.items():
+        print(f"     {key}: {count:,} ({count * 4 / (1024**3):.3f} GB)")
+
+    # Count buffers (quantizer statistics)
+    total_buffers = 0
+    buffer_count = 0
+    for name, buffer in model.named_buffers():
+        if buffer is not None:
+            total_buffers += buffer.numel()
+            buffer_count += 1
+
+    if buffer_count > 0:
+        print(f"\n   Buffers: {buffer_count} buffers, {total_buffers:,} elements")
+        print(f"   Buffer memory: {total_buffers * 4 / (1024**3):.3f} GB")
+
+    return total_params
 
 
 def calibrate_with_two_pass(sp_model, tokenizer, device):
