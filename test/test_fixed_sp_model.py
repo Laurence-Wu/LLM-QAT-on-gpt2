@@ -259,14 +259,14 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
     return True
 
 
-def test_16bit_equivalence(sp_model, gpt2_model, tokenizer, device):
-    """Test 1: Verify 16-bit matches GPT-2 exactly"""
+def test_32bit_equivalence(sp_model, gpt2_model, tokenizer, device):
+    """Test 1: Verify 32-bit teacher matches GPT-2 exactly"""
     print("\n" + "="*60)
-    print("TEST 1: 16-BIT GPT-2 EQUIVALENCE")
+    print("TEST 1: 32-BIT TEACHER GPT-2 EQUIVALENCE")
     print("="*60)
 
-    # ==== EVALUATION STAGE: 16-bit Testing ====
-    sp_model.set_precision(16)
+    # ==== EVALUATION STAGE: 32-bit Teacher Testing ====
+    sp_model.set_precision(32)
 
     # CRITICAL: Both models MUST be in EVAL mode for fair comparison
     sp_model.eval()
@@ -390,12 +390,12 @@ def test_quantization_degradation(sp_model, tokenizer, device):
     results = {}
 
     # Need to calibrate each precision separately since set_precision resets calibration
-    for precision in [16, 8, 4]:
+    for precision in [32, 16, 8, 4]:  # Include 32-bit teacher
         sp_model.set_precision(precision)
         print(f"\n   Testing {precision}-bit precision...")
 
-        # Calibrate for non-16-bit precisions
-        if precision < 16:
+        # Calibrate for student precisions (all except 32-bit)
+        if precision < 32:
             # ==== TRAINING STAGE: Calibration ====
             print(f"      📈 TRAINING STAGE: Calibrating {precision}-bit quantizers...")
 
@@ -547,7 +547,7 @@ def test_lora_behavior(sp_model, tokenizer, device):
     lora_contributions = {}
 
     with torch.no_grad():
-        for precision in [16, 8, 4]:
+        for precision in [32, 16, 8, 4]:  # Include 32-bit teacher
             sp_model.set_precision(precision)
 
             # Count enabled LoRA layers for the CURRENT precision only
@@ -586,15 +586,23 @@ def test_lora_behavior(sp_model, tokenizer, device):
     # Analysis
     print(f"\n📊 LORA ANALYSIS:")
 
-    if lora_contributions[16]['enabled'] == 0:
-        print("   ✅ 16-bit: LoRA properly disabled")
+    # 32-bit teacher should have LoRA disabled
+    if lora_contributions[32]['enabled'] == 0:
+        print("   ✅ 32-bit (teacher): LoRA properly disabled")
     else:
-        print("   ❌ 16-bit: LoRA should be disabled!")
+        print("   ❌ 32-bit (teacher): LoRA should be disabled!")
 
-    if lora_contributions[8]['enabled'] > 0 and lora_contributions[4]['enabled'] > 0:
-        print("   ✅ 8/4-bit: LoRA properly enabled for quantization compensation")
+    # 16-bit student should have LoRA enabled for distillation
+    if lora_contributions[16]['enabled'] > 0:
+        print("   ✅ 16-bit (student): LoRA properly enabled for distillation")
     else:
-        print("   ⚠️ 8/4-bit: LoRA may not be working correctly")
+        print("   ❌ 16-bit (student): LoRA should be enabled!")
+
+    # 8/4-bit students should have LoRA enabled
+    if lora_contributions[8]['enabled'] > 0 and lora_contributions[4]['enabled'] > 0:
+        print("   ✅ 8/4-bit (students): LoRA properly enabled for quantization compensation")
+    else:
+        print("   ⚠️ 8/4-bit (students): LoRA may not be working correctly")
 
     return lora_contributions
 
@@ -1073,8 +1081,8 @@ def run_comprehensive_test():
     test_results = {}
 
     try:
-        # Test 1: 16-bit equivalence
-        test_results['equivalence'] = test_16bit_equivalence(
+        # Test 1: 32-bit teacher equivalence
+        test_results['equivalence'] = test_32bit_equivalence(
             sp_model, gpt2_model, tokenizer, device
         )
         if torch.cuda.is_available():
@@ -1132,10 +1140,10 @@ def run_comprehensive_test():
 
     # Assess each test
     if test_results['equivalence']['ppl_status'] in ['excellent', 'good']:
-        print("✅ Test 1 (16-bit equivalence): PASSED")
+        print("✅ Test 1 (32-bit teacher equivalence): PASSED")
         passed_tests += 1
     else:
-        print("❌ Test 1 (16-bit equivalence): FAILED")
+        print("❌ Test 1 (32-bit teacher equivalence): FAILED")
 
     # Check degradation results - handle both old and new format
     degradation = test_results.get('degradation', {})

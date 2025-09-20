@@ -259,50 +259,50 @@ class SPLinearWithLoRA(nn.Module):
         input_quantizer = self.quantizers_input[bits_key]
         active_lora = self.lora_adapters[bits_key]
 
-        # DEBUG: Check quantizer state before calling (print once per precision change)
-        try:
-            if self._last_logged_bits != self.current_bits:
-                raise AttributeError  # Force print on precision change
-        except AttributeError:
-            self._last_logged_bits = self.current_bits
-            print(f"\nDEBUG SPLinearWithLoRA.forward():")
-            print(f"  current_bits: {self.current_bits}")
-            print(f"  bits_key: {bits_key}")
-            print(f"  weight_quantizer.num_bits: {weight_quantizer.num_bits}")
-            print(f"  weight_quantizer.training: {weight_quantizer.training}")
-            print(f"  weight_quantizer.calibrated (before): {weight_quantizer.calibrated}")
-            print(f"  weight_quantizer.collecting_stats: {weight_quantizer.collecting_stats}")
-            print(f"  input_quantizer.num_bits: {input_quantizer.num_bits}")
-            print(f"  input_quantizer.calibrated (before): {input_quantizer.calibrated}")
-            print(f"  input_quantizer.collecting_stats: {input_quantizer.collecting_stats}")
+        # # DEBUG: Check quantizer state before calling (print once per precision change)
+        # try:
+        #     if self._last_logged_bits != self.current_bits:
+        #         raise AttributeError  # Force print on precision change
+        # except AttributeError:
+        #     self._last_logged_bits = self.current_bits
+        #     print(f"\nDEBUG SPLinearWithLoRA.forward():")
+        #     print(f"  current_bits: {self.current_bits}")
+        #     print(f"  bits_key: {bits_key}")
+        #     print(f"  weight_quantizer.num_bits: {weight_quantizer.num_bits}")
+        #     print(f"  weight_quantizer.training: {weight_quantizer.training}")
+        #     print(f"  weight_quantizer.calibrated (before): {weight_quantizer.calibrated}")
+        #     print(f"  weight_quantizer.collecting_stats: {weight_quantizer.collecting_stats}")
+        #     print(f"  input_quantizer.num_bits: {input_quantizer.num_bits}")
+        #     print(f"  input_quantizer.calibrated (before): {input_quantizer.calibrated}")
+        #     print(f"  input_quantizer.collecting_stats: {input_quantizer.collecting_stats}")
 
         # Quantize inputs and weights
         x_quantized = input_quantizer(x)
         weight_quantized = weight_quantizer(self.linear.weight)
 
-        # DEBUG: Check if calibration happened and values are valid
-        try:
-            if self._calib_logged_bits != self.current_bits:
-                raise AttributeError  # Force print on precision change
-        except AttributeError:
-            self._calib_logged_bits = self.current_bits
-            print(f"  weight_quantizer.calibrated (after): {weight_quantizer.calibrated}")
-            print(f"  input_quantizer.calibrated (after): {input_quantizer.calibrated}")
-            # These should always have scale attribute
-            print(f"  weight_quantizer.scale shape: {weight_quantizer.scale.shape}")
-            print(f"  weight_quantizer.scale mean: {weight_quantizer.scale.mean().item():.6f}")
-            print(f"  input_quantizer.scale shape: {input_quantizer.scale.shape}")
-            print(f"  input_quantizer.scale mean: {input_quantizer.scale.mean().item():.6f}")
+        # # DEBUG: Check if calibration happened and values are valid
+        # try:
+        #     if self._calib_logged_bits != self.current_bits:
+        #         raise AttributeError  # Force print on precision change
+        # except AttributeError:
+        #     self._calib_logged_bits = self.current_bits
+        #     print(f"  weight_quantizer.calibrated (after): {weight_quantizer.calibrated}")
+        #     print(f"  input_quantizer.calibrated (after): {input_quantizer.calibrated}")
+        #     # These should always have scale attribute
+        #     print(f"  weight_quantizer.scale shape: {weight_quantizer.scale.shape}")
+        #     print(f"  weight_quantizer.scale mean: {weight_quantizer.scale.mean().item():.6f}")
+        #     print(f"  input_quantizer.scale shape: {input_quantizer.scale.shape}")
+        #     print(f"  input_quantizer.scale mean: {input_quantizer.scale.mean().item():.6f}")
 
-            # Check for NaN/Inf
-            if torch.isnan(x_quantized).any():
-                print(f"  WARNING: NaN detected in x_quantized!")
-            if torch.isinf(x_quantized).any():
-                print(f"  WARNING: Inf detected in x_quantized!")
-            if torch.isnan(weight_quantized).any():
-                print(f"  WARNING: NaN detected in weight_quantized!")
-            if torch.isinf(weight_quantized).any():
-                print(f"  WARNING: Inf detected in weight_quantized!")
+        #     # Check for NaN/Inf
+        #     if torch.isnan(x_quantized).any():
+        #         print(f"  WARNING: NaN detected in x_quantized!")
+        #     if torch.isinf(x_quantized).any():
+        #         print(f"  WARNING: Inf detected in x_quantized!")
+        #     if torch.isnan(weight_quantized).any():
+        #         print(f"  WARNING: NaN detected in weight_quantized!")
+        #     if torch.isinf(weight_quantized).any():
+        #         print(f"  WARNING: Inf detected in weight_quantized!")
 
         # Base computation with quantized values
         base_output = F.linear(x_quantized, weight_quantized, self.linear.bias)
