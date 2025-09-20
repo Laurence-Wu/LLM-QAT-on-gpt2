@@ -16,6 +16,7 @@ import gc
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from test.fix_model_initialization import create_properly_initialized_model
+from shared.quantization import LearnableFakeQuantize
 
 
 def get_memory_info(stage_name=""):
@@ -119,21 +120,18 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
         "Natural language processing enables computers to understand human language.",
     ]
 
-    # Set to training mode for calibration (required for automatic two-pass)
-    sp_model.train()
-
-    # Calibrate each bit-width using two-pass
+    # Calibrate each bit-width using manual calibration
     for bits in [4, 8]:  # Skip 16-bit (no quantization needed)
         print(f"\n📊 Calibrating {bits}-bit mode...")
         sp_model.set_precision(bits)
 
-        # The quantizers will automatically handle two-pass internally in training mode
-        # Just run forward passes and the quantizers will collect stats automatically
-        print(f"  Running calibration for {bits}-bit...")
+        # Start manual calibration for all quantizers
+        print(f"  Starting calibration for {bits}-bit...")
+        for module in sp_model.modules():
+            if isinstance(module, LearnableFakeQuantize) and module.num_bits == bits:
+                module.start_calibration()
 
-        # Need to be in training mode for automatic two-pass to work
-        sp_model.train()
-
+        # Collect statistics
         with torch.no_grad():
             for i, text in enumerate(calibration_texts):
                 tokens = tokenizer(
@@ -144,14 +142,20 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
                     padding=False
                 )['input_ids'].to(device)
 
-                # Forward pass - quantizers handle statistics automatically
+                # Forward pass to collect statistics
                 _ = sp_model(tokens)
 
                 if (i + 1) % 4 == 0:
                     print(f"    Processed {i + 1}/{len(calibration_texts)} samples")
 
+        # Finish calibration for all quantizers
+        for module in sp_model.modules():
+            if isinstance(module, LearnableFakeQuantize) and module.num_bits == bits:
+                module.finish_calibration()
+
         # Test with calibrated model
         print(f"  Testing calibrated {bits}-bit model...")
+        sp_model.eval()
         with torch.no_grad():
             test_text = calibration_texts[0]
             tokens = tokenizer(test_text, return_tensors='pt')['input_ids'].to(device)
@@ -161,9 +165,6 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
             print(f"    Test loss: {loss:.4f}, PPL: {ppl:.2f}")
 
         print(f"  ✅ {bits}-bit calibration complete")
-
-    # Set back to eval mode for testing
-    sp_model.eval()
 
     # Reset to 16-bit
     sp_model.set_precision(16)
@@ -323,18 +324,41 @@ def test_quantization_degradation(sp_model, tokenizer, device):
         "Cross-validation prevents overfitting by evaluating model generalization.",
     ]
 
-    sp_model.eval()
-
     results = {}
 
-    with torch.no_grad():
-        for precision in [16, 8, 4]:
-            sp_model.set_precision(precision)
-            print(f"\n   Testing {precision}-bit precision...")
+    # Need to calibrate each precision separately since set_precision resets calibration
+    for precision in [16, 8, 4]:
+        sp_model.set_precision(precision)
+        print(f"\n   Testing {precision}-bit precision...")
 
-            losses = []
-            perplexities = []
+        # Calibrate for non-16-bit precisions
+        if precision < 16:
+            print(f"      Calibrating {precision}-bit quantizers...")
 
+            # Start manual calibration for quantizers at this precision
+            for module in sp_model.modules():
+                if isinstance(module, LearnableFakeQuantize) and module.num_bits == precision:
+                    module.start_calibration()
+
+            with torch.no_grad():
+                # Use first few sentences for calibration
+                for i in range(min(5, len(test_sentences))):
+                    inputs = tokenizer(test_sentences[i], return_tensors='pt')
+                    input_ids = inputs['input_ids'].to(device)
+                    _ = sp_model(input_ids)
+
+            # Finish calibration
+            for module in sp_model.modules():
+                if isinstance(module, LearnableFakeQuantize) and module.num_bits == precision:
+                    module.finish_calibration()
+
+            print(f"      Calibration complete")
+
+        # Now test with calibrated model
+        losses = []
+        perplexities = []
+
+        with torch.no_grad():
             for i, sentence in enumerate(test_sentences):
                 inputs = tokenizer(sentence, return_tensors='pt')
                 input_ids = inputs['input_ids'].to(device)
@@ -505,21 +529,18 @@ def test_quantizer_activation(sp_model, tokenizer, device):
         "Deep neural networks process information efficiently."
     ]
 
-    # Start in training mode for calibration
-    sp_model.train()
-
     # Test each precision level
     quantization_results = {}
 
     for bits in [4, 8]:  # Skip 16-bit (no quantization)
-        print(f"\n🔧 Testing {bits}-bit precision with two-pass:")
+        print(f"\n🔧 Testing {bits}-bit precision:")
         sp_model.set_precision(bits)
 
-        # Ensure we're in training mode for automatic two-pass calibration
-        sp_model.train()
-
-        # Run calibration - quantizers handle two-pass automatically
+        # Start manual calibration
         print(f"   Running calibration...")
+        for module in sp_model.modules():
+            if isinstance(module, LearnableFakeQuantize) and module.num_bits == bits:
+                module.start_calibration()
 
         with torch.no_grad():
             for text in test_inputs:
@@ -527,9 +548,14 @@ def test_quantizer_activation(sp_model, tokenizer, device):
                 input_ids = inputs['input_ids'].to(device)
                 _ = sp_model(input_ids)
 
+        # Finish calibration
+        for module in sp_model.modules():
+            if isinstance(module, LearnableFakeQuantize) and module.num_bits == bits:
+                module.finish_calibration()
+
         print(f"   Calibration complete")
 
-        # Set to eval mode after calibration is done
+        # Set to eval mode for testing
         sp_model.eval()
 
         # Check quantizer state after calibration

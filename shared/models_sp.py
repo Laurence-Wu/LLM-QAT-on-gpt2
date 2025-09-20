@@ -41,7 +41,6 @@ class SPAttention(nn.Module):
                 "Example: config.lora_rank_per_bit = {4: 8, 8: 16, 16: 32}"
             )
         lora_dropout = getattr(config, 'lora_dropout', 0.1)
-        gradient_accumulation_steps = getattr(config, 'gradient_accumulation_steps', 8)
 
         # Switchable layers with per-bit-width LoRA modules
         self.c_attn = SPLinearWithLoRA(
@@ -49,16 +48,14 @@ class SPAttention(nn.Module):
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
-            lora_dropout=lora_dropout,
-            gradient_accumulation_steps=gradient_accumulation_steps
+            lora_dropout=lora_dropout
         )
         self.c_proj = SPLinearWithLoRA(
             config.n_embd, config.n_embd,
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
-            lora_dropout=lora_dropout,
-            gradient_accumulation_steps=gradient_accumulation_steps
+            lora_dropout=lora_dropout
         )
 
         # KV cache quantizer - use median bit width as default
@@ -125,7 +122,6 @@ class SPMLP(nn.Module):
                 "Required: lora_rank_per_bit, lora_alpha_per_bit"
             )
         lora_dropout = getattr(config, 'lora_dropout', 0.1)
-        gradient_accumulation_steps = getattr(config, 'gradient_accumulation_steps', 8)
 
         # Switchable layers with per-bit-width LoRA modules
         self.c_fc = SPLinearWithLoRA(
@@ -133,16 +129,14 @@ class SPMLP(nn.Module):
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
-            lora_dropout=lora_dropout,
-            gradient_accumulation_steps=gradient_accumulation_steps
+            lora_dropout=lora_dropout
         )
         self.c_proj = SPLinearWithLoRA(
             4 * config.n_embd, config.n_embd,
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
-            lora_dropout=lora_dropout,
-            gradient_accumulation_steps=gradient_accumulation_steps
+            lora_dropout=lora_dropout
         )
         self.act = nn.GELU()
 

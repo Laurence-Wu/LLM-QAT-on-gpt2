@@ -147,8 +147,7 @@ class SPLinearWithLoRA(nn.Module):
                  bit_widths=[4, 8, 16],
                  lora_rank_per_bit={4: 32, 8: 16, 16: 8},
                  lora_alpha_per_bit={4: 64, 8: 32, 16: 16},
-                 lora_dropout=0.1,
-                 gradient_accumulation_steps=8):
+                 lora_dropout=0.1):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -158,13 +157,13 @@ class SPLinearWithLoRA(nn.Module):
         # FP32 base layer (shared across all bit-widths)
         self.linear = nn.Linear(in_features, out_features, bias=bias)
 
-        # Create separate quantizers for each bit-width with gradient_accumulation_steps
+        # Create separate quantizers for each bit-width
         self.quantizers_weight = nn.ModuleDict({
-            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True, gradient_accumulation_steps=gradient_accumulation_steps)
+            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True)
             for bits in bit_widths
         })
         self.quantizers_input = nn.ModuleDict({
-            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True, gradient_accumulation_steps=gradient_accumulation_steps)
+            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True)
             for bits in bit_widths
         })
 
@@ -246,9 +245,12 @@ class SPLinearWithLoRA(nn.Module):
         input_quantizer = self.quantizers_input[bits_key]
         active_lora = self.lora_adapters[bits_key]
 
-        # DEBUG: Check quantizer state before calling
-        if not hasattr(self, '_debug_logged'):
-            self._debug_logged = True
+        # DEBUG: Check quantizer state before calling (print once per precision change)
+        try:
+            if self._last_logged_bits != self.current_bits:
+                raise AttributeError  # Force print on precision change
+        except AttributeError:
+            self._last_logged_bits = self.current_bits
             print(f"\nDEBUG SPLinearWithLoRA.forward():")
             print(f"  current_bits: {self.current_bits}")
             print(f"  bits_key: {bits_key}")
@@ -263,16 +265,18 @@ class SPLinearWithLoRA(nn.Module):
         weight_quantized = weight_quantizer(self.linear.weight)
 
         # DEBUG: Check if calibration happened and values are valid
-        if not hasattr(self, '_calib_logged'):
-            self._calib_logged = True
+        try:
+            if self._calib_logged_bits != self.current_bits:
+                raise AttributeError  # Force print on precision change
+        except AttributeError:
+            self._calib_logged_bits = self.current_bits
             print(f"  weight_quantizer.calibrated (after): {weight_quantizer.calibrated}")
             print(f"  input_quantizer.calibrated (after): {input_quantizer.calibrated}")
-            if hasattr(weight_quantizer, 'scale'):
-                print(f"  weight_quantizer.scale shape: {weight_quantizer.scale.shape}")
-                print(f"  weight_quantizer.scale mean: {weight_quantizer.scale.mean().item():.6f}")
-            if hasattr(input_quantizer, 'scale'):
-                print(f"  input_quantizer.scale shape: {input_quantizer.scale.shape}")
-                print(f"  input_quantizer.scale mean: {input_quantizer.scale.mean().item():.6f}")
+            # These should always have scale attribute
+            print(f"  weight_quantizer.scale shape: {weight_quantizer.scale.shape}")
+            print(f"  weight_quantizer.scale mean: {weight_quantizer.scale.mean().item():.6f}")
+            print(f"  input_quantizer.scale shape: {input_quantizer.scale.shape}")
+            print(f"  input_quantizer.scale mean: {input_quantizer.scale.mean().item():.6f}")
 
             # Check for NaN/Inf
             if torch.isnan(x_quantized).any():

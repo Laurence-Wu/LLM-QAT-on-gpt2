@@ -31,7 +31,7 @@ class QuantizationFunction(torch.autograd.Function):
         return grad_input, None, None, None, None
 
 class LearnableFakeQuantize(nn.Module):
-    def __init__(self, num_bits=8, symmetric=True, per_channel=False, channel_dim=0, gradient_accumulation_steps=8):
+    def __init__(self, num_bits=8, symmetric=True, per_channel=False, channel_dim=0):
         super().__init__()
         self.num_bits = max(1, min(num_bits, 32))  # Clamp to valid range
         self.symmetric = symmetric
@@ -51,18 +51,13 @@ class LearnableFakeQuantize(nn.Module):
 
         self.calibrated = False  # Should be False initially, will be set True after first calibration
 
-        # Two-pass mode support
-        self.collecting_stats = False  # True during Pass 1 (statistics collection)
-        self.stats_frozen = False  # True during Pass 2 (fixed parameters)
+        # Manual calibration mode support
+        self.collecting_stats = False  # True during calibration
         self.num_batches_collected = 0
 
-        # Temporary statistics for two-pass mode (NOT registered as buffers to save memory)
+        # Temporary statistics for calibration (NOT registered as buffers to save memory)
         self.temp_min = None  # Will be created only when needed
         self.temp_max = None  # Will be created only when needed
-
-        # Auto two-pass configuration
-        self.gradient_accumulation_steps = gradient_accumulation_steps
-        self.forward_counter = 0  # Counts forward passes
 
     def set_num_bits(self, value):
         """Update num_bits and recalculate quantization ranges."""
@@ -79,6 +74,42 @@ class LearnableFakeQuantize(nn.Module):
             # self.running_min.zero_()
             # self.running_max.zero_()
 
+    def start_calibration(self):
+        """Start calibration mode."""
+        self.collecting_stats = True
+        self.calibrated = False
+        self.num_batches_collected = 0
+        self.temp_min = None
+        self.temp_max = None
+
+    def finish_calibration(self):
+        """Finish calibration and compute final scale/zero_point."""
+        if self.num_batches_collected > 0 and self.temp_min is not None:
+            # Move temp stats to running stats
+            self.running_min.resize_as_(self.temp_min).copy_(self.temp_min)
+            self.running_max.resize_as_(self.temp_max).copy_(self.temp_max)
+
+            # Compute scale and zero_point
+            with torch.no_grad():
+                if self.symmetric:
+                    abs_max = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
+                    abs_max = torch.clamp(abs_max, min=self.eps)
+                    self.scale.resize_as_(abs_max).copy_(abs_max / (2**(self.num_bits-1) - 1))
+                    self.zero_point.resize_as_(abs_max).zero_()
+                else:
+                    range_val = torch.clamp(self.running_max - self.running_min, min=self.eps)
+                    self.scale.resize_as_(range_val).copy_(range_val / (2**self.num_bits - 1))
+                    self.zero_point.resize_as_(range_val)
+                    self.zero_point.copy_(torch.round(self.quant_min - self.running_min / self.scale))
+
+            self.calibrated = True
+            self.collecting_stats = False
+            # Clear temp buffers
+            self.temp_min = None
+            self.temp_max = None
+        else:
+            # If no statistics collected, just turn off collection mode
+            self.collecting_stats = False
 
     def _collect_statistics_batch(self, x):
         """Collect min/max statistics for current batch (Pass 1)."""
@@ -149,162 +180,54 @@ class LearnableFakeQuantize(nn.Module):
             self.quant_max = 2 ** (self.num_bits - 1) - 1
     
     def forward(self, x):
-        # Pass through for high precision modes (16-bit and above)
-        # 16-bit provides sufficient precision without quantization artifacts
+        # Skip quantization for 16-bit and above
         if self.num_bits >= 16:
             return x
 
-        # Automatic two-pass mode in training
-        if self.training:
-            self.forward_counter += 1
-
-            # Pass 1: Collect statistics for gradient_accumulation_steps batches
-            if self.forward_counter <= self.gradient_accumulation_steps:
-                if not self.collecting_stats:
-                    # Start Pass 1
-                    self.collecting_stats = True
-                    self.stats_frozen = False
-                    self.num_batches_collected = 0
-                    self.temp_min = None
-                    self.temp_max = None
-
-                # Collect statistics
-                self._collect_statistics_batch(x)
-
-                # Check if Pass 1 is complete
-                if self.forward_counter == self.gradient_accumulation_steps:
-                    # End Pass 1: Compute scale/zero_point and freeze them
-                    if self.num_batches_collected > 0 and self.temp_min is not None:
-                        # Copy statistics to running buffers
-                        with torch.no_grad():
-                            self.running_min.resize_as_(self.temp_min).copy_(self.temp_min)
-                            self.running_max.resize_as_(self.temp_max).copy_(self.temp_max)
-                            self._compute_scale_zero_point()
-                        self.calibrated = True
-                        self.stats_frozen = True
-                        # Clear temp buffers
-                        self.temp_min = None
-                        self.temp_max = None
-                    self.collecting_stats = False
-
-                return x  # Return original tensor during Pass 1
-
-            # Pass 2: Use frozen quantization parameters for next gradient_accumulation_steps
-            elif self.forward_counter <= 2 * self.gradient_accumulation_steps:
-                # Keep stats frozen during Pass 2
-                if self.forward_counter == 2 * self.gradient_accumulation_steps:
-                    # End Pass 2: Reset for next cycle
-                    self.stats_frozen = False
-                    self.forward_counter = 0
-                # Continue to quantization below
-            else:
-                # Should not reach here, reset counter
-                self.forward_counter = 0
-
-        # Two-pass mode: Pass 1 - Statistics Collection (manual mode for compatibility)
+        # MANUAL CALIBRATION MODE (controlled externally)
         if self.collecting_stats:
+            # Collect statistics during calibration
             self._collect_statistics_batch(x)
-            return x  # Return original tensor during collection
+            return x  # No quantization during calibration
 
-        # If uncalibrated in eval mode, do one-shot calibration on first input
-        if not self.calibrated and not self.training:
+        # If not calibrated, do one-shot calibration
+        if not self.calibrated:
             with torch.no_grad():
                 if self.per_channel:
-                    # Per-channel one-shot calibration
-                    dims_to_reduce = list(range(x.dim()))
-                    dims_to_reduce.remove(self.channel_dim)
-
-                    min_val = x
-                    max_val = x
-                    for dim in sorted(dims_to_reduce, reverse=True):
-                        min_val = min_val.min(dim=dim, keepdim=True)[0]
-                        max_val = max_val.max(dim=dim, keepdim=True)[0]
-
-                    self.running_min.resize_as_(min_val).copy_(min_val)
-                    self.running_max.resize_as_(max_val).copy_(max_val)
-                    self.scale.resize_as_(min_val)
-                    self.zero_point.resize_as_(min_val)
+                    dims = list(range(x.dim()))
+                    dims.remove(self.channel_dim)
+                    min_val = x.amin(dim=dims, keepdim=True)
+                    max_val = x.amax(dim=dims, keepdim=True)
                 else:
-                    # Per-tensor one-shot calibration
-                    self.running_min.copy_(x.min())
-                    self.running_max.copy_(x.max())
-
-                self.calibrated = True  # Mark as calibrated
-
-        if self.training and not self.stats_frozen and self.forward_counter == 0:
-            with torch.no_grad():  # Ensure no gradient tracking for statistics
-                if self.per_channel:
-                    # Per-channel statistics - calculate min/max along non-channel dimensions
-                    dims_to_reduce = list(range(x.dim()))
-                    dims_to_reduce.remove(self.channel_dim)
-
-                    # Calculate min/max by iteratively reducing dimensions
-                    min_val = x
-                    max_val = x
-                    for dim in sorted(dims_to_reduce, reverse=True):  # Start from highest dim
-                        min_val = min_val.min(dim=dim, keepdim=True)[0]
-                        max_val = max_val.max(dim=dim, keepdim=True)[0]
-
-                    # Use in-place operations to avoid creating new tensors
-                    if not self.calibrated:
-                        # Resize buffers and copy values
-                        self.running_min.resize_as_(min_val).copy_(min_val)
-                        self.running_max.resize_as_(max_val).copy_(max_val)
-                        self.scale.resize_as_(min_val).fill_(1.0)
-                        self.zero_point.resize_as_(min_val).zero_()
-                        self.calibrated = True
-                    else:
-                        # In-place exponential moving average update
-                        self.running_min.mul_(0.9).add_(min_val, alpha=0.1)
-                        self.running_max.mul_(0.9).add_(max_val, alpha=0.1)
-                else:
-                    # Per-tensor statistics
                     min_val = x.min()
                     max_val = x.max()
 
-                    if not self.calibrated:
-                        # Direct assignment for scalars
-                        self.running_min.copy_(min_val)
-                        self.running_max.copy_(max_val)
-                        self.calibrated = True
-                    else:
-                        # In-place exponential moving average update
-                        self.running_min.mul_(0.9).add_(min_val, alpha=0.1)
-                        self.running_max.mul_(0.9).add_(max_val, alpha=0.1)
-        
-        # Only update scale and zero_point if not in frozen state (Pass 2)
-        if not self.stats_frozen and (self.calibrated or self.training):
-            with torch.no_grad():
-                if self.symmetric:
-                    # Paper formula: α = max(|X_R|)/(2^(N-1) - 1)
-                    max_val = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
-                    max_val = torch.clamp(max_val, min=self.eps)
-                    # In-place update of scale
-                    self.scale.copy_(max_val / (2**(self.num_bits-1) - 1))
-                    self.zero_point.zero_()  # In-place zero
-                else:
-                    range_val = torch.clamp(self.running_max - self.running_min, min=self.eps)
-                    denom = self.quant_max - self.quant_min
-                    if denom > 0:
-                        # In-place update of scale
-                        self.scale.copy_(range_val / denom)
-                        if torch.any(self.scale > 0):
-                            # In-place update of zero_point
-                            self.zero_point.copy_(torch.round(self.quant_min - self.running_min / self.scale))
-                        else:
-                            self.zero_point.zero_()
-                    else:
-                        self.scale.fill_(1.0)
-                        self.zero_point.zero_()
+                self.running_min.resize_as_(min_val).copy_(min_val)
+                self.running_max.resize_as_(max_val).copy_(max_val)
 
-        # Scale and zero_point are already registered buffers, so they're on the right device
-        # Just use them directly without creating new tensors
-        return QuantizationFunction.apply(x, self.scale, self.zero_point,
-                                         self.num_bits, self.symmetric)
+                # Compute scale and zero_point immediately
+                if self.symmetric:
+                    abs_max = torch.max(torch.abs(min_val), torch.abs(max_val))
+                    abs_max = torch.clamp(abs_max, min=self.eps)
+                    self.scale.resize_as_(abs_max).copy_(abs_max / (2**(self.num_bits-1) - 1))
+                    self.zero_point.resize_as_(abs_max).zero_()
+                else:
+                    range_val = torch.clamp(max_val - min_val, min=self.eps)
+                    self.scale.resize_as_(range_val).copy_(range_val / (2**self.num_bits - 1))
+                    self.zero_point.resize_as_(range_val)
+                    self.zero_point.copy_(torch.round(self.quant_min - min_val / self.scale))
+
+                self.calibrated = True
+
+        # Apply quantization with current scale/zero_point
+        return QuantizationFunction.apply(
+            x, self.scale, self.zero_point,
+            self.num_bits, self.symmetric
+        )
 
 class QuantizedLinear(nn.Module):
     def __init__(self, in_features, out_features, bias=True,
-                 weight_bits=8, activation_bits=8, gradient_accumulation_steps=8):
+                 weight_bits=8, activation_bits=8):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -316,8 +239,8 @@ class QuantizedLinear(nn.Module):
             self.register_parameter('bias', None)
 
         # Per-channel weight quantization, per-token activation quantization (paper approach)
-        self.weight_quantizer = LearnableFakeQuantize(weight_bits, symmetric=True, per_channel=True, channel_dim=0, gradient_accumulation_steps=gradient_accumulation_steps)
-        self.activation_quantizer = LearnableFakeQuantize(activation_bits, symmetric=True, gradient_accumulation_steps=gradient_accumulation_steps)  # Paper uses symmetric for both
+        self.weight_quantizer = LearnableFakeQuantize(weight_bits, symmetric=True, per_channel=True, channel_dim=0)
+        self.activation_quantizer = LearnableFakeQuantize(activation_bits, symmetric=True)  # Paper uses symmetric for both
         
     def forward(self, input):
         input_q = self.activation_quantizer(input)

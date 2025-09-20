@@ -80,7 +80,6 @@ def initialize_model(model_config, device):
 
     # Use switchable model if configured
     gpt2_config.bit_widths = model_config.bit_widths
-    gpt2_config.gradient_accumulation_steps = training_config.gradient_accumulation_steps
     model = SPLMHeadModel(gpt2_config)
 
 
