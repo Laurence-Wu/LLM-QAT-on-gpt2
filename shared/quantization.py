@@ -56,9 +56,9 @@ class LearnableFakeQuantize(nn.Module):
         self.stats_frozen = False  # True during Pass 2 (fixed parameters)
         self.num_batches_collected = 0
 
-        # Temporary statistics for two-pass mode
-        self.register_buffer('temp_min', torch.zeros(1))
-        self.register_buffer('temp_max', torch.zeros(1))
+        # Temporary statistics for two-pass mode (NOT registered as buffers to save memory)
+        self.temp_min = None  # Will be created only when needed
+        self.temp_max = None  # Will be created only when needed
 
     def set_num_bits(self, value):
         """Update num_bits and recalculate quantization ranges."""
@@ -80,13 +80,13 @@ class LearnableFakeQuantize(nn.Module):
         self.collecting_stats = True
         self.stats_frozen = False
         self.num_batches_collected = 0
-        # Reset temporary statistics
-        self.temp_min.zero_()
-        self.temp_max.zero_()
+        # Clear any existing temporary statistics to free memory
+        self.temp_min = None
+        self.temp_max = None
 
     def stop_stats_collection(self):
         """End Pass 1: Finalize statistics and compute quantization parameters."""
-        if self.collecting_stats and self.num_batches_collected > 0:
+        if self.collecting_stats and self.num_batches_collected > 0 and self.temp_min is not None:
             # Copy collected stats to running buffers
             self.running_min.resize_as_(self.temp_min).copy_(self.temp_min)
             self.running_max.resize_as_(self.temp_max).copy_(self.temp_max)
@@ -94,11 +94,17 @@ class LearnableFakeQuantize(nn.Module):
             self._compute_scale_zero_point()
             self.calibrated = True
             self.stats_frozen = True
+            # Clear temporary buffers to free memory
+            self.temp_min = None
+            self.temp_max = None
         self.collecting_stats = False
 
     def unfreeze_stats(self):
         """End Pass 2: Allow statistics to be updated again."""
         self.stats_frozen = False
+        # Clean up any temporary tensors
+        self.temp_min = None
+        self.temp_max = None
 
     def _collect_statistics_batch(self, x):
         """Collect min/max statistics for current batch (Pass 1)."""
@@ -115,9 +121,9 @@ class LearnableFakeQuantize(nn.Module):
                     max_val = max_val.max(dim=dim, keepdim=True)[0]
 
                 if self.num_batches_collected == 0:
-                    # First batch: initialize
-                    self.temp_min.resize_as_(min_val).copy_(min_val)
-                    self.temp_max.resize_as_(max_val).copy_(max_val)
+                    # First batch: create and initialize temporary tensors
+                    self.temp_min = min_val.clone().detach()
+                    self.temp_max = max_val.clone().detach()
                 else:
                     # Subsequent batches: track global min/max
                     self.temp_min = torch.minimum(self.temp_min, min_val)
@@ -128,8 +134,9 @@ class LearnableFakeQuantize(nn.Module):
                 max_val = x.max()
 
                 if self.num_batches_collected == 0:
-                    self.temp_min.copy_(min_val)
-                    self.temp_max.copy_(max_val)
+                    # First batch: create and initialize temporary tensors
+                    self.temp_min = min_val.clone().detach()
+                    self.temp_max = max_val.clone().detach()
                 else:
                     self.temp_min = torch.minimum(self.temp_min, min_val)
                     self.temp_max = torch.maximum(self.temp_max, max_val)
