@@ -103,64 +103,64 @@ def load_pretrained_weights(model):
 
     import torch.nn as nn
 
-    # Copy and freeze embeddings
+    # Copy embeddings - keep them TRAINABLE for the teacher
     model.transformer.wte.weight.data = pretrained.transformer.wte.weight.data.clone()
-    model.transformer.wte.weight.requires_grad = False  # Freeze token embeddings
+    model.transformer.wte.weight.requires_grad = True  # Keep embeddings trainable for teacher
 
     # Only copy the position embeddings we need (model might have fewer positions than pretrained)
     min_positions = min(model.transformer.wpe.weight.shape[0], pretrained.transformer.wpe.weight.shape[0])
     model.transformer.wpe.weight.data[:min_positions] = pretrained.transformer.wpe.weight.data[:min_positions].clone()
-    model.transformer.wpe.weight.requires_grad = False  # Freeze position embeddings
+    model.transformer.wpe.weight.requires_grad = True  # Keep position embeddings trainable for teacher
 
     if model.transformer.wpe.weight.shape[0] != pretrained.transformer.wpe.weight.shape[0]:
         print(f"Adjusted position embeddings from {pretrained.transformer.wpe.weight.shape[0]} to {model.transformer.wpe.weight.shape[0]}")
 
-    # Copy LM head weights (CRITICAL - this was missing!)
+    # Copy LM head weights - keep TRAINABLE for teacher
     model.lm_head.weight.data = pretrained.lm_head.weight.data.clone()
-    model.lm_head.weight.requires_grad = False  # Freeze LM head
+    model.lm_head.weight.requires_grad = True  # Keep LM head trainable for teacher
 
-    # Copy and freeze transformer blocks
+    # Copy transformer blocks - keep TRAINABLE for teacher
     for i in range(min(len(model.transformer.h), len(pretrained.transformer.h))):
-        # Layer normalizations - freeze after copying
+        # Layer normalizations - keep trainable
         model.transformer.h[i].ln_1.weight.data = pretrained.transformer.h[i].ln_1.weight.data.clone()
         model.transformer.h[i].ln_1.bias.data = pretrained.transformer.h[i].ln_1.bias.data.clone()
-        model.transformer.h[i].ln_1.weight.requires_grad = False
-        model.transformer.h[i].ln_1.bias.requires_grad = False
+        model.transformer.h[i].ln_1.weight.requires_grad = True
+        model.transformer.h[i].ln_1.bias.requires_grad = True
 
         model.transformer.h[i].ln_2.weight.data = pretrained.transformer.h[i].ln_2.weight.data.clone()
         model.transformer.h[i].ln_2.bias.data = pretrained.transformer.h[i].ln_2.bias.data.clone()
-        model.transformer.h[i].ln_2.weight.requires_grad = False
-        model.transformer.h[i].ln_2.bias.requires_grad = False
+        model.transformer.h[i].ln_2.weight.requires_grad = True
+        model.transformer.h[i].ln_2.bias.requires_grad = True
 
-        # Attention QKV weights - transpose and freeze
+        # Attention QKV weights - transpose and keep trainable
         model.transformer.h[i].attn.c_attn.linear.weight.data = pretrained.transformer.h[i].attn.c_attn.weight.data.t().contiguous()
         model.transformer.h[i].attn.c_attn.linear.bias.data = pretrained.transformer.h[i].attn.c_attn.bias.data.clone()
-        model.transformer.h[i].attn.c_attn.linear.weight.requires_grad = False
-        model.transformer.h[i].attn.c_attn.linear.bias.requires_grad = False
+        model.transformer.h[i].attn.c_attn.linear.weight.requires_grad = True
+        model.transformer.h[i].attn.c_attn.linear.bias.requires_grad = True
 
-        # Attention projection - transpose and freeze
+        # Attention projection - transpose and keep trainable
         model.transformer.h[i].attn.c_proj.linear.weight.data = pretrained.transformer.h[i].attn.c_proj.weight.data.t().contiguous()
         model.transformer.h[i].attn.c_proj.linear.bias.data = pretrained.transformer.h[i].attn.c_proj.bias.data.clone()
-        model.transformer.h[i].attn.c_proj.linear.weight.requires_grad = False
-        model.transformer.h[i].attn.c_proj.linear.bias.requires_grad = False
+        model.transformer.h[i].attn.c_proj.linear.weight.requires_grad = True
+        model.transformer.h[i].attn.c_proj.linear.bias.requires_grad = True
 
-        # MLP feedforward projection to higher dimension - transpose and freeze
+        # MLP feedforward projection to higher dimension - transpose and keep trainable
         model.transformer.h[i].mlp.c_fc.linear.weight.data = pretrained.transformer.h[i].mlp.c_fc.weight.data.t().contiguous()
         model.transformer.h[i].mlp.c_fc.linear.bias.data = pretrained.transformer.h[i].mlp.c_fc.bias.data.clone()
-        model.transformer.h[i].mlp.c_fc.linear.weight.requires_grad = False
-        model.transformer.h[i].mlp.c_fc.linear.bias.requires_grad = False
+        model.transformer.h[i].mlp.c_fc.linear.weight.requires_grad = True
+        model.transformer.h[i].mlp.c_fc.linear.bias.requires_grad = True
 
-        # MLP feedforward projection from higher dimension - transpose and freeze
+        # MLP feedforward projection from higher dimension - transpose and keep trainable
         model.transformer.h[i].mlp.c_proj.linear.weight.data = pretrained.transformer.h[i].mlp.c_proj.weight.data.t().contiguous()
         model.transformer.h[i].mlp.c_proj.linear.bias.data = pretrained.transformer.h[i].mlp.c_proj.bias.data.clone()
-        model.transformer.h[i].mlp.c_proj.linear.weight.requires_grad = False
-        model.transformer.h[i].mlp.c_proj.linear.bias.requires_grad = False
+        model.transformer.h[i].mlp.c_proj.linear.weight.requires_grad = True
+        model.transformer.h[i].mlp.c_proj.linear.bias.requires_grad = True
 
-    # Final layer normalization - freeze after copying
+    # Final layer normalization - keep trainable
     model.transformer.ln_f.weight.data = pretrained.transformer.ln_f.weight.data.clone()
     model.transformer.ln_f.bias.data = pretrained.transformer.ln_f.bias.data.clone()
-    model.transformer.ln_f.weight.requires_grad = False
-    model.transformer.ln_f.bias.requires_grad = False
+    model.transformer.ln_f.weight.requires_grad = True
+    model.transformer.ln_f.bias.requires_grad = True
 
     # LoRA initialization - TEMPORARY: Commenting out to preserve zero initialization
     # TODO: Revisit this initialization strategy after tests pass
