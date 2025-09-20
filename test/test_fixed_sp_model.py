@@ -299,11 +299,29 @@ def test_quantization_degradation(sp_model, tokenizer, device):
     print("TEST 2: QUANTIZATION DEGRADATION")
     print("="*60)
 
+    # More diverse test sentences for better PPL evaluation
     test_sentences = [
         "Machine learning algorithms process vast amounts of data.",
         "Natural language processing enables human-computer interaction.",
         "Deep learning models require substantial computational resources.",
-    ]  # Reduced for memory efficiency
+        "Artificial intelligence is transforming various industries rapidly.",
+        "Neural networks mimic the structure of human brain connections.",
+        "Computer vision systems can identify objects in images accurately.",
+        "Data science combines statistics, programming, and domain expertise.",
+        "Reinforcement learning agents learn through trial and error.",
+        "Transformers revolutionized the field of natural language processing.",
+        "Gradient descent optimizes neural network parameters iteratively.",
+        "Convolutional layers extract features from image data effectively.",
+        "Recurrent networks process sequential data with temporal dependencies.",
+        "Attention mechanisms help models focus on relevant information.",
+        "Transfer learning leverages pre-trained models for new tasks.",
+        "Generative models create new data samples from learned distributions.",
+        "Supervised learning requires labeled training data for predictions.",
+        "Unsupervised learning discovers patterns without explicit labels.",
+        "Semi-supervised methods combine labeled and unlabeled data efficiently.",
+        "Feature engineering improves machine learning model performance.",
+        "Cross-validation prevents overfitting by evaluating model generalization.",
+    ]
 
     sp_model.eval()
 
@@ -312,36 +330,76 @@ def test_quantization_degradation(sp_model, tokenizer, device):
     with torch.no_grad():
         for precision in [16, 8, 4]:
             sp_model.set_precision(precision)
+            print(f"\n   Testing {precision}-bit precision...")
 
             losses = []
-            for sentence in test_sentences:
+            perplexities = []
+
+            for i, sentence in enumerate(test_sentences):
                 inputs = tokenizer(sentence, return_tensors='pt')
                 input_ids = inputs['input_ids'].to(device)
 
                 outputs = sp_model(input_ids, labels=input_ids)
                 loss = outputs['loss'].item()
+                ppl = np.exp(loss)
+
                 losses.append(loss)
+                perplexities.append(ppl)
+
+                if (i + 1) % 5 == 0:
+                    print(f"      Processed {i + 1}/{len(test_sentences)} samples")
 
             avg_loss = np.mean(losses)
-            avg_ppl = np.exp(avg_loss)
+            std_loss = np.std(losses)
+            avg_ppl = np.mean(perplexities)
+            std_ppl = np.std(perplexities)
+            median_ppl = np.median(perplexities)
 
-            results[precision] = {'loss': avg_loss, 'ppl': avg_ppl}
-            print(f"   {precision:2d}-bit: Loss = {avg_loss:.4f}, PPL = {avg_ppl:.2f}")
+            results[precision] = {
+                'loss': avg_loss,
+                'loss_std': std_loss,
+                'ppl': avg_ppl,
+                'ppl_std': std_ppl,
+                'median_ppl': median_ppl,
+                'num_samples': len(losses)
+            }
+
+            print(f"   {precision:2d}-bit Results:")
+            print(f"      Loss: {avg_loss:.4f} ± {std_loss:.4f}")
+            print(f"      PPL (mean): {avg_ppl:.2f} ± {std_ppl:.2f}")
+            print(f"      PPL (median): {median_ppl:.2f}")
 
     # Calculate degradation
     baseline_ppl = results[16]['ppl']
+    baseline_median = results[16]['median_ppl']
 
     print(f"\n📊 DEGRADATION ANALYSIS:")
-    print(f"   Baseline (16-bit): {baseline_ppl:.2f} PPL")
+    print(f"   Baseline (16-bit):")
+    print(f"      Mean PPL: {baseline_ppl:.2f} ± {results[16]['ppl_std']:.2f}")
+    print(f"      Median PPL: {baseline_median:.2f}")
+    print(f"      Samples tested: {results[16]['num_samples']}")
 
     degradation_results = {}
 
     for precision in [8, 4]:
         if precision in results:
             ppl = results[precision]['ppl']
-            degradation = ((ppl - baseline_ppl) / baseline_ppl) * 100
+            median = results[precision]['median_ppl']
+            std = results[precision]['ppl_std']
 
-            degradation_results[precision] = degradation
+            degradation = ((ppl - baseline_ppl) / baseline_ppl) * 100
+            degradation_median = ((median - baseline_median) / baseline_median) * 100
+
+            degradation_results[precision] = {
+                'mean_degradation': degradation,
+                'median_degradation': degradation_median
+            }
+
+            print(f"\n   {precision}-bit Performance:")
+            print(f"      Mean PPL: {ppl:.2f} ± {std:.2f}")
+            print(f"      Median PPL: {median:.2f}")
+            print(f"      Mean Degradation: {degradation:+.1f}%")
+            print(f"      Median Degradation: {degradation_median:+.1f}%")
 
             # Expected targets: 8-bit <20%, 4-bit <100%
             if precision == 8:
@@ -361,7 +419,7 @@ def test_quantization_degradation(sp_model, tokenizer, device):
                     status = "❌ POOR"
                 target = "target: <100%"
 
-            print(f"   {precision}-bit degradation: {degradation:.1f}% ({status}, {target})")
+            print(f"      Status: {status} ({target})")
 
     return degradation_results
 
@@ -632,6 +690,186 @@ def test_distillation_setup(sp_model, tokenizer, device):
     return True
 
 
+def test_comprehensive_ppl(sp_model, tokenizer, device):
+    """Test 6: Comprehensive PPL evaluation with larger dataset"""
+    print("\n" + "="*60)
+    print("TEST 6: COMPREHENSIVE PPL EVALUATION")
+    print("="*60)
+
+    # Create a diverse test dataset with various text types
+    test_dataset = {
+        'technical': [
+            "Machine learning algorithms optimize objective functions through gradient descent.",
+            "Neural networks consist of interconnected layers of artificial neurons.",
+            "Backpropagation computes gradients efficiently using the chain rule.",
+            "Convolutional neural networks excel at processing grid-like data structures.",
+            "Recurrent neural networks maintain hidden states for sequence modeling.",
+            "Transformers use self-attention mechanisms to process sequential data.",
+            "Regularization techniques prevent overfitting in machine learning models.",
+            "Batch normalization accelerates training and improves model stability.",
+            "Dropout randomly deactivates neurons during training for regularization.",
+            "Adam optimizer combines momentum with adaptive learning rates.",
+        ],
+        'scientific': [
+            "Quantum computing leverages superposition and entanglement for computation.",
+            "Climate change affects global weather patterns and ecosystems.",
+            "DNA sequencing reveals genetic information encoded in nucleotides.",
+            "Black holes form when massive stars collapse under gravity.",
+            "Photosynthesis converts light energy into chemical energy in plants.",
+            "Evolution occurs through natural selection and genetic variation.",
+            "Antibiotics target specific bacterial processes to eliminate infections.",
+            "Renewable energy sources reduce dependence on fossil fuels.",
+            "Stem cells differentiate into specialized cell types during development.",
+            "Vaccines stimulate immune responses to prevent infectious diseases.",
+        ],
+        'general': [
+            "The internet has revolutionized global communication and commerce.",
+            "Artificial intelligence is transforming various industries worldwide.",
+            "Social media platforms connect billions of users globally.",
+            "Electric vehicles are becoming increasingly popular and affordable.",
+            "Remote work has changed traditional office dynamics significantly.",
+            "Cybersecurity threats continue to evolve and challenge organizations.",
+            "Blockchain technology enables decentralized and transparent transactions.",
+            "Virtual reality creates immersive digital experiences for users.",
+            "Cloud computing provides scalable and flexible infrastructure solutions.",
+            "Data privacy concerns influence technology development and regulation.",
+        ],
+        'conversational': [
+            "How are you doing today?",
+            "The weather has been quite nice lately.",
+            "I enjoyed reading that book you recommended.",
+            "Let's meet for coffee tomorrow afternoon.",
+            "Have you seen any good movies recently?",
+            "The restaurant downtown serves excellent food.",
+            "I'm planning a vacation for next month.",
+            "The concert last night was amazing.",
+            "Thanks for helping me with the project.",
+            "It's been great catching up with you.",
+        ]
+    }
+
+    sp_model.eval()
+
+    print("\nEvaluating perplexity across text categories and bit-widths...")
+
+    comprehensive_results = {}
+
+    with torch.no_grad():
+        for precision in [16, 8, 4]:
+            sp_model.set_precision(precision)
+            print(f"\n{precision}-bit Precision Evaluation:")
+
+            precision_results = {}
+            all_losses = []
+            all_ppls = []
+
+            for category, texts in test_dataset.items():
+                category_losses = []
+                category_ppls = []
+
+                print(f"  Testing {category} texts...")
+
+                for text in texts:
+                    inputs = tokenizer(text, return_tensors='pt',
+                                     max_length=128, truncation=True)
+                    input_ids = inputs['input_ids'].to(device)
+
+                    outputs = sp_model(input_ids, labels=input_ids)
+                    loss = outputs['loss'].item()
+                    ppl = np.exp(loss)
+
+                    category_losses.append(loss)
+                    category_ppls.append(ppl)
+                    all_losses.append(loss)
+                    all_ppls.append(ppl)
+
+                # Category statistics
+                cat_mean_loss = np.mean(category_losses)
+                cat_mean_ppl = np.mean(category_ppls)
+                cat_median_ppl = np.median(category_ppls)
+                cat_std_ppl = np.std(category_ppls)
+
+                precision_results[category] = {
+                    'mean_loss': cat_mean_loss,
+                    'mean_ppl': cat_mean_ppl,
+                    'median_ppl': cat_median_ppl,
+                    'std_ppl': cat_std_ppl,
+                    'samples': len(category_ppls)
+                }
+
+                print(f"    {category}: PPL={cat_mean_ppl:.2f} (median={cat_median_ppl:.2f}, std={cat_std_ppl:.2f})")
+
+            # Overall statistics for this precision
+            overall_mean_ppl = np.mean(all_ppls)
+            overall_median_ppl = np.median(all_ppls)
+            overall_std_ppl = np.std(all_ppls)
+            overall_min_ppl = np.min(all_ppls)
+            overall_max_ppl = np.max(all_ppls)
+
+            comprehensive_results[precision] = {
+                'categories': precision_results,
+                'overall': {
+                    'mean_ppl': overall_mean_ppl,
+                    'median_ppl': overall_median_ppl,
+                    'std_ppl': overall_std_ppl,
+                    'min_ppl': overall_min_ppl,
+                    'max_ppl': overall_max_ppl,
+                    'total_samples': len(all_ppls)
+                }
+            }
+
+            print(f"\n  Overall {precision}-bit Statistics:")
+            print(f"    Mean PPL: {overall_mean_ppl:.2f} ± {overall_std_ppl:.2f}")
+            print(f"    Median PPL: {overall_median_ppl:.2f}")
+            print(f"    Range: [{overall_min_ppl:.2f}, {overall_max_ppl:.2f}]")
+            print(f"    Total samples: {len(all_ppls)}")
+
+    # Detailed degradation analysis
+    print("\n" + "="*60)
+    print("DETAILED DEGRADATION ANALYSIS")
+    print("="*60)
+
+    baseline = comprehensive_results[16]['overall']
+
+    for precision in [8, 4]:
+        current = comprehensive_results[precision]['overall']
+
+        mean_degradation = ((current['mean_ppl'] - baseline['mean_ppl']) / baseline['mean_ppl']) * 100
+        median_degradation = ((current['median_ppl'] - baseline['median_ppl']) / baseline['median_ppl']) * 100
+
+        print(f"\n{precision}-bit vs 16-bit:")
+        print(f"  Mean degradation: {mean_degradation:+.1f}%")
+        print(f"  Median degradation: {median_degradation:+.1f}%")
+
+        # Category-wise degradation
+        print(f"\n  Category-wise degradation:")
+        for category in test_dataset.keys():
+            cat_baseline = comprehensive_results[16]['categories'][category]['mean_ppl']
+            cat_current = comprehensive_results[precision]['categories'][category]['mean_ppl']
+            cat_degradation = ((cat_current - cat_baseline) / cat_baseline) * 100
+            print(f"    {category}: {cat_degradation:+.1f}%")
+
+        # Final verdict
+        if precision == 8:
+            if mean_degradation < 20:
+                verdict = "✅ EXCELLENT - Well within target"
+            elif mean_degradation < 50:
+                verdict = "⚠️ ACCEPTABLE - Within reasonable bounds"
+            else:
+                verdict = "❌ POOR - Exceeds acceptable degradation"
+        else:  # 4-bit
+            if mean_degradation < 100:
+                verdict = "✅ EXCELLENT - Exceptional for 4-bit"
+            elif mean_degradation < 300:
+                verdict = "⚠️ ACCEPTABLE - Expected for 4-bit"
+            else:
+                verdict = "❌ POOR - High degradation even for 4-bit"
+
+        print(f"\n  Verdict: {verdict}")
+
+    return comprehensive_results
+
+
 def run_comprehensive_test():
     """Run all tests on the fixed SP model"""
     print("\n" + "="*80)
@@ -729,6 +967,16 @@ def run_comprehensive_test():
 
         # Test 5: Distillation setup
         test_results['distillation'] = test_distillation_setup(
+            sp_model, tokenizer, device
+        )
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        # Test 6: Comprehensive PPL evaluation
+        print("\n" + "="*70)
+        print("Running comprehensive PPL evaluation...")
+        print("="*70)
+        test_results['comprehensive_ppl'] = test_comprehensive_ppl(
             sp_model, tokenizer, device
         )
         if torch.cuda.is_available():

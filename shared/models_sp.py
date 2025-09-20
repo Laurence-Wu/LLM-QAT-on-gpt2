@@ -309,13 +309,38 @@ class SPModel(nn.Module):
                     mapped_dict[new_name] = param.t()  # Transpose for Conv1D to Linear
                 else:
                     mapped_dict[new_name] = param
+            # Map attention and MLP biases
+            elif 'attn.c_attn.bias' in name or 'attn.c_proj.bias' in name:
+                new_name = name.replace('.bias', '.linear.bias')
+                mapped_dict[new_name] = param
+            elif 'mlp.c_fc.bias' in name or 'mlp.c_proj.bias' in name:
+                new_name = name.replace('.bias', '.linear.bias')
+                mapped_dict[new_name] = param
 
         # Update model weights
         model_dict.update(mapped_dict)
         self.load_state_dict(model_dict, strict=False)
         self.to(device)
 
-        print(f"Loaded {len(mapped_dict)} weights from pretrained model")
+        # Verify critical weights were loaded
+        loaded_weights = set(mapped_dict.keys())
+        expected_patterns = ['wte', 'wpe', 'ln', 'attn.c_attn', 'attn.c_proj', 'mlp.c_fc', 'mlp.c_proj']
+        missing_patterns = []
+        for pattern in expected_patterns:
+            if not any(pattern in name for name in loaded_weights):
+                missing_patterns.append(pattern)
+
+        if missing_patterns:
+            print(f"⚠️ Warning: Missing weight patterns: {missing_patterns}")
+
+        print(f"✅ Loaded {len(mapped_dict)} weights from pretrained model")
+
+        # Count biases loaded
+        bias_count = sum(1 for name in mapped_dict if 'bias' in name)
+        weight_count = sum(1 for name in mapped_dict if 'weight' in name)
+        print(f"   - Weights: {weight_count}")
+        print(f"   - Biases: {bias_count}")
+
         return self
 
 
