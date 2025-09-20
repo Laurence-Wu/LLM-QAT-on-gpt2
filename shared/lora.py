@@ -257,8 +257,10 @@ class SPLinearWithLoRA(nn.Module):
             print(f"  weight_quantizer.num_bits: {weight_quantizer.num_bits}")
             print(f"  weight_quantizer.training: {weight_quantizer.training}")
             print(f"  weight_quantizer.calibrated (before): {weight_quantizer.calibrated}")
+            print(f"  weight_quantizer.collecting_stats: {weight_quantizer.collecting_stats}")
             print(f"  input_quantizer.num_bits: {input_quantizer.num_bits}")
             print(f"  input_quantizer.calibrated (before): {input_quantizer.calibrated}")
+            print(f"  input_quantizer.collecting_stats: {input_quantizer.collecting_stats}")
 
         # Quantize inputs and weights
         x_quantized = input_quantizer(x)
