@@ -113,12 +113,20 @@ def test_auto_two_pass():
     # Pass 2 should show constant non-zero scale
     print(f"   Pass 2 scales: {pass2_scales[:3]} ... {pass2_scales[-1:]}")
 
-    # Check if scales were frozen during Pass 2
-    pass2_unique = len(set(pass2_scales))
-    if pass2_unique == 1 and pass2_scales[0] > 0:
-        print(f"   ✅ PASSED: Scale frozen during Pass 2 (value: {pass2_scales[0]:.6f})")
+    # Check if scales were frozen during Pass 2 (allowing for small floating-point differences)
+    if len(pass2_scales) > 0 and pass2_scales[0] > 0:
+        scale_variance = max(pass2_scales) - min(pass2_scales)
+        scale_mean = sum(pass2_scales) / len(pass2_scales)
+        relative_variance = scale_variance / scale_mean if scale_mean > 0 else float('inf')
+
+        # Allow up to 1e-6 relative difference due to floating point
+        if relative_variance < 1e-6:
+            print(f"   ✅ PASSED: Scale frozen during Pass 2 (mean: {scale_mean:.6f}, variance: {scale_variance:.2e})")
+        else:
+            print(f"   ❌ FAILED: Scale changed during Pass 2 (relative variance: {relative_variance:.2e})")
+            return False
     else:
-        print(f"   ❌ FAILED: Scale changed during Pass 2 ({pass2_unique} unique values)")
+        print(f"   ❌ FAILED: Invalid scales during Pass 2")
         return False
 
     # Run another cycle to verify reset

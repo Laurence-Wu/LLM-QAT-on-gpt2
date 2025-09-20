@@ -205,11 +205,14 @@ class LearnableFakeQuantize(nn.Module):
                 if self.forward_counter == self.gradient_accumulation_steps:
                     # End Pass 1: Compute scale/zero_point and freeze them
                     if self.num_batches_collected > 0 and self.temp_min is not None:
-                        self.running_min.resize_as_(self.temp_min).copy_(self.temp_min)
-                        self.running_max.resize_as_(self.temp_max).copy_(self.temp_max)
-                        self._compute_scale_zero_point()
+                        # Copy statistics to running buffers
+                        with torch.no_grad():
+                            self.running_min.resize_as_(self.temp_min).copy_(self.temp_min)
+                            self.running_max.resize_as_(self.temp_max).copy_(self.temp_max)
+                            self._compute_scale_zero_point()
                         self.calibrated = True
                         self.stats_frozen = True
+                        # Clear temp buffers
                         self.temp_min = None
                         self.temp_max = None
                     self.collecting_stats = False
