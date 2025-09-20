@@ -227,14 +227,21 @@ def calibrate_quantizers_for_testing(model, tokenizer, device, bits):
 
     # Pass 1: Start calibration on attention and MLP layers in each block
     bits_key = f'{bits}bit'
+    print(f"Starting calibration for {bits}-bit quantizers...")
     for block in model.transformer.h:
         # Each block has attn and mlp modules with SPLinearWithLoRA layers
         for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
             # Call start_calibration on the specific quantizers for this bit-width
             if bits_key in module.quantizers_weight:
                 module.quantizers_weight[bits_key].start_calibration()
+                # Debug: verify calibration started
+                q = module.quantizers_weight[bits_key]
+                print(f"  Weight quantizer: collecting_stats={q.collecting_stats}, calibrated={q.calibrated}")
             if bits_key in module.quantizers_input:
                 module.quantizers_input[bits_key].start_calibration()
+                # Debug: verify calibration started
+                q = module.quantizers_input[bits_key]
+                print(f"  Input quantizer: collecting_stats={q.collecting_stats}, calibrated={q.calibrated}")
 
     # Collect statistics with a few samples
     calibration_texts = [
@@ -250,12 +257,19 @@ def calibrate_quantizers_for_testing(model, tokenizer, device, bits):
             _ = model(input_ids)
 
     # Pass 1 complete: Finish calibration
+    print(f"Finishing calibration for {bits}-bit quantizers...")
     for block in model.transformer.h:
         for module in [block.attn.c_attn, block.attn.c_proj, block.mlp.c_fc, block.mlp.c_proj]:
             if bits_key in module.quantizers_weight:
                 module.quantizers_weight[bits_key].finish_calibration()
+                # Debug: verify calibration finished
+                q = module.quantizers_weight[bits_key]
+                print(f"  Weight quantizer: calibrated={q.calibrated}, scale mean={q.scale.mean().item():.6f}")
             if bits_key in module.quantizers_input:
                 module.quantizers_input[bits_key].finish_calibration()
+                # Debug: verify calibration finished
+                q = module.quantizers_input[bits_key]
+                print(f"  Input quantizer: calibrated={q.calibrated}, scale mean={q.scale.mean().item():.6f}")
 
     # Return to eval mode after calibration
     model.eval()
