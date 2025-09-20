@@ -30,11 +30,11 @@ class DistillationManager:
         self.full_precision_bits = full_precision_bits
         self.config = config
 
-        # Get device from model
+        # Get device from model (should always be CUDA)
         try:
             self.device = next(model.parameters()).device
         except StopIteration:
-            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            self.device = torch.device('cuda')
 
         # Teacher output cache
         self.teacher_cache = {}
@@ -100,11 +100,6 @@ class DistillationManager:
             if teacher_outputs.get('hidden_states'):
                 cache_entry['hidden_states'] = [h.detach().clone() for h in teacher_outputs['hidden_states']]
 
-            # Optionally move to CPU to save GPU memory
-            if getattr(self.config, 'move_cache_to_cpu', False):
-                cache_entry['logits'] = cache_entry['logits'].cpu()
-                cache_entry['hidden_states'] = [h.cpu() for h in cache_entry['hidden_states']]
-
             # Store in cache with input hash as key
             batch_key = self._get_batch_key(input_ids)
             self._add_to_cache(batch_key, cache_entry)
@@ -139,12 +134,6 @@ class DistillationManager:
                 shift_logits.view(-1, shift_logits.size(-1)),
                 shift_labels.view(-1)
             )
-
-        # Move teacher tensors to GPU if they were on CPU
-        if teacher['logits'].device != self.device:
-            teacher['logits'] = teacher['logits'].to(self.device)
-            if teacher['hidden_states']:
-                teacher['hidden_states'] = [h.to(self.device) for h in teacher['hidden_states']]
 
         # 1. Output distillation (KL divergence)
         T = self.config.distill_temperature

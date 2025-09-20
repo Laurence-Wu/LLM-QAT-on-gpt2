@@ -69,7 +69,6 @@ class TrainingConfig:
         self.save_interval = 100
 
         # Memory optimization
-        self.use_amp = True
         self.empty_cache_interval = 25
         self.num_workers = 0  # For DataLoader
 
@@ -82,4 +81,3 @@ class TrainingConfig:
         self.distill_warmup_steps = 100  # Steps before starting distillation
         self.feature_layers = None  # Which layers to match (None = all)
         self.cache_size = 32  # Teacher cache size
-        self.move_cache_to_cpu = False  # Move cache to CPU to save GPU memory

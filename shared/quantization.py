@@ -180,9 +180,10 @@ class LearnableFakeQuantize(nn.Module):
             self.quant_max = 2 ** (self.num_bits - 1) - 1
     
     def forward(self, x):
-        # Skip quantization for 16-bit and above (including 32-bit FP32 teacher)
-        # 32-bit = FP32 pass-through (teacher), 16-bit = FP16 pass-through
-        if self.num_bits >= 16:
+        # Skip quantization only for 32-bit FP32 teacher
+        # 32-bit = FP32 pass-through (teacher)
+        # 16-bit and below = quantization (students)
+        if self.num_bits >= 32:
             return x
 
         # MANUAL CALIBRATION MODE (controlled externally)

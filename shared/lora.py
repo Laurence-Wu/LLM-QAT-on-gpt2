@@ -20,6 +20,7 @@ class LoRALayer(nn.Module):
         self.bits = bits
 
         # CRITICAL: For 32-bit teacher, disable LoRA entirely (no quantization compensation needed)
+        # 16-bit and below are students that need LoRA for quantization compensation
         if bits >= 32 or rank <= 0:
             self.enabled = False
             self.scaling = 0
@@ -226,10 +227,10 @@ class SPLinearWithLoRA(nn.Module):
         """
         Forward pass with bit-width-specific behavior:
         - 32-bit: Pure FP32 teacher (no quantization, no LoRA)
-        - 16-bit: Student with mild quantization and LoRA
+        - 16-bit: Student with quantization and LoRA
         - 8/4-bit: Student with stronger quantization and LoRA
         """
-        # CRITICAL: 32-bit teacher uses pure FP32 weights without any modifications
+        # CRITICAL: Only 32-bit teacher uses pure FP32 weights without any modifications
         if self.current_bits >= 32:
             output = F.linear(x, self.linear.weight, self.linear.bias)
             # Debug check for 32-bit gradient flow

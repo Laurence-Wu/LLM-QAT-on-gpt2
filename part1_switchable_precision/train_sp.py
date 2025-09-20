@@ -79,7 +79,7 @@ class CalibrationManager:
         print("=" * 50)
 
         for bits in bit_widths:
-            if bits < 16 and bits not in self.calibrated_bits:
+            if bits < 32 and bits not in self.calibrated_bits:  # Calibrate all students (4, 8, 16)
                 print(f"\nCalibrating {bits}-bit precision...")
                 self.model.set_precision(bits)
                 self._calibrate_precision(bits, num_batches)
@@ -90,7 +90,7 @@ class CalibrationManager:
 
     def ensure_calibrated(self, bits, num_batches=5):
         """Ensure a specific bit-width is calibrated."""
-        if bits < 16 and bits not in self.calibrated_bits:
+        if bits < 32 and bits not in self.calibrated_bits:  # Calibrate all students
             print(f"\n⚠️ {bits}-bit not calibrated, calibrating now...")
             self._calibrate_precision(bits, num_batches)
             self.calibrated_bits.add(bits)
@@ -219,14 +219,14 @@ def compute_loss_for_all_students(model, batch, teacher_bits, student_bits_list,
 
     # First, compute teacher outputs and update cache (using FP32)
     model.set_precision(teacher_bits)
-    with torch.amp.autocast('cuda', enabled=config.use_amp):
+    with torch.amp.autocast('cuda'):  # Always use AMP
         # Teacher forward pass to update cache
         if distill_mgr and distill_mgr.should_update_teacher(teacher_bits, iteration):
             distill_mgr.update_teacher(input_ids, attention_mask)
 
     # Compute loss for teacher first (standard cross-entropy)
     model.set_precision(teacher_bits)
-    with torch.amp.autocast('cuda', enabled=config.use_amp):
+    with torch.amp.autocast('cuda'):  # Always use AMP
         outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
         teacher_loss = outputs['loss']
         total_loss += teacher_loss
@@ -236,7 +236,7 @@ def compute_loss_for_all_students(model, batch, teacher_bits, student_bits_list,
     for student_bits in student_bits_list:
         model.set_precision(student_bits)
 
-        with torch.amp.autocast('cuda', enabled=config.use_amp):
+        with torch.amp.autocast('cuda'):  # Always use AMP
             # Students train with distillation loss
             outputs = model(input_ids, output_hidden_states=True, return_dict=True)
             loss = distill_mgr.compute_distillation_loss(outputs, input_ids)
@@ -280,34 +280,17 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
         )
         total_loss += loss.detach().item()
 
-        # Backward pass
-        if scaler:
-            scaler.scale(loss).backward()
-        else:
-            loss.backward()
+        # Backward pass (always use scaler for mixed precision)
+        scaler.scale(loss).backward()
 
         # Clean up
         del batch, loss
 
-    # Optimizer step
-    if scaler:
-        # Check if any gradients were computed
-        has_gradients = any(p.grad is not None for p in model.parameters() if p.requires_grad)
-
-        if has_gradients:
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            print(f"ERROR: No gradients computed at iteration {iteration}")
-            print(f"  current_bits: {current_bits}")
-            print(f"  total_loss: {total_loss}")
-            # Skip optimizer step but update scaler to prevent assertion error
-            scaler.update()
-    else:
-        torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
-        optimizer.step()
+    # Optimizer step (always use scaler for mixed precision training)
+    scaler.unscale_(optimizer)
+    torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
+    scaler.step(optimizer)
+    scaler.update()
 
     return total_loss
 
@@ -316,7 +299,7 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
 # EVALUATION
 # ============================================================================
 
-def evaluate(model, val_loader, device, use_amp):
+def evaluate(model, val_loader, device):
     """Quick evaluation on validation set."""
     model.eval()
     total_loss = 0
@@ -333,7 +316,7 @@ def evaluate(model, val_loader, device, use_amp):
             if attention_mask is not None:
                 attention_mask = attention_mask.to(device, non_blocking=True)
 
-            with torch.amp.autocast('cuda', enabled=use_amp):
+            with torch.amp.autocast('cuda'):  # Always use AMP
                 outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
                 loss = outputs['loss']
 
@@ -361,10 +344,10 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     model = model.to(device)
     cleanup_memory()
 
-    # Initialize calibration manager and calibrate quantized precisions only
+    # Initialize calibration manager and calibrate all student precisions
     calib_mgr = CalibrationManager(model, train_loader, device)
-    quantized_bits = [b for b in model_config.bit_widths if b < 16]  # Only calibrate 4, 8 bit
-    calib_mgr.calibrate_all_precisions(quantized_bits)
+    student_bits = [b for b in model_config.bit_widths if b < 32]  # Calibrate all students (4, 8, 16)
+    calib_mgr.calibrate_all_precisions(student_bits)
 
     # Initialize distillation manager if enabled
     distill_mgr = None
@@ -379,7 +362,7 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     # Setup optimizer and scheduler
     optimizer = setup_optimizer(model, config)
     scheduler = CosineAnnealingLR(optimizer, T_max=config.num_iterations)
-    scaler = torch.amp.GradScaler('cuda') if config.use_amp else None
+    scaler = torch.amp.GradScaler('cuda')  # Always use AMP for mixed precision training
 
     # Initialize statistics tracker
     stats = StatsTracker()
@@ -400,8 +383,7 @@ def train_sp(model, train_loader, val_loader, config, model_config):
 
     # Ensure all student precisions are calibrated
     for bits in student_bits_list:
-        if bits < 16:  # Only calibrate quantized precisions
-            calib_mgr.ensure_calibrated(bits)
+        calib_mgr.ensure_calibrated(bits)  # Calibrate all students (4, 8, 16)
 
     for iteration in progress_bar:
         # Execute training step for all precisions
@@ -433,7 +415,7 @@ def train_sp(model, train_loader, val_loader, config, model_config):
 
         # Periodic evaluation
         if should_evaluate(iteration, config):
-            val_loss = evaluate(model, val_loader, device, config.use_amp)
+            val_loss = evaluate(model, val_loader, device)
             stats.add_validation(val_loss)
             print(f"\n[Iter {iteration}] Train: {total_loss:.4f}, Val: {val_loss:.4f}, Training bits: {student_bits_list}")
             model.train()  # Return to training mode
