@@ -20,7 +20,6 @@ class ModelConfig:
         # Quantization settings
         self.quantization_bits = 8  # Default for single-precision mode
         self.activation_bits = 8  # Bits for activation quantization
-        self.kv_cache_bits = 8  # Bits for KV cache quantization (default)
         self.use_gradient_checkpointing = True
 
         # LoRA settings (used when not in switchable mode)
@@ -29,7 +28,7 @@ class ModelConfig:
         self.lora_dropout = 0.1
 
         # Switchable precision settings
-        self.bit_widths = [4, 8, 16]  # Student bit-widths to train
+        self.bit_widths = [4, 8, 16, 32]  # Include teacher bit-width in list
         self.teacher_bits = 32  # Teacher uses FP32 (no quantization)
 
         # Training precision - set this to the desired bit-width for training
@@ -40,9 +39,8 @@ class ModelConfig:
         self.lora_rank_per_bit = {4: 8, 8: 16, 16: 16, 32: 0}  # 32-bit has rank=0 (disabled)
         self.lora_alpha_per_bit = {4: 16, 8: 32, 16: 32, 32: 0}  # 32-bit has alpha=0 (disabled)
 
-        # Activation and KV cache bits per weight precision
+        # Activation bits per weight precision
         self.activation_bits_per_bit = {4: 4, 8: 8, 16: 16}  # Match weight precision
-        self.kv_cache_bits_per_bit = {4: 4, 8: 8, 16: 16}  # Match weight precision
 
 
 class TrainingConfig:

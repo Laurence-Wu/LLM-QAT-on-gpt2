@@ -40,11 +40,9 @@ def initialize_model(model_config, device):
         _ = model_config.lora_rank_per_bit
         _ = model_config.lora_alpha_per_bit
         _ = model_config.activation_bits_per_bit
-        _ = model_config.kv_cache_bits_per_bit
-        _ = model_config.kv_cache_bits  # Single kv_cache_bits attribute
     except AttributeError as e:
         print(f"Error: ModelConfig missing required attribute: {e}")
-        print("Required attributes: lora_rank_per_bit, lora_alpha_per_bit, activation_bits_per_bit, kv_cache_bits_per_bit, kv_cache_bits")
+        print("Required attributes: lora_rank_per_bit, lora_alpha_per_bit, activation_bits_per_bit")
         print("These should be defined in ModelConfig class in config_sp.py")
         raise AttributeError(f"ModelConfig missing required switchable precision attribute: {e}")
 
@@ -59,15 +57,13 @@ def initialize_model(model_config, device):
         quantization_bits=model_config.quantization_bits,
         lora_rank=model_config.lora_rank,
         lora_alpha=model_config.lora_alpha,
-        lora_dropout=model_config.lora_dropout,
-        kv_cache_bits=model_config.kv_cache_bits
+        lora_dropout=model_config.lora_dropout
     )
 
     # Add switchable precision specific configs
     gpt2_config.lora_rank_per_bit = model_config.lora_rank_per_bit
     gpt2_config.lora_alpha_per_bit = model_config.lora_alpha_per_bit
     gpt2_config.activation_bits_per_bit = model_config.activation_bits_per_bit
-    gpt2_config.kv_cache_bits_per_bit = model_config.kv_cache_bits_per_bit
 
     # Print configuration being used
     print(f"Initializing SP Model with configurations:")
@@ -75,8 +71,6 @@ def initialize_model(model_config, device):
     print(f"  LoRA rank per bit: {model_config.lora_rank_per_bit}")
     print(f"  LoRA alpha per bit: {model_config.lora_alpha_per_bit}")
     print(f"  Activation bits per bit: {model_config.activation_bits_per_bit}")
-    print(f"  KV cache bits per bit: {model_config.kv_cache_bits_per_bit}")
-    print(f"  Default KV cache bits: {model_config.kv_cache_bits}")
 
     # Use switchable model if configured
     gpt2_config.bit_widths = model_config.bit_widths
@@ -261,8 +255,8 @@ def main():
         # Ensure critical SP configurations are included
         critical_configs = [
             'lora_rank_per_bit', 'lora_alpha_per_bit',
-            'activation_bits_per_bit', 'kv_cache_bits_per_bit',
-            'bit_widths', 'switch_strategy', 'switch_interval', 'curriculum_schedule'
+            'activation_bits_per_bit',
+            'bit_widths', 'teacher_bits'
         ]
 
         for config_key in critical_configs:

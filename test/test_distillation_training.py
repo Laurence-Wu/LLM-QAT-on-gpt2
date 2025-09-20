@@ -48,9 +48,7 @@ def test_distillation_training():
         bit_widths=model_config.bit_widths,
         lora_rank_per_bit=model_config.lora_rank_per_bit,
         lora_alpha_per_bit=model_config.lora_alpha_per_bit,
-        activation_bits_per_bit=model_config.activation_bits_per_bit,
-        kv_cache_bits_per_bit=model_config.kv_cache_bits_per_bit,
-        kv_cache_bits=model_config.kv_cache_bits
+        activation_bits_per_bit=model_config.activation_bits_per_bit
     )
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

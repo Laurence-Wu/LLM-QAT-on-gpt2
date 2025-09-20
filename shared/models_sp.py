@@ -58,10 +58,7 @@ class SPAttention(nn.Module):
             lora_dropout=lora_dropout
         )
 
-        # KV cache quantizer - use median bit width as default
-        default_kv_bits = sorted(bit_widths)[len(bit_widths)//2]
-        kv_bits = getattr(config, 'kv_cache_bits', default_kv_bits)
-        self.kv_quantizer = LearnableFakeQuantize(num_bits=kv_bits, symmetric=False)
+        # No KV cache quantization needed
 
         self.register_buffer("bias", torch.tril(torch.ones(config.n_positions, config.n_positions)))
 
@@ -85,13 +82,7 @@ class SPAttention(nn.Module):
         v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
 
         # Quantize KV cache (bypass for 16-bit to match GPT-2 exactly)
-        if hasattr(self, 'current_bit_width') and self.current_bit_width == 16:
-            # Skip quantization in 16-bit mode for exact GPT-2 equivalence
-            pass
-        else:
-            # Apply quantization for lower precisions
-            k = self.kv_quantizer(k)
-            v = self.kv_quantizer(v)
+        # No KV quantization (removed for simplicity)
 
         attn_weights = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)
         bias_mask = self.bias[:T, :T].to(attn_weights.device)

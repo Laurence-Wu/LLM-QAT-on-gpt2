@@ -221,20 +221,22 @@ def compute_loss_for_all_students(model, batch, teacher_bits, student_bits_list,
         if distill_mgr and distill_mgr.should_update_teacher(teacher_bits, iteration):
             distill_mgr.update_teacher(input_ids, attention_mask)
 
+    # Compute loss for teacher first (standard cross-entropy)
+    model.set_precision(teacher_bits)
+    with torch.amp.autocast('cuda', enabled=config.use_amp):
+        outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
+        teacher_loss = outputs['loss']
+        total_loss += teacher_loss
+        num_students += 1
+
     # Now compute distillation loss for each student precision
     for student_bits in student_bits_list:
         model.set_precision(student_bits)
 
         with torch.amp.autocast('cuda', enabled=config.use_amp):
-            if student_bits == teacher_bits:
-                # Teacher trains with standard loss
-                outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
-                loss = outputs['loss']
-            else:
-                # Students train with distillation loss
-                outputs = model(input_ids, output_hidden_states=True, return_dict=True)
-                loss = distill_mgr.compute_distillation_loss(outputs, input_ids)
-
+            # Students train with distillation loss
+            outputs = model(input_ids, output_hidden_states=True, return_dict=True)
+            loss = distill_mgr.compute_distillation_loss(outputs, input_ids)
             total_loss += loss
             num_students += 1
 
@@ -356,9 +358,10 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     model = model.to(device)
     cleanup_memory()
 
-    # Initialize calibration manager and calibrate all precisions
+    # Initialize calibration manager and calibrate quantized precisions only
     calib_mgr = CalibrationManager(model, train_loader, device)
-    calib_mgr.calibrate_all_precisions(model_config.bit_widths)
+    quantized_bits = [b for b in model_config.bit_widths if b < 16]  # Only calibrate 4, 8 bit
+    calib_mgr.calibrate_all_precisions(quantized_bits)
 
     # Initialize distillation manager if enabled
     distill_mgr = None
@@ -389,11 +392,13 @@ def train_sp(model, train_loader, val_loader, config, model_config):
 
     # Get teacher and student bit-widths from config
     teacher_bits = model_config.teacher_bits if hasattr(model_config, 'teacher_bits') else 32
-    student_bits_list = model_config.bit_widths  # [4, 8, 16]
+    # Student bits are all bit-widths except the teacher
+    student_bits_list = [b for b in model_config.bit_widths if b != teacher_bits]  # [4, 8, 16]
 
     # Ensure all student precisions are calibrated
     for bits in student_bits_list:
-        calib_mgr.ensure_calibrated(bits)
+        if bits < 16:  # Only calibrate quantized precisions
+            calib_mgr.ensure_calibrated(bits)
 
     for iteration in progress_bar:
         # Execute training step for all precisions
