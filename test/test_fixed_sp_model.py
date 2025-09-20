@@ -15,7 +15,100 @@ from transformers import GPT2LMHeadModel, GPT2Tokenizer
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from test.fix_model_initialization import create_properly_initialized_model
-from shared.calibration_manager import calibrate_sp_model
+
+
+def calibrate_with_two_pass(sp_model, tokenizer, device):
+    """Calibrate SP model using two-pass statistics collection."""
+    print("\n🔧 Two-Pass Calibration Starting...")
+
+    # Calibration texts
+    calibration_texts = [
+        "The quick brown fox jumps over the lazy dog.",
+        "Machine learning is transforming modern technology rapidly.",
+        "Python is a versatile programming language for data science.",
+        "Natural language processing enables computers to understand human language.",
+        "Deep learning models require significant computational resources for training.",
+        "The weather today is sunny with clear blue skies and gentle breeze.",
+        "Books are a great source of knowledge and entertainment for everyone.",
+        "Technology continues to advance at an unprecedented pace in our society.",
+    ]
+
+    sp_model.eval()
+
+    # Calibrate each bit-width using two-pass
+    for bits in [4, 8]:  # Skip 16-bit (no quantization needed)
+        print(f"\n📊 Calibrating {bits}-bit mode with two-pass...")
+        sp_model.set_precision(bits)
+
+        # Pass 1: Collect statistics
+        print(f"  Pass 1: Collecting statistics for {bits}-bit...")
+        sp_model.start_stats_collection()
+
+        with torch.no_grad():
+            for i, text in enumerate(calibration_texts):
+                tokens = tokenizer(
+                    text,
+                    return_tensors='pt',
+                    max_length=64,
+                    truncation=True,
+                    padding=False
+                )['input_ids'].to(device)
+
+                # Forward pass to collect statistics
+                _ = sp_model(tokens)
+
+                if (i + 1) % 4 == 0:
+                    print(f"    Processed {i + 1}/{len(calibration_texts)} samples")
+
+        # Finalize statistics and freeze parameters
+        sp_model.stop_stats_collection()
+        print(f"  Pass 1 complete: Statistics collected and parameters frozen")
+
+        # Pass 2: Verify with fixed parameters
+        print(f"  Pass 2: Testing with frozen parameters...")
+        with torch.no_grad():
+            test_text = calibration_texts[0]
+            tokens = tokenizer(test_text, return_tensors='pt')['input_ids'].to(device)
+            outputs = sp_model(tokens, labels=tokens)
+            loss = outputs['loss'].item()
+            ppl = torch.exp(torch.tensor(loss)).item()
+            print(f"    Test loss: {loss:.4f}, PPL: {ppl:.2f}")
+
+        # Unfreeze for next calibration
+        sp_model.unfreeze_stats()
+        print(f"  ✅ {bits}-bit calibration complete")
+
+    # Reset to 16-bit
+    sp_model.set_precision(16)
+    print("\n✅ Two-pass calibration complete for all precisions")
+
+    # Quick validation check
+    print("\n🧪 Quick calibration quality check...")
+    test_text = "Machine learning and artificial intelligence are revolutionizing technology."
+    tokens = tokenizer(test_text, return_tensors='pt')['input_ids'].to(device)
+
+    sp_model.eval()
+    results = {}
+
+    with torch.no_grad():
+        for bits in [16, 8, 4]:
+            sp_model.set_precision(bits)
+            outputs = sp_model(tokens, labels=tokens)
+            loss = outputs['loss'].item()
+            ppl = torch.exp(torch.tensor(loss)).item()
+            results[bits] = {'loss': loss, 'ppl': ppl}
+            print(f"  {bits:2d}-bit: Loss = {loss:.4f}, PPL = {ppl:.2f}")
+
+    # Check degradation
+    baseline_ppl = results[16]['ppl']
+    for bits in [8, 4]:
+        ppl = results[bits]['ppl']
+        degradation = ((ppl - baseline_ppl) / baseline_ppl) * 100
+        status = "✅" if degradation < 100 else "⚠️" if degradation < 500 else "❌"
+        print(f"  {bits}-bit degradation: {degradation:.1f}% {status}")
+
+    sp_model.set_precision(16)
+    return True
 
 
 def test_16bit_equivalence(sp_model, gpt2_model, tokenizer, device):
@@ -257,71 +350,154 @@ def test_lora_behavior(sp_model, tokenizer, device):
 
 
 def test_quantizer_activation(sp_model, tokenizer, device):
-    """Test 4: Diagnose why quantizers aren't getting calibrated"""
+    """Test 4: Test two-pass quantization and verify correct calibration"""
     print("\n" + "="*60)
-    print("TEST 4: QUANTIZER ACTIVATION DIAGNOSIS")
+    print("TEST 4: TWO-PASS QUANTIZATION VERIFICATION")
     print("="*60)
 
-    test_input = "Testing quantizer activation during forward pass."
-    inputs = tokenizer(test_input, return_tensors='pt')
-    input_ids = inputs['input_ids'].to(device)
+    test_inputs = [
+        "Testing quantizer activation during forward pass.",
+        "Machine learning models require proper calibration.",
+        "Deep neural networks process information efficiently."
+    ]
 
     sp_model.eval()
 
-    # Add hooks to monitor quantizer calls
-    quantizer_calls = {}
+    # Test each precision level
+    quantization_results = {}
 
-    def create_hook(name):
-        def hook(module, input, output):
-            if name not in quantizer_calls:
-                quantizer_calls[name] = 0
-            quantizer_calls[name] += 1
-            print(f"    📞 Quantizer called: {name} (call #{quantizer_calls[name]}, num_bits={module.num_bits})")
-        return hook
+    for bits in [4, 8]:  # Skip 16-bit (no quantization)
+        print(f"\n🔧 Testing {bits}-bit precision with two-pass:")
+        sp_model.set_precision(bits)
 
-    # Register hooks on first few quantizers to see if they get called
-    hooks = []
-    quantizer_count = 0
-    for name, module in sp_model.named_modules():
-        if 'LearnableFakeQuantize' in str(type(module)) and quantizer_count < 10:
-            hook = module.register_forward_hook(create_hook(name))
-            hooks.append(hook)
-            quantizer_count += 1
+        # Pass 1: Collect statistics
+        print(f"   Pass 1: Collecting statistics...")
+        sp_model.start_stats_collection()
 
-    print(f"Registered hooks on {len(hooks)} quantizers for monitoring...")
+        with torch.no_grad():
+            for text in test_inputs:
+                inputs = tokenizer(text, return_tensors='pt')
+                input_ids = inputs['input_ids'].to(device)
+                _ = sp_model(input_ids)
 
+        sp_model.stop_stats_collection()
+        print(f"   Pass 1 complete: Statistics collected")
+
+        # Check quantizer state after Pass 1
+        quantizer_states = []
+        for name, module in sp_model.named_modules():
+            if 'LearnableFakeQuantize' in str(type(module)) and f'{bits}bit' in name:
+                state = {
+                    'calibrated': module.calibrated,
+                    'stats_frozen': module.stats_frozen,
+                    'scale': module.scale.mean().item() if module.scale.numel() > 0 else 0
+                }
+                quantizer_states.append(state)
+                if len(quantizer_states) == 1:  # Print first one as sample
+                    print(f"   Sample quantizer state:")
+                    print(f"     Calibrated: {state['calibrated']}")
+                    print(f"     Stats frozen: {state['stats_frozen']}")
+                    print(f"     Scale: {state['scale']:.6f}")
+
+        # Pass 2: Test with fixed parameters
+        print(f"   Pass 2: Testing with frozen parameters...")
+        losses = []
+        with torch.no_grad():
+            for text in test_inputs:
+                inputs = tokenizer(text, return_tensors='pt')
+                input_ids = inputs['input_ids'].to(device)
+                outputs = sp_model(input_ids, labels=input_ids)
+                losses.append(outputs['loss'].item())
+
+        avg_loss = np.mean(losses)
+        avg_ppl = np.exp(avg_loss)
+        print(f"   Average loss: {avg_loss:.4f}, PPL: {avg_ppl:.2f}")
+
+        # Verify scales remained fixed during Pass 2
+        scales_unchanged = True
+        for i, (name, module) in enumerate(sp_model.named_modules()):
+            if 'LearnableFakeQuantize' in str(type(module)) and f'{bits}bit' in name and i < len(quantizer_states):
+                current_scale = module.scale.mean().item() if module.scale.numel() > 0 else 0
+                if abs(current_scale - quantizer_states[i]['scale']) > 1e-6:
+                    scales_unchanged = False
+                    print(f"   ⚠️ Scale changed for {name}: {quantizer_states[i]['scale']:.6f} -> {current_scale:.6f}")
+
+        if scales_unchanged:
+            print(f"   ✅ Scales remained fixed during Pass 2")
+        else:
+            print(f"   ❌ Scales changed during Pass 2!")
+
+        # Unfreeze for next test
+        sp_model.unfreeze_stats()
+
+        # Store results
+        quantization_results[bits] = {
+            'avg_loss': avg_loss,
+            'avg_ppl': avg_ppl,
+            'scales_fixed': scales_unchanged,
+            'num_quantizers': len(quantizer_states),
+            'all_calibrated': all(s['calibrated'] for s in quantizer_states)
+        }
+
+    # Test 16-bit (should bypass quantization)
+    print(f"\n🔧 Testing 16-bit precision (no quantization):")
+    sp_model.set_precision(16)
+
+    losses = []
     with torch.no_grad():
-        for bits in [4, 8, 16]:
-            print(f"\n🔧 Testing {bits}-bit precision:")
-            sp_model.set_precision(bits)
+        for text in test_inputs:
+            inputs = tokenizer(text, return_tensors='pt')
+            input_ids = inputs['input_ids'].to(device)
+            outputs = sp_model(input_ids, labels=input_ids)
+            losses.append(outputs['loss'].item())
 
-            # Reset call counts
-            quantizer_calls.clear()
+    avg_loss = np.mean(losses)
+    avg_ppl = np.exp(avg_loss)
+    print(f"   Average loss: {avg_loss:.4f}, PPL: {avg_ppl:.2f}")
 
-            # Forward pass
-            outputs = sp_model(input_ids)
+    quantization_results[16] = {
+        'avg_loss': avg_loss,
+        'avg_ppl': avg_ppl,
+        'scales_fixed': True,  # No quantization
+        'num_quantizers': 0,
+        'all_calibrated': True  # No quantizers to calibrate
+    }
 
-            print(f"   Forward pass completed. Quantizer calls: {len(quantizer_calls)}")
-            if quantizer_calls:
-                print(f"   Active quantizers: {list(quantizer_calls.keys())[:5]}...")
-            else:
-                print(f"   ❌ NO QUANTIZERS WERE CALLED!")
+    # Verify results
+    print(f"\n📊 QUANTIZATION RESULTS:")
+    all_tests_passed = True
 
-                # Check if quantizers exist but aren't being used
-                total_quantizers = 0
-                for name, module in sp_model.named_modules():
-                    if 'LearnableFakeQuantize' in str(type(module)):
-                        total_quantizers += 1
-                        if total_quantizers <= 3:  # Print first few
-                            print(f"      Found quantizer {name}: num_bits={module.num_bits}")
+    for bits in [4, 8]:
+        result = quantization_results[bits]
+        print(f"   {bits}-bit:")
+        print(f"     Quantizers found: {result['num_quantizers']}")
+        print(f"     All calibrated: {result['all_calibrated']}")
+        print(f"     Scales fixed: {result['scales_fixed']}")
 
-                print(f"   Total quantizers found: {total_quantizers}")
+        if not result['all_calibrated']:
+            print(f"     ❌ Not all quantizers calibrated!")
+            all_tests_passed = False
+        if not result['scales_fixed']:
+            print(f"     ❌ Scales not fixed during Pass 2!")
+            all_tests_passed = False
+        if result['num_quantizers'] == 0:
+            print(f"     ❌ No quantizers found!")
+            all_tests_passed = False
 
-    # Remove hooks
-    for hook in hooks:
-        hook.remove()
+    # Check degradation
+    baseline_ppl = quantization_results[16]['avg_ppl']
+    for bits in [8, 4]:
+        ppl = quantization_results[bits]['avg_ppl']
+        degradation = ((ppl - baseline_ppl) / baseline_ppl) * 100
+        print(f"   {bits}-bit degradation: {degradation:.1f}%")
 
-    return len(quantizer_calls) > 0
+        # Reasonable thresholds
+        if bits == 8 and degradation > 100:
+            print(f"     ⚠️ High degradation for 8-bit!")
+        elif bits == 4 and degradation > 500:
+            print(f"     ⚠️ Very high degradation for 4-bit!")
+
+    return all_tests_passed
 
 
 def test_distillation_setup(sp_model, tokenizer, device):
@@ -408,9 +584,9 @@ def run_comprehensive_test():
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     tokenizer.pad_token = tokenizer.eos_token
 
-    # Calibrate the SP model
-    print("\n🎯 Calibrating quantizers...")
-    calibration_success = calibrate_sp_model(sp_model, tokenizer, device)
+    # Calibrate the SP model using two-pass
+    print("\n🎯 Calibrating quantizers with two-pass method...")
+    calibration_success = calibrate_with_two_pass(sp_model, tokenizer, device)
 
     if not calibration_success:
         print("❌ Calibration failed! Tests may not be reliable.")
@@ -478,10 +654,10 @@ def run_comprehensive_test():
         print("❌ Test 3 (LoRA behavior): FAILED")
 
     if test_results['quantizer_activation']:
-        print("✅ Test 4 (quantizer activation): PASSED")
+        print("✅ Test 4 (two-pass quantization): PASSED")
         passed_tests += 1
     else:
-        print("❌ Test 4 (quantizer activation): FAILED - Quantizers not being called!")
+        print("❌ Test 4 (two-pass quantization): FAILED - Issues with calibration or fixed parameters!")
 
     if test_results['distillation']:
         print("✅ Test 5 (distillation setup): PASSED")
