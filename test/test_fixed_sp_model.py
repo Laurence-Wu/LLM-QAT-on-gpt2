@@ -119,16 +119,20 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
         "Natural language processing enables computers to understand human language.",
     ]
 
-    sp_model.eval()
+    # Set to training mode for calibration (required for automatic two-pass)
+    sp_model.train()
 
     # Calibrate each bit-width using two-pass
     for bits in [4, 8]:  # Skip 16-bit (no quantization needed)
         print(f"\n📊 Calibrating {bits}-bit mode...")
         sp_model.set_precision(bits)
 
-        # The quantizers will automatically handle two-pass internally
+        # The quantizers will automatically handle two-pass internally in training mode
         # Just run forward passes and the quantizers will collect stats automatically
         print(f"  Running calibration for {bits}-bit...")
+
+        # Need to be in training mode for automatic two-pass to work
+        sp_model.train()
 
         with torch.no_grad():
             for i, text in enumerate(calibration_texts):
@@ -157,6 +161,9 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
             print(f"    Test loss: {loss:.4f}, PPL: {ppl:.2f}")
 
         print(f"  ✅ {bits}-bit calibration complete")
+
+    # Set back to eval mode for testing
+    sp_model.eval()
 
     # Reset to 16-bit
     sp_model.set_precision(16)
@@ -437,7 +444,8 @@ def test_quantizer_activation(sp_model, tokenizer, device):
         "Deep neural networks process information efficiently."
     ]
 
-    sp_model.eval()
+    # Start in training mode for calibration
+    sp_model.train()
 
     # Test each precision level
     quantization_results = {}
@@ -445,6 +453,9 @@ def test_quantizer_activation(sp_model, tokenizer, device):
     for bits in [4, 8]:  # Skip 16-bit (no quantization)
         print(f"\n🔧 Testing {bits}-bit precision with two-pass:")
         sp_model.set_precision(bits)
+
+        # Ensure we're in training mode for automatic two-pass calibration
+        sp_model.train()
 
         # Run calibration - quantizers handle two-pass automatically
         print(f"   Running calibration...")
@@ -456,6 +467,9 @@ def test_quantizer_activation(sp_model, tokenizer, device):
                 _ = sp_model(input_ids)
 
         print(f"   Calibration complete")
+
+        # Set to eval mode after calibration is done
+        sp_model.eval()
 
         # Check quantizer state after calibration
         quantizer_states = []
@@ -496,6 +510,7 @@ def test_quantizer_activation(sp_model, tokenizer, device):
     # Test 16-bit (should bypass quantization)
     print(f"\n🔧 Testing 16-bit precision (no quantization):")
     sp_model.set_precision(16)
+    sp_model.eval()  # Ensure eval mode for 16-bit testing
 
     losses = []
     with torch.no_grad():
