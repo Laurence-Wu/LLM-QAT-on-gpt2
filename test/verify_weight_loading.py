@@ -14,7 +14,7 @@ from transformers import GPT2LMHeadModel, GPT2Tokenizer
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from test.fix_model_initialization import create_properly_initialized_model
+from fix_model_initialization import create_properly_initialized_model
 import numpy as np
 
 
