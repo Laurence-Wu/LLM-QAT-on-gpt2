@@ -46,18 +46,18 @@ class CalibrationManager:
         self.model.eval()
 
         # Calibrate each bit-width separately
-        for bits in [4, 8, 16]:
-            if bits >= 16:
-                # Skip 16-bit - no calibration needed
-                continue
-
+        for bits in [4, 8]:  # Skip 16-bit entirely
             print(f"  📊 Calibrating {bits}-bit mode...")
             self.model.set_precision(bits)
 
             # Reset calibration state for quantizers matching this precision
-            self._reset_calibration_for_precision(bits)
+            reset_count = self._reset_calibration_for_precision(bits)
+            print(f"    Reset {reset_count} quantizers")
 
             # Run forward passes to calibrate quantizers
+            bits_key = f'{bits}bit'
+            calibrated_after_first = 0
+
             with torch.no_grad():
                 for i, text in enumerate(self.calibration_texts):
                     tokens = self.tokenizer(
@@ -70,6 +70,14 @@ class CalibrationManager:
 
                     # This triggers calibration in LearnableFakeQuantize
                     outputs = self.model(tokens)
+
+                    # Check calibration status after first sample
+                    if i == 0:
+                        for name, module in self.model.named_modules():
+                            if isinstance(module, LearnableFakeQuantize) and bits_key in name:
+                                if module.calibrated:
+                                    calibrated_after_first += 1
+                        print(f"    After first sample: {calibrated_after_first}/{reset_count} calibrated")
 
                     if (i + 1) % 4 == 0:
                         print(f"    Processed {i + 1}/{len(self.calibration_texts)} samples")
@@ -86,30 +94,43 @@ class CalibrationManager:
             raise ValueError("16-bit mode doesn't need calibration")
 
         bits_key = f'{bits}bit'
+        reset_count = 0
         for name, module in self.model.named_modules():
             if isinstance(module, LearnableFakeQuantize) and bits_key in name:
                 # Reset calibration to allow fresh calibration
                 module.calibrated = False
+                # Reset statistics for clean calibration
+                if hasattr(module, 'running_min'):
+                    module.running_min.zero_()
+                if hasattr(module, 'running_max'):
+                    module.running_max.zero_()
+                reset_count += 1
+
+        return reset_count
 
     def validate_calibration(self) -> bool:
         """Check if each layer has properly calibrated quantizers for each precision"""
         print("\n🔍 Validating quantizer calibration...")
 
-        # Check that each precision has its quantizers calibrated
         all_valid = True
         for bits in [4, 8]:  # Only check 4 and 8 bit (16-bit bypasses)
             bits_key = f'{bits}bit'
             total = 0
             calibrated = 0
+            issues = []
 
             # Check quantizers for this specific bit-width
             for name, module in self.model.named_modules():
                 if isinstance(module, LearnableFakeQuantize) and bits_key in name:
                     total += 1
-                    if module.calibrated:
-                        calibrated += 1
+                    if not hasattr(module, 'calibrated'):
+                        issues.append(f"{name[:40]}... (no calibrated attr)")
+                    elif not module.calibrated:
+                        issues.append(f"{name[:40]}... (not calibrated)")
+                    elif hasattr(module, 'scale') and torch.all(module.scale == 1.0):
+                        issues.append(f"{name[:40]}... (default scale)")
                     else:
-                        all_valid = False
+                        calibrated += 1
 
             if total == 0:
                 print(f"  ❌ {bits}-bit: No quantizers found!")
@@ -118,7 +139,17 @@ class CalibrationManager:
                 print(f"  ✅ {bits}-bit: {calibrated}/{total} quantizers calibrated")
             else:
                 print(f"  ❌ {bits}-bit: Only {calibrated}/{total} quantizers calibrated")
+                if len(issues) <= 3:
+                    for issue in issues:
+                        print(f"      - {issue}")
+                else:
+                    for issue in issues[:2]:
+                        print(f"      - {issue}")
+                    print(f"      ... and {len(issues)-2} more")
+                all_valid = False
 
+        if all_valid:
+            print("✅ All precision modes properly calibrated")
         return all_valid
 
     def get_calibration_stats(self) -> Dict[str, Any]:
@@ -189,3 +220,45 @@ def calibrate_sp_model(model, tokenizer, device='cuda'):
 
     calibration_mgr.quick_calibration_check()
     return True
+
+
+def debug_quantizer_routing(model, tokenizer, device='cuda'):
+    """Debug function to check if quantizers are being called correctly"""
+    print("\n🔍 Debugging quantizer routing...")
+
+    model.eval()
+    test_text = "Test"
+    tokens = tokenizer(test_text, return_tensors='pt')['input_ids'].to(device)
+
+    for bits in [4, 8]:
+        print(f"\n  Testing {bits}-bit mode:")
+        model.set_precision(bits)
+        bits_key = f'{bits}bit'
+
+        # Add hooks to track calls
+        hooks = []
+        called = {}
+
+        def make_hook(name):
+            def hook(module, input, output):
+                called[name] = True
+                print(f"    ✓ Called: {name[:60]}...")
+            return hook
+
+        # Register hooks on quantizers for this bit-width
+        for name, module in model.named_modules():
+            if isinstance(module, LearnableFakeQuantize) and bits_key in name:
+                h = module.register_forward_hook(make_hook(name))
+                hooks.append(h)
+
+        # Run forward pass
+        with torch.no_grad():
+            _ = model(tokens)
+
+        # Remove hooks
+        for h in hooks:
+            h.remove()
+
+        print(f"    Total quantizers called: {len(called)}")
+
+    model.set_precision(16)
