@@ -16,7 +16,6 @@ import gc
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from test.fix_model_initialization import create_properly_initialized_model
-from shared.quantization import LearnableFakeQuantize
 
 
 def get_memory_info(stage_name=""):
@@ -125,11 +124,16 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
         print(f"\n📊 Calibrating {bits}-bit mode...")
         sp_model.set_precision(bits)
 
-        # Start manual calibration for all quantizers
+        # Start manual calibration for all quantizers at this precision
         print(f"  Starting calibration for {bits}-bit...")
-        for module in sp_model.modules():
-            if isinstance(module, LearnableFakeQuantize) and module.num_bits == bits:
-                module.start_calibration()
+        for name, module in sp_model.named_modules():
+            # Check for SPLinearWithLoRA modules
+            if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
+                bits_key = f'{bits}bit'
+                if bits_key in module.quantizers_weight:
+                    module.quantizers_weight[bits_key].start_calibration()
+                if bits_key in module.quantizers_input:
+                    module.quantizers_input[bits_key].start_calibration()
 
         # Collect statistics
         with torch.no_grad():
@@ -148,10 +152,15 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
                 if (i + 1) % 4 == 0:
                     print(f"    Processed {i + 1}/{len(calibration_texts)} samples")
 
-        # Finish calibration for all quantizers
-        for module in sp_model.modules():
-            if isinstance(module, LearnableFakeQuantize) and module.num_bits == bits:
-                module.finish_calibration()
+        # Finish calibration for all quantizers at this precision
+        for name, module in sp_model.named_modules():
+            # Check for SPLinearWithLoRA modules
+            if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
+                bits_key = f'{bits}bit'
+                if bits_key in module.quantizers_weight:
+                    module.quantizers_weight[bits_key].finish_calibration()
+                if bits_key in module.quantizers_input:
+                    module.quantizers_input[bits_key].finish_calibration()
 
         # Test with calibrated model
         print(f"  Testing calibrated {bits}-bit model...")
@@ -336,9 +345,13 @@ def test_quantization_degradation(sp_model, tokenizer, device):
             print(f"      Calibrating {precision}-bit quantizers...")
 
             # Start manual calibration for quantizers at this precision
-            for module in sp_model.modules():
-                if isinstance(module, LearnableFakeQuantize) and module.num_bits == precision:
-                    module.start_calibration()
+            for name, module in sp_model.named_modules():
+                if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
+                    bits_key = f'{precision}bit'
+                    if bits_key in module.quantizers_weight:
+                        module.quantizers_weight[bits_key].start_calibration()
+                    if bits_key in module.quantizers_input:
+                        module.quantizers_input[bits_key].start_calibration()
 
             with torch.no_grad():
                 # Use first few sentences for calibration
@@ -348,9 +361,13 @@ def test_quantization_degradation(sp_model, tokenizer, device):
                     _ = sp_model(input_ids)
 
             # Finish calibration
-            for module in sp_model.modules():
-                if isinstance(module, LearnableFakeQuantize) and module.num_bits == precision:
-                    module.finish_calibration()
+            for name, module in sp_model.named_modules():
+                if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
+                    bits_key = f'{precision}bit'
+                    if bits_key in module.quantizers_weight:
+                        module.quantizers_weight[bits_key].finish_calibration()
+                    if bits_key in module.quantizers_input:
+                        module.quantizers_input[bits_key].finish_calibration()
 
             print(f"      Calibration complete")
 
@@ -538,9 +555,13 @@ def test_quantizer_activation(sp_model, tokenizer, device):
 
         # Start manual calibration
         print(f"   Running calibration...")
-        for module in sp_model.modules():
-            if isinstance(module, LearnableFakeQuantize) and module.num_bits == bits:
-                module.start_calibration()
+        for name, module in sp_model.named_modules():
+            if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
+                bits_key = f'{bits}bit'
+                if bits_key in module.quantizers_weight:
+                    module.quantizers_weight[bits_key].start_calibration()
+                if bits_key in module.quantizers_input:
+                    module.quantizers_input[bits_key].start_calibration()
 
         with torch.no_grad():
             for text in test_inputs:
@@ -549,9 +570,13 @@ def test_quantizer_activation(sp_model, tokenizer, device):
                 _ = sp_model(input_ids)
 
         # Finish calibration
-        for module in sp_model.modules():
-            if isinstance(module, LearnableFakeQuantize) and module.num_bits == bits:
-                module.finish_calibration()
+        for name, module in sp_model.named_modules():
+            if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
+                bits_key = f'{bits}bit'
+                if bits_key in module.quantizers_weight:
+                    module.quantizers_weight[bits_key].finish_calibration()
+                if bits_key in module.quantizers_input:
+                    module.quantizers_input[bits_key].finish_calibration()
 
         print(f"   Calibration complete")
 
@@ -561,16 +586,20 @@ def test_quantizer_activation(sp_model, tokenizer, device):
         # Check quantizer state after calibration
         quantizer_states = []
         for name, module in sp_model.named_modules():
-            if 'LearnableFakeQuantize' in str(type(module)) and f'{bits}bit' in name:
-                state = {
-                    'calibrated': module.calibrated,
-                    'scale': module.scale.mean().item() if module.scale.numel() > 0 else 0
-                }
-                quantizer_states.append(state)
-                if len(quantizer_states) == 1:  # Print first one as sample
-                    print(f"   Sample quantizer state:")
-                    print(f"     Calibrated: {state['calibrated']}")
-                    print(f"     Scale: {state['scale']:.6f}")
+            if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
+                bits_key = f'{bits}bit'
+                if bits_key in module.quantizers_weight:
+                    quantizer = module.quantizers_weight[bits_key]
+                    state = {
+                        'calibrated': quantizer.calibrated,
+                        'scale': quantizer.scale.mean().item() if quantizer.scale.numel() > 0 else 0
+                    }
+                    quantizer_states.append(state)
+                    if len(quantizer_states) == 1:  # Print first one as sample
+                        print(f"   Sample quantizer state:")
+                        print(f"     Calibrated: {state['calibrated']}")
+                        print(f"     Scale: {state['scale']:.6f}")
+                        break  # Only need one sample
 
         # Test with calibrated model
         print(f"   Testing calibrated {bits}-bit model...")
