@@ -147,7 +147,8 @@ class SPLinearWithLoRA(nn.Module):
                  bit_widths=[4, 8, 16],
                  lora_rank_per_bit={4: 32, 8: 16, 16: 8},
                  lora_alpha_per_bit={4: 64, 8: 32, 16: 16},
-                 lora_dropout=0.1):
+                 lora_dropout=0.1,
+                 gradient_accumulation_steps=8):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -157,13 +158,13 @@ class SPLinearWithLoRA(nn.Module):
         # FP32 base layer (shared across all bit-widths)
         self.linear = nn.Linear(in_features, out_features, bias=bias)
 
-        # Create separate quantizers for each bit-width
+        # Create separate quantizers for each bit-width with gradient_accumulation_steps
         self.quantizers_weight = nn.ModuleDict({
-            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True)
+            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True, gradient_accumulation_steps=gradient_accumulation_steps)
             for bits in bit_widths
         })
         self.quantizers_input = nn.ModuleDict({
-            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True)
+            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True, gradient_accumulation_steps=gradient_accumulation_steps)
             for bits in bit_widths
         })
 

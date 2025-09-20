@@ -31,7 +31,7 @@ class QuantizationFunction(torch.autograd.Function):
         return grad_input, None, None, None, None
 
 class LearnableFakeQuantize(nn.Module):
-    def __init__(self, num_bits=8, symmetric=True, per_channel=False, channel_dim=0):
+    def __init__(self, num_bits=8, symmetric=True, per_channel=False, channel_dim=0, gradient_accumulation_steps=8):
         super().__init__()
         self.num_bits = max(1, min(num_bits, 32))  # Clamp to valid range
         self.symmetric = symmetric
@@ -59,6 +59,10 @@ class LearnableFakeQuantize(nn.Module):
         # Temporary statistics for two-pass mode (NOT registered as buffers to save memory)
         self.temp_min = None  # Will be created only when needed
         self.temp_max = None  # Will be created only when needed
+
+        # Auto two-pass configuration
+        self.gradient_accumulation_steps = gradient_accumulation_steps
+        self.forward_counter = 0  # Counts forward passes
 
     def set_num_bits(self, value):
         """Update num_bits and recalculate quantization ranges."""
@@ -180,7 +184,51 @@ class LearnableFakeQuantize(nn.Module):
         if self.num_bits >= 16:
             return x
 
-        # Two-pass mode: Pass 1 - Statistics Collection
+        # Automatic two-pass mode in training
+        if self.training:
+            self.forward_counter += 1
+
+            # Pass 1: Collect statistics for gradient_accumulation_steps batches
+            if self.forward_counter <= self.gradient_accumulation_steps:
+                if not self.collecting_stats:
+                    # Start Pass 1
+                    self.collecting_stats = True
+                    self.stats_frozen = False
+                    self.num_batches_collected = 0
+                    self.temp_min = None
+                    self.temp_max = None
+
+                # Collect statistics
+                self._collect_statistics_batch(x)
+
+                # Check if Pass 1 is complete
+                if self.forward_counter == self.gradient_accumulation_steps:
+                    # End Pass 1: Compute scale/zero_point and freeze them
+                    if self.num_batches_collected > 0 and self.temp_min is not None:
+                        self.running_min.resize_as_(self.temp_min).copy_(self.temp_min)
+                        self.running_max.resize_as_(self.temp_max).copy_(self.temp_max)
+                        self._compute_scale_zero_point()
+                        self.calibrated = True
+                        self.stats_frozen = True
+                        self.temp_min = None
+                        self.temp_max = None
+                    self.collecting_stats = False
+
+                return x  # Return original tensor during Pass 1
+
+            # Pass 2: Use frozen quantization parameters for next gradient_accumulation_steps
+            elif self.forward_counter <= 2 * self.gradient_accumulation_steps:
+                # Keep stats frozen during Pass 2
+                if self.forward_counter == 2 * self.gradient_accumulation_steps:
+                    # End Pass 2: Reset for next cycle
+                    self.stats_frozen = False
+                    self.forward_counter = 0
+                # Continue to quantization below
+            else:
+                # Should not reach here, reset counter
+                self.forward_counter = 0
+
+        # Two-pass mode: Pass 1 - Statistics Collection (manual mode for compatibility)
         if self.collecting_stats:
             self._collect_statistics_batch(x)
             return x  # Return original tensor during collection
@@ -210,7 +258,7 @@ class LearnableFakeQuantize(nn.Module):
 
                 self.calibrated = True  # Mark as calibrated
 
-        if self.training:
+        if self.training and not self.stats_frozen and self.forward_counter == 0:
             with torch.no_grad():  # Ensure no gradient tracking for statistics
                 if self.per_channel:
                     # Per-channel statistics - calculate min/max along non-channel dimensions
@@ -282,21 +330,21 @@ class LearnableFakeQuantize(nn.Module):
                                          self.num_bits, self.symmetric)
 
 class QuantizedLinear(nn.Module):
-    def __init__(self, in_features, out_features, bias=True, 
-                 weight_bits=8, activation_bits=8):
+    def __init__(self, in_features, out_features, bias=True,
+                 weight_bits=8, activation_bits=8, gradient_accumulation_steps=8):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        
+
         self.weight = nn.Parameter(torch.randn(out_features, in_features) / math.sqrt(in_features))
         if bias:
             self.bias = nn.Parameter(torch.zeros(out_features))
         else:
             self.register_parameter('bias', None)
-        
+
         # Per-channel weight quantization, per-token activation quantization (paper approach)
-        self.weight_quantizer = LearnableFakeQuantize(weight_bits, symmetric=True, per_channel=True, channel_dim=0)
-        self.activation_quantizer = LearnableFakeQuantize(activation_bits, symmetric=True)  # Paper uses symmetric for both
+        self.weight_quantizer = LearnableFakeQuantize(weight_bits, symmetric=True, per_channel=True, channel_dim=0, gradient_accumulation_steps=gradient_accumulation_steps)
+        self.activation_quantizer = LearnableFakeQuantize(activation_bits, symmetric=True, gradient_accumulation_steps=gradient_accumulation_steps)  # Paper uses symmetric for both
         
     def forward(self, input):
         input_q = self.activation_quantizer(input)
