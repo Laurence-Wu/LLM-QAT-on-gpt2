@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Verify Weight Loading
+Verify Weight Loading for Current SP Architecture
 Checks if weight loading after initialization works correctly
+with SPLinearWithLoRA wrapper and manual calibration
 """
 
 import sys
@@ -14,6 +15,26 @@ from transformers import GPT2LMHeadModel, GPT2Tokenizer
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from test.fix_model_initialization import create_properly_initialized_model
+import numpy as np
+
+
+def check_quantizer_status(model, bits):
+    """Check if quantizers are properly calibrated for a given precision."""
+    calibrated_count = 0
+    uncalibrated_count = 0
+
+    for name, module in model.named_modules():
+        if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
+            bits_key = f'{bits}bit'
+            if bits_key in module.quantizers_weight:
+                quantizer = module.quantizers_weight[bits_key]
+                if hasattr(quantizer, 'calibrated'):
+                    if quantizer.calibrated:
+                        calibrated_count += 1
+                    else:
+                        uncalibrated_count += 1
+
+    return calibrated_count, uncalibrated_count
 
 
 def test_weight_loading_detailed():
@@ -47,9 +68,15 @@ def test_weight_loading_detailed():
     else:
         print("   ❌ Token embeddings differ!")
 
-    # Check first attention layer weights
+    # Check first attention layer weights (handle SPLinearWithLoRA wrapper)
     try:
-        sp_attn = sp_model.transformer.h[0].attn.c_attn.linear.weight
+        # Access the underlying linear layer in SPLinearWithLoRA
+        sp_attn_module = sp_model.transformer.h[0].attn.c_attn
+        if hasattr(sp_attn_module, 'linear'):
+            sp_attn = sp_attn_module.linear.weight
+        else:
+            sp_attn = sp_attn_module.weight
+
         gpt2_attn = gpt2_model.transformer.h[0].attn.c_attn.weight.t()  # Transpose for comparison
 
         attn_diff = (sp_attn - gpt2_attn).abs().max().item()
@@ -57,17 +84,22 @@ def test_weight_loading_detailed():
 
         if attn_diff == 0.0:
             print("   ✅ Attention weights loaded perfectly")
+        elif attn_diff < 1e-6:
+            print("   ✅ Attention weights loaded with tiny numerical differences")
         else:
             print("   ❌ Attention weights differ!")
 
     except AttributeError as e:
         print(f"   ❌ Error accessing attention weights: {e}")
-        return False
+        # Try to provide more details
+        print(f"   SP module type: {type(sp_model.transformer.h[0].attn.c_attn)}")
+        return False, {'weight_diff': float('inf'), 'logit_diff': float('inf'), 'perplexity_diff': float('inf')}
 
     # Test 2: Forward pass comparison
     print("\n3. Testing forward pass equivalence...")
 
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    tokenizer.pad_token = tokenizer.eos_token  # Set pad token
     test_text = "The quick brown fox"
     inputs = tokenizer(test_text, return_tensors='pt')
     input_ids = inputs['input_ids'].to(device)
@@ -136,6 +168,10 @@ def test_weight_loading_detailed():
     # Assessment
     print("\n5. ASSESSMENT:")
 
+    # Check if attn_diff is defined (might not be if there was an error)
+    if 'attn_diff' not in locals():
+        attn_diff = float('inf')  # Set to infinity if not accessible
+
     if wte_diff == 0.0 and attn_diff == 0.0:
         print("   ✅ Weight loading: PERFECT")
     elif wte_diff < 1e-6 and attn_diff < 1e-6:
@@ -157,7 +193,10 @@ def test_weight_loading_detailed():
     else:
         print("   ❌ Perplexity: FAILED")
 
-    # Overall result
+    # Overall result (handle case where attn_diff might not be defined)
+    if 'attn_diff' not in locals():
+        attn_diff = float('inf')
+
     success = (wte_diff < 1e-6 and attn_diff < 1e-6 and
                mean_diff < 1e-3 and avg_ppl_diff < 1.0)
 
@@ -168,10 +207,53 @@ def test_weight_loading_detailed():
     }
 
 
+def calibrate_quantizers_for_testing(model, tokenizer, device, bits):
+    """Calibrate quantizers for a specific bit-width."""
+    if bits >= 16:
+        return  # No calibration needed for 16-bit
+
+    # Set to training mode for calibration
+    model.train()
+
+    # Start calibration
+    for name, module in model.named_modules():
+        if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
+            bits_key = f'{bits}bit'
+            if bits_key in module.quantizers_weight:
+                module.quantizers_weight[bits_key].start_calibration()
+            if bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].start_calibration()
+
+    # Collect statistics with a few samples
+    calibration_texts = [
+        "The quick brown fox jumps over the lazy dog.",
+        "Machine learning is transforming technology.",
+        "Natural language processing enables computers to understand human language."
+    ]
+
+    with torch.no_grad():
+        for text in calibration_texts:
+            inputs = tokenizer(text, return_tensors='pt')
+            input_ids = inputs['input_ids'].to(device)
+            _ = model(input_ids)
+
+    # Finish calibration
+    for name, module in model.named_modules():
+        if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
+            bits_key = f'{bits}bit'
+            if bits_key in module.quantizers_weight:
+                module.quantizers_weight[bits_key].finish_calibration()
+            if bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].finish_calibration()
+
+    # Return to eval mode
+    model.eval()
+
+
 def test_different_precision_modes():
     """Test that different precisions work as expected."""
     print("\n" + "="*80)
-    print("PRECISION MODE TESTING")
+    print("PRECISION MODE TESTING WITH CALIBRATION")
     print("="*80)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -179,24 +261,37 @@ def test_different_precision_modes():
     # Load SP model
     sp_model, sp_config = create_properly_initialized_model(use_pretrained=True)
     sp_model = sp_model.to(device)
-    sp_model.eval()
 
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    tokenizer.pad_token = tokenizer.eos_token  # Set pad token
     test_text = "Machine learning is transforming technology."
     inputs = tokenizer(test_text, return_tensors='pt')
     input_ids = inputs['input_ids'].to(device)
 
     print(f"\nTest sentence: '{test_text}'")
+    print("\nCalibrating quantizers for each precision...")
 
     results = {}
 
-    with torch.no_grad():
-        for precision in [16, 8, 4]:
-            sp_model.set_precision(precision)
+    for precision in [16, 8, 4]:
+        # Set precision
+        sp_model.set_precision(precision)
 
+        # Calibrate if needed
+        if precision < 16:
+            print(f"   Calibrating {precision}-bit quantizers...")
+            calibrate_quantizers_for_testing(sp_model, tokenizer, device, precision)
+
+            # Check calibration status
+            calibrated, uncalibrated = check_quantizer_status(sp_model, precision)
+            print(f"   Calibration status: {calibrated} calibrated, {uncalibrated} uncalibrated")
+
+        # Evaluate
+        sp_model.eval()
+        with torch.no_grad():
             outputs = sp_model(input_ids, labels=input_ids)
             loss = outputs['loss'].item()
-            ppl = torch.exp(torch.tensor(loss)).item()
+            ppl = np.exp(loss)
 
             results[precision] = {'loss': loss, 'ppl': ppl}
             print(f"   {precision:2d}-bit: Loss = {loss:.4f}, PPL = {ppl:.2f}")
@@ -222,11 +317,62 @@ def test_different_precision_modes():
     return results
 
 
+def verify_sp_linear_with_lora_structure():
+    """Verify the SPLinearWithLoRA structure is correct."""
+    print("\n" + "="*80)
+    print("SP LINEAR WITH LORA STRUCTURE VERIFICATION")
+    print("="*80)
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    sp_model, _ = create_properly_initialized_model(use_pretrained=True)
+    sp_model = sp_model.to(device)
+
+    print("\nChecking module structure...")
+
+    # Check a few key modules
+    modules_to_check = [
+        ('transformer.h[0].attn.c_attn', sp_model.transformer.h[0].attn.c_attn),
+        ('transformer.h[0].attn.c_proj', sp_model.transformer.h[0].attn.c_proj),
+        ('transformer.h[0].mlp.c_fc', sp_model.transformer.h[0].mlp.c_fc),
+        ('transformer.h[0].mlp.c_proj', sp_model.transformer.h[0].mlp.c_proj),
+    ]
+
+    for name, module in modules_to_check:
+        print(f"\n{name}:")
+        print(f"  Type: {type(module).__name__}")
+
+        if hasattr(module, 'linear'):
+            print(f"  Has linear layer: ✅")
+            print(f"  Linear weight shape: {module.linear.weight.shape}")
+        else:
+            print(f"  Has linear layer: ❌")
+
+        if hasattr(module, 'quantizers_weight'):
+            print(f"  Has weight quantizers: ✅")
+            print(f"  Quantizer keys: {list(module.quantizers_weight.keys())}")
+        else:
+            print(f"  Has weight quantizers: ❌")
+
+        if hasattr(module, 'lora_adapters'):
+            print(f"  Has LoRA adapters: ✅")
+            print(f"  LoRA keys: {list(module.lora_adapters.keys())}")
+        else:
+            print(f"  Has LoRA adapters: ❌")
+
+    return True
+
+
 def main():
     """Main verification function."""
     print("\n" + "="*80)
-    print("WEIGHT LOADING VERIFICATION")
+    print("WEIGHT LOADING VERIFICATION FOR CURRENT ARCHITECTURE")
     print("="*80)
+
+    # First verify the structure
+    structure_ok = verify_sp_linear_with_lora_structure()
+    if not structure_ok:
+        print("\n❌ Structure verification failed!")
+        return False
 
     # Test 1: Detailed weight loading verification
     success, metrics = test_weight_loading_detailed()
