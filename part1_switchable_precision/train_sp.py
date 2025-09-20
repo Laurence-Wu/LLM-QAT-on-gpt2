@@ -327,12 +327,24 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
         # For 16-bit (no quantization), standard gradient accumulation
         model.train()
 
+        # Ensure model parameters require gradients
+        for param in model.parameters():
+            param.requires_grad = True
+
         for step in range(config.gradient_accumulation_steps):
             # Get batch
             batch = get_next_batch(train_iter, train_loader)
 
-            # Compute loss
+            # Compute loss (ensure we're not in no_grad context)
             loss = compute_loss(model, batch, current_bits, distill_mgr, config, iteration)
+
+            # Verify loss has grad_fn before backward
+            if not loss.requires_grad:
+                print(f"WARNING: Loss doesn't require grad at iteration {iteration}, step {step}")
+                print(f"  current_bits: {current_bits}")
+                print(f"  loss.requires_grad: {loss.requires_grad}")
+                print(f"  loss.grad_fn: {loss.grad_fn}")
+
             total_loss += loss.detach().item()
 
             # Backward pass
