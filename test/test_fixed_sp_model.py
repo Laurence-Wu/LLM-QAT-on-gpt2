@@ -126,6 +126,10 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
 
         # Start manual calibration for all quantizers at this precision
         print(f"  Starting calibration for {bits}-bit...")
+
+        # CRITICAL: Must be in TRAINING mode for statistics collection
+        sp_model.train()
+
         for name, module in sp_model.named_modules():
             # Check for SPLinearWithLoRA modules
             if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
@@ -135,7 +139,7 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
                 if bits_key in module.quantizers_input:
                     module.quantizers_input[bits_key].start_calibration()
 
-        # Collect statistics
+        # Collect statistics (Pass 1 - training mode for statistics)
         with torch.no_grad():
             for i, text in enumerate(calibration_texts):
                 tokens = tokenizer(
@@ -344,6 +348,9 @@ def test_quantization_degradation(sp_model, tokenizer, device):
         if precision < 16:
             print(f"      Calibrating {precision}-bit quantizers...")
 
+            # CRITICAL: Must be in TRAINING mode for statistics collection
+            sp_model.train()
+
             # Start manual calibration for quantizers at this precision
             for name, module in sp_model.named_modules():
                 if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
@@ -371,7 +378,8 @@ def test_quantization_degradation(sp_model, tokenizer, device):
 
             print(f"      Calibration complete")
 
-        # Now test with calibrated model
+        # Now test with calibrated model - switch to EVAL mode
+        sp_model.eval()
         losses = []
         perplexities = []
 
@@ -555,6 +563,10 @@ def test_quantizer_activation(sp_model, tokenizer, device):
 
         # Start manual calibration
         print(f"   Running calibration...")
+
+        # CRITICAL: Must be in TRAINING mode for statistics collection
+        sp_model.train()
+
         for name, module in sp_model.named_modules():
             if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
                 bits_key = f'{bits}bit'
