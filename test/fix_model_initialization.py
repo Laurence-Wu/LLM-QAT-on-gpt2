@@ -13,7 +13,7 @@ from transformers import GPT2Config
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.models_sp import SPLMHeadModel
-from part1_switchable_precision.config_sp import SPConfig
+from part1_switchable_precision.config_sp import ModelConfig as SPConfig
 
 
 def create_properly_initialized_model(use_pretrained=True, num_layers=None):
