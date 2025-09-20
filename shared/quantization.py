@@ -79,36 +79,6 @@ class LearnableFakeQuantize(nn.Module):
             # self.running_min.zero_()
             # self.running_max.zero_()
 
-    def start_stats_collection(self):
-        """Start Pass 1: Statistics collection mode."""
-        self.collecting_stats = True
-        self.stats_frozen = False
-        self.num_batches_collected = 0
-        # Clear any existing temporary statistics to free memory
-        self.temp_min = None
-        self.temp_max = None
-
-    def stop_stats_collection(self):
-        """End Pass 1: Finalize statistics and compute quantization parameters."""
-        if self.collecting_stats and self.num_batches_collected > 0 and self.temp_min is not None:
-            # Copy collected stats to running buffers
-            self.running_min.resize_as_(self.temp_min).copy_(self.temp_min)
-            self.running_max.resize_as_(self.temp_max).copy_(self.temp_max)
-            # Compute scale and zero_point
-            self._compute_scale_zero_point()
-            self.calibrated = True
-            self.stats_frozen = True
-            # Clear temporary buffers to free memory
-            self.temp_min = None
-            self.temp_max = None
-        self.collecting_stats = False
-
-    def unfreeze_stats(self):
-        """End Pass 2: Allow statistics to be updated again."""
-        self.stats_frozen = False
-        # Clean up any temporary tensors
-        self.temp_min = None
-        self.temp_max = None
 
     def _collect_statistics_batch(self, x):
         """Collect min/max statistics for current batch (Pass 1)."""

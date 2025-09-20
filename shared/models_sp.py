@@ -231,59 +231,6 @@ class SPModel(nn.Module):
         """Get current precision setting."""
         return self.current_bit_width
 
-    def start_stats_collection(self):
-        """Start Pass 1: Begin collecting statistics for all layers in SPModel."""
-        for i, block in enumerate(self.h):
-            try:
-                # For attention layers
-                if isinstance(block.attn.c_attn, SPLinearWithLoRA):
-                    block.attn.c_attn.start_stats_collection()
-                if isinstance(block.attn.c_proj, SPLinearWithLoRA):
-                    block.attn.c_proj.start_stats_collection()
-                # For MLP layers
-                if isinstance(block.mlp.c_fc, SPLinearWithLoRA):
-                    block.mlp.c_fc.start_stats_collection()
-                if isinstance(block.mlp.c_proj, SPLinearWithLoRA):
-                    block.mlp.c_proj.start_stats_collection()
-            except AttributeError as e:
-                print(f"Warning: Block {i} missing expected layer structure: {e}")
-                raise
-
-    def stop_stats_collection(self):
-        """End Pass 1: Finalize statistics and freeze quantization parameters."""
-        for i, block in enumerate(self.h):
-            try:
-                # For attention layers
-                if isinstance(block.attn.c_attn, SPLinearWithLoRA):
-                    block.attn.c_attn.stop_stats_collection()
-                if isinstance(block.attn.c_proj, SPLinearWithLoRA):
-                    block.attn.c_proj.stop_stats_collection()
-                # For MLP layers
-                if isinstance(block.mlp.c_fc, SPLinearWithLoRA):
-                    block.mlp.c_fc.stop_stats_collection()
-                if isinstance(block.mlp.c_proj, SPLinearWithLoRA):
-                    block.mlp.c_proj.stop_stats_collection()
-            except AttributeError as e:
-                print(f"Warning: Block {i} missing expected layer structure: {e}")
-                raise
-
-    def unfreeze_stats(self):
-        """End Pass 2: Allow statistics to be updated again."""
-        for i, block in enumerate(self.h):
-            try:
-                # For attention layers
-                if isinstance(block.attn.c_attn, SPLinearWithLoRA):
-                    block.attn.c_attn.unfreeze_stats()
-                if isinstance(block.attn.c_proj, SPLinearWithLoRA):
-                    block.attn.c_proj.unfreeze_stats()
-                # For MLP layers
-                if isinstance(block.mlp.c_fc, SPLinearWithLoRA):
-                    block.mlp.c_fc.unfreeze_stats()
-                if isinstance(block.mlp.c_proj, SPLinearWithLoRA):
-                    block.mlp.c_proj.unfreeze_stats()
-            except AttributeError as e:
-                print(f"Warning: Block {i} missing expected layer structure: {e}")
-                raise
 
     def forward(self, input_ids, attention_mask=None, use_checkpoint=False,
                 output_hidden_states=False):
@@ -455,20 +402,6 @@ class SPLMHeadModel(nn.Module):
             # Backward compatibility
             return {'loss': loss, 'logits': logits} if loss is not None else logits
 
-    def start_stats_collection(self):
-        """Start Pass 1: Begin collecting statistics for all layers."""
-        # SPLMHeadModel delegates to its transformer
-        self.transformer.start_stats_collection()
-
-    def stop_stats_collection(self):
-        """End Pass 1: Finalize statistics and freeze quantization parameters."""
-        # SPLMHeadModel delegates to its transformer
-        self.transformer.stop_stats_collection()
-
-    def unfreeze_stats(self):
-        """End Pass 2: Allow statistics to be updated again."""
-        # SPLMHeadModel delegates to its transformer
-        self.transformer.unfreeze_stats()
 
     def generate(self, input_ids, max_length=100, temperature=1.0,
                  do_sample=True, top_k=50, top_p=0.95, eos_token_id=None):

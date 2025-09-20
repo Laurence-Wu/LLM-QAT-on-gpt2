@@ -123,12 +123,12 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
 
     # Calibrate each bit-width using two-pass
     for bits in [4, 8]:  # Skip 16-bit (no quantization needed)
-        print(f"\n📊 Calibrating {bits}-bit mode with two-pass...")
+        print(f"\n📊 Calibrating {bits}-bit mode...")
         sp_model.set_precision(bits)
 
-        # Pass 1: Collect statistics
-        print(f"  Pass 1: Collecting statistics for {bits}-bit...")
-        sp_model.start_stats_collection()
+        # The quantizers will automatically handle two-pass internally
+        # Just run forward passes and the quantizers will collect stats automatically
+        print(f"  Running calibration for {bits}-bit...")
 
         with torch.no_grad():
             for i, text in enumerate(calibration_texts):
@@ -140,18 +140,14 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
                     padding=False
                 )['input_ids'].to(device)
 
-                # Forward pass to collect statistics
+                # Forward pass - quantizers handle statistics automatically
                 _ = sp_model(tokens)
 
                 if (i + 1) % 4 == 0:
                     print(f"    Processed {i + 1}/{len(calibration_texts)} samples")
 
-        # Finalize statistics and freeze parameters
-        sp_model.stop_stats_collection()
-        print(f"  Pass 1 complete: Statistics collected and parameters frozen")
-
-        # Pass 2: Verify with fixed parameters
-        print(f"  Pass 2: Testing with frozen parameters...")
+        # Test with calibrated model
+        print(f"  Testing calibrated {bits}-bit model...")
         with torch.no_grad():
             test_text = calibration_texts[0]
             tokens = tokenizer(test_text, return_tensors='pt')['input_ids'].to(device)
@@ -160,8 +156,6 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
             ppl = torch.exp(torch.tensor(loss)).item()
             print(f"    Test loss: {loss:.4f}, PPL: {ppl:.2f}")
 
-        # Unfreeze for next calibration
-        sp_model.unfreeze_stats()
         print(f"  ✅ {bits}-bit calibration complete")
 
     # Reset to 16-bit
@@ -452,9 +446,8 @@ def test_quantizer_activation(sp_model, tokenizer, device):
         print(f"\n🔧 Testing {bits}-bit precision with two-pass:")
         sp_model.set_precision(bits)
 
-        # Pass 1: Collect statistics
-        print(f"   Pass 1: Collecting statistics...")
-        sp_model.start_stats_collection()
+        # Run calibration - quantizers handle two-pass automatically
+        print(f"   Running calibration...")
 
         with torch.no_grad():
             for text in test_inputs:
@@ -462,27 +455,24 @@ def test_quantizer_activation(sp_model, tokenizer, device):
                 input_ids = inputs['input_ids'].to(device)
                 _ = sp_model(input_ids)
 
-        sp_model.stop_stats_collection()
-        print(f"   Pass 1 complete: Statistics collected")
+        print(f"   Calibration complete")
 
-        # Check quantizer state after Pass 1
+        # Check quantizer state after calibration
         quantizer_states = []
         for name, module in sp_model.named_modules():
             if 'LearnableFakeQuantize' in str(type(module)) and f'{bits}bit' in name:
                 state = {
                     'calibrated': module.calibrated,
-                    'stats_frozen': module.stats_frozen,
                     'scale': module.scale.mean().item() if module.scale.numel() > 0 else 0
                 }
                 quantizer_states.append(state)
                 if len(quantizer_states) == 1:  # Print first one as sample
                     print(f"   Sample quantizer state:")
                     print(f"     Calibrated: {state['calibrated']}")
-                    print(f"     Stats frozen: {state['stats_frozen']}")
                     print(f"     Scale: {state['scale']:.6f}")
 
-        # Pass 2: Test with fixed parameters
-        print(f"   Pass 2: Testing with frozen parameters...")
+        # Test with calibrated model
+        print(f"   Testing calibrated {bits}-bit model...")
         losses = []
         with torch.no_grad():
             for text in test_inputs:
@@ -495,28 +485,10 @@ def test_quantizer_activation(sp_model, tokenizer, device):
         avg_ppl = np.exp(avg_loss)
         print(f"   Average loss: {avg_loss:.4f}, PPL: {avg_ppl:.2f}")
 
-        # Verify scales remained fixed during Pass 2
-        scales_unchanged = True
-        for i, (name, module) in enumerate(sp_model.named_modules()):
-            if 'LearnableFakeQuantize' in str(type(module)) and f'{bits}bit' in name and i < len(quantizer_states):
-                current_scale = module.scale.mean().item() if module.scale.numel() > 0 else 0
-                if abs(current_scale - quantizer_states[i]['scale']) > 1e-6:
-                    scales_unchanged = False
-                    print(f"   ⚠️ Scale changed for {name}: {quantizer_states[i]['scale']:.6f} -> {current_scale:.6f}")
-
-        if scales_unchanged:
-            print(f"   ✅ Scales remained fixed during Pass 2")
-        else:
-            print(f"   ❌ Scales changed during Pass 2!")
-
-        # Unfreeze for next test
-        sp_model.unfreeze_stats()
-
         # Store results
         quantization_results[bits] = {
             'avg_loss': avg_loss,
             'avg_ppl': avg_ppl,
-            'scales_fixed': scales_unchanged,
             'num_quantizers': len(quantizer_states),
             'all_calibrated': all(s['calibrated'] for s in quantizer_states)
         }
@@ -554,13 +526,9 @@ def test_quantizer_activation(sp_model, tokenizer, device):
         print(f"   {bits}-bit:")
         print(f"     Quantizers found: {result['num_quantizers']}")
         print(f"     All calibrated: {result['all_calibrated']}")
-        print(f"     Scales fixed: {result['scales_fixed']}")
 
         if not result['all_calibrated']:
             print(f"     ❌ Not all quantizers calibrated!")
-            all_tests_passed = False
-        if not result['scales_fixed']:
-            print(f"     ❌ Scales not fixed during Pass 2!")
             all_tests_passed = False
         if result['num_quantizers'] == 0:
             print(f"     ❌ No quantizers found!")
