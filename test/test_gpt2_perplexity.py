@@ -163,13 +163,14 @@ def test_standard_gpt2(model_name='gpt2', datasets=['wikitext']):
     return results
 
 
-def test_quantized_model(model_path, datasets=['wikitext']):
+def test_quantized_model(model_path, datasets=['wikitext'], model_type='auto'):
     """
-    Test quantized/switchable precision model perplexity.
+    Test quantized model perplexity (supports both switchable and fixed precision).
 
     Args:
         model_path: Path to the quantized model checkpoint
         datasets: List of datasets to evaluate on
+        model_type: Type of model ('switchable', 'fixed', or 'auto' to detect)
 
     Returns:
         Dictionary of results for each bit-width and dataset
@@ -178,43 +179,116 @@ def test_quantized_model(model_path, datasets=['wikitext']):
     print(f"Testing Quantized Model: {model_path}")
     print("=" * 60)
 
-    # Import the switchable model
-    from shared.models import SwitchableQATGPT2
-    from transformers import GPT2Config
-
     # Load checkpoint
     print(f"Loading checkpoint from {model_path}...")
     checkpoint = torch.load(model_path, map_location='cuda')
 
-    # Extract configuration
+    # Detect model type and configuration
+    model = None
+    bit_widths = []
+    is_switchable = False
+
     if isinstance(checkpoint, dict) and 'model_config' in checkpoint:
         model_config = checkpoint['model_config']
-        bit_widths = model_config.get('bit_widths', [4, 8, 16])
 
-        # Create GPT2Config
-        config = GPT2Config(
-            vocab_size=model_config.get('vocab_size', 50257),
-            n_positions=model_config.get('n_positions', 1024),
-            n_embd=model_config['n_embd'],
-            n_layer=model_config['n_layer'],
-            n_head=model_config['n_head']
-        )
+        # Check if it's a switchable model (has bit_widths list)
+        if 'bit_widths' in model_config and isinstance(model_config['bit_widths'], list):
+            # Switchable precision model
+            is_switchable = True
+            bit_widths = model_config['bit_widths']
+            print(f"Detected SWITCHABLE precision model with bit-widths: {bit_widths}")
 
-        # Create model
-        model = SwitchableQATGPT2(config, bit_widths=bit_widths)
+            from shared.models import SwitchableQATGPT2
+            from transformers import GPT2Config
+
+            # Create GPT2Config
+            config = GPT2Config(
+                vocab_size=model_config.get('vocab_size', 50257),
+                n_positions=model_config.get('n_positions', 1024),
+                n_embd=model_config['n_embd'],
+                n_layer=model_config['n_layer'],
+                n_head=model_config['n_head']
+            )
+
+            # Create switchable model
+            model = SwitchableQATGPT2(config, bit_widths=bit_widths)
+
+        else:
+            # Fixed precision model
+            is_switchable = False
+            quantization_bits = model_config.get('quantization_bits', 8)
+            bit_widths = [quantization_bits]  # Single bit-width
+            print(f"Detected FIXED precision model with {quantization_bits}-bit quantization")
+
+            # Import the appropriate fixed precision model
+            try:
+                from shared.models import QuantizedGPT2
+                from transformers import GPT2Config
+
+                # Create GPT2Config
+                config = GPT2Config(
+                    vocab_size=model_config.get('vocab_size', 50257),
+                    n_positions=model_config.get('n_positions', 1024),
+                    n_embd=model_config['n_embd'],
+                    n_layer=model_config['n_layer'],
+                    n_head=model_config['n_head'],
+                    quantization_bits=quantization_bits
+                )
+
+                # Create fixed precision model
+                model = QuantizedGPT2(config)
+
+            except ImportError:
+                # Fallback: try to use switchable model with single bit-width
+                print("Warning: QuantizedGPT2 not found, using SwitchableQATGPT2 with single bit-width")
+                from shared.models import SwitchableQATGPT2
+                from transformers import GPT2Config
+
+                config = GPT2Config(
+                    vocab_size=model_config.get('vocab_size', 50257),
+                    n_positions=model_config.get('n_positions', 1024),
+                    n_embd=model_config['n_embd'],
+                    n_layer=model_config['n_layer'],
+                    n_head=model_config['n_head']
+                )
+
+                model = SwitchableQATGPT2(config, bit_widths=bit_widths)
+                is_switchable = True  # Treat as switchable for API compatibility
 
         # Load weights
         if 'model_state_dict' in checkpoint:
             model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+            print("Model weights loaded successfully")
 
-        print(f"Model supports bit-widths: {bit_widths}")
     else:
-        raise ValueError("Invalid checkpoint format")
+        # Try to load as a direct model object
+        if hasattr(checkpoint, 'eval'):
+            model = checkpoint
+            print("Loaded model directly from checkpoint")
+
+            # Try to detect bit-widths
+            if hasattr(model, 'bit_widths'):
+                is_switchable = True
+                bit_widths = model.bit_widths
+                print(f"Model supports bit-widths: {bit_widths}")
+            elif hasattr(model, 'config') and hasattr(model.config, 'quantization_bits'):
+                is_switchable = False
+                bit_widths = [model.config.quantization_bits]
+                print(f"Fixed precision model: {bit_widths[0]}-bit")
+            else:
+                # Default assumption
+                print("Warning: Could not detect bit configuration, assuming 8-bit")
+                bit_widths = [8]
+                is_switchable = False
+        else:
+            raise ValueError("Invalid checkpoint format")
 
     # Load tokenizer
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    tokenizer.pad_token = tokenizer.eos_token
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = model.to(device)
 
     # Test each bit-width configuration
     all_results = {}
@@ -224,8 +298,10 @@ def test_quantized_model(model_path, datasets=['wikitext']):
         print(f"Testing {bits}-bit precision")
         print('='*40)
 
-        # Set model precision
-        model.set_precision(bits)
+        # Set model precision if switchable
+        if is_switchable and hasattr(model, 'set_precision'):
+            model.set_precision(bits)
+            print(f"Set model to {bits}-bit precision")
 
         # Evaluate on each dataset
         bit_results = {}
@@ -247,6 +323,10 @@ def test_quantized_model(model_path, datasets=['wikitext']):
             print(f"  Average loss: {result['avg_loss']:.4f}")
 
         all_results[f'{bits}bit'] = bit_results
+
+    # Add metadata about model type
+    all_results['model_type'] = 'switchable' if is_switchable else 'fixed'
+    all_results['bit_widths'] = bit_widths
 
     return all_results
 
@@ -334,6 +414,9 @@ def main():
                        help='Model to test (gpt2, gpt2-medium, gpt2-large, or path to checkpoint)')
     parser.add_argument('--quantized_model', type=str, default=None,
                        help='Path to quantized/switchable model checkpoint')
+    parser.add_argument('--model_type', type=str, default='auto',
+                       choices=['auto', 'switchable', 'fixed'],
+                       help='Type of quantized model (auto-detect by default)')
     parser.add_argument('--datasets', nargs='+', default=['wikitext'],
                        choices=['wikitext', 'c4', 'ptb'],
                        help='Datasets to evaluate on')
@@ -367,7 +450,8 @@ def main():
     if args.quantized_model:
         quantized_results = test_quantized_model(
             model_path=args.quantized_model,
-            datasets=args.datasets
+            datasets=args.datasets,
+            model_type=args.model_type
         )
 
     # Compare results
