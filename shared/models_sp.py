@@ -328,11 +328,18 @@ class SPModel(nn.Module):
 
         # Map pretrained weights to our model
         mapped_dict = {}
+        weights_loaded = 0
+        biases_loaded = 0
+
         for name, param in pretrained_dict.items():
             # Handle the mapping of pretrained weights to our switchable model
             if 'wte' in name or 'wpe' in name or 'ln' in name:
                 if name in model_dict and param.shape == model_dict[name].shape:
                     mapped_dict[name] = param
+                    if 'weight' in name:
+                        weights_loaded += 1
+                    elif 'bias' in name:
+                        biases_loaded += 1
             # Map attention and MLP weights
             elif 'attn.c_attn.weight' in name or 'attn.c_proj.weight' in name:
                 new_name = name.replace('.weight', '.linear.weight')
@@ -340,21 +347,31 @@ class SPModel(nn.Module):
                     # Handle Conv1D to Linear conversion
                     if len(param.shape) == 2:
                         mapped_dict[new_name] = param.t()  # Transpose for Conv1D to Linear
+                        weights_loaded += 1
                     else:
                         mapped_dict[new_name] = param
+                        weights_loaded += 1
             elif 'mlp.c_fc.weight' in name or 'mlp.c_proj.weight' in name:
                 new_name = name.replace('.weight', '.linear.weight')
                 if len(param.shape) == 2:
                     mapped_dict[new_name] = param.t()  # Transpose for Conv1D to Linear
+                    weights_loaded += 1
                 else:
                     mapped_dict[new_name] = param
+                    weights_loaded += 1
             # Map attention and MLP biases
             elif 'attn.c_attn.bias' in name or 'attn.c_proj.bias' in name:
                 new_name = name.replace('.bias', '.linear.bias')
                 mapped_dict[new_name] = param
+                biases_loaded += 1
             elif 'mlp.c_fc.bias' in name or 'mlp.c_proj.bias' in name:
                 new_name = name.replace('.bias', '.linear.bias')
                 mapped_dict[new_name] = param
+                biases_loaded += 1
+
+        print(f"✅ Loaded {len(mapped_dict)} weights from pretrained model")
+        print(f"   - Weights: {weights_loaded}")
+        print(f"   - Biases: {biases_loaded}")
 
         # Update model weights
         model_dict.update(mapped_dict)
@@ -518,5 +535,13 @@ class SPLMHeadModel(nn.Module):
 
     def load_pretrained_weights(self, pretrained_model, device='cuda'):
         """Load weights from pretrained GPT-2 model."""
+        # Load transformer weights
         self.transformer.load_pretrained_weights(pretrained_model.transformer, device)
+
+        # Load LM head weight (already tied to embeddings via weight sharing)
+        # Since weights are tied, this is already loaded through wte
+        # But we need to ensure the tie is maintained
+        self.lm_head.weight = self.transformer.wte.weight
+
+        print(f"LM head weights tied to token embeddings")
         return self

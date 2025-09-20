@@ -1063,9 +1063,9 @@ def run_comprehensive_test():
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    # Create a smaller model for testing (reduce layers)
-    print("⚠️ Using reduced configuration for memory efficiency...")
-    sp_model, sp_config = create_properly_initialized_model(use_pretrained=True, num_layers=6)  # Reduce from 12 to 6 layers
+    # Create full model for proper testing
+    print("Loading full 12-layer model for accurate testing...")
+    sp_model, sp_config = create_properly_initialized_model(use_pretrained=True, num_layers=12)  # Full 12-layer model
 
     # Move to device with memory check
     try:
@@ -1075,21 +1075,9 @@ def run_comprehensive_test():
         device = torch.device('cpu')
         sp_model = sp_model.to(device)
 
-    # Load GPT-2 model with same reduced config for comparison
-    from transformers import GPT2Config
-    gpt2_config = GPT2Config.from_pretrained('gpt2')
-    gpt2_config.n_layer = 6  # Match reduced layers
-    gpt2_model = GPT2LMHeadModel(gpt2_config)
-
-    # Load partial weights from pretrained
-    pretrained_full = GPT2LMHeadModel.from_pretrained('gpt2')
-    gpt2_model.transformer.wte = pretrained_full.transformer.wte
-    gpt2_model.transformer.wpe = pretrained_full.transformer.wpe
-    for i in range(6):
-        gpt2_model.transformer.h[i] = pretrained_full.transformer.h[i]
-    gpt2_model.transformer.ln_f = pretrained_full.transformer.ln_f
-    gpt2_model.lm_head = pretrained_full.lm_head
-    del pretrained_full  # Free memory
+    # Load full GPT-2 model for comparison
+    print("Loading full GPT-2 model for comparison...")
+    gpt2_model = GPT2LMHeadModel.from_pretrained('gpt2')  # Full 12-layer GPT-2
 
     try:
         gpt2_model = gpt2_model.to(device)
