@@ -2,6 +2,28 @@
 """
 Comprehensive Test of Fixed SP Model
 Tests all fixes applied according to implementation prompt
+
+STRICT TRAINING/EVALUATION SCHEDULE:
+=====================================
+This test follows a strict separation of training and evaluation stages:
+
+1. TRAINING STAGE (model.train()):
+   - Used ONLY for calibration/statistics collection
+   - Quantizers collect min/max statistics
+   - No actual quantization happens
+   - Returns unquantized tensors
+
+2. EVALUATION STAGE (model.eval()):
+   - Used for ALL testing and inference
+   - Quantizers use frozen statistics from training stage
+   - Actual quantization is applied
+   - Returns quantized tensors
+
+CRITICAL RULES:
+- ALWAYS use model.train() before collecting statistics
+- ALWAYS use model.eval() before testing/inference
+- NEVER mix training and evaluation in the same stage
+- ALWAYS call finish_calibration() before switching to eval mode
 """
 
 import sys
@@ -16,6 +38,24 @@ import gc
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from test.fix_model_initialization import create_properly_initialized_model
+
+
+def ensure_mode(model, mode, stage_name=""):
+    """Ensure model is in the correct mode with explicit logging."""
+    if mode == "train":
+        model.train()
+        print(f"    ⚙️ Set model to TRAINING mode for: {stage_name}")
+    elif mode == "eval":
+        model.eval()
+        print(f"    ⚙️ Set model to EVALUATION mode for: {stage_name}")
+    else:
+        raise ValueError(f"Invalid mode: {mode}. Must be 'train' or 'eval'")
+
+    # Verify mode was set correctly
+    if model.training and mode == "eval":
+        raise RuntimeError(f"Failed to set eval mode for {stage_name}")
+    if not model.training and mode == "train":
+        raise RuntimeError(f"Failed to set train mode for {stage_name}")
 
 
 def get_memory_info(stage_name=""):
@@ -124,12 +164,13 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
         print(f"\n📊 Calibrating {bits}-bit mode...")
         sp_model.set_precision(bits)
 
-        # Start manual calibration for all quantizers at this precision
-        print(f"  Starting calibration for {bits}-bit...")
+        # ==== TRAINING STAGE: Collect Statistics ====
+        print(f"  📈 TRAINING STAGE: Collecting statistics for {bits}-bit...")
 
         # CRITICAL: Must be in TRAINING mode for statistics collection
         sp_model.train()
 
+        # Start manual calibration for all quantizers at this precision
         for name, module in sp_model.named_modules():
             # Check for SPLinearWithLoRA modules
             if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
@@ -139,7 +180,7 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
                 if bits_key in module.quantizers_input:
                     module.quantizers_input[bits_key].start_calibration()
 
-        # Collect statistics (Pass 1 - training mode for statistics)
+        # Collect statistics (Pass 1 - MUST be in training mode)
         with torch.no_grad():
             for i, text in enumerate(calibration_texts):
                 tokens = tokenizer(
@@ -156,7 +197,7 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
                 if (i + 1) % 4 == 0:
                     print(f"    Processed {i + 1}/{len(calibration_texts)} samples")
 
-        # Finish calibration for all quantizers at this precision
+        # Finish calibration (compute scales from collected statistics)
         for name, module in sp_model.named_modules():
             # Check for SPLinearWithLoRA modules
             if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
@@ -166,9 +207,14 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
                 if bits_key in module.quantizers_input:
                     module.quantizers_input[bits_key].finish_calibration()
 
-        # Test with calibrated model
-        print(f"  Testing calibrated {bits}-bit model...")
+        print(f"  ✅ Statistics collection complete")
+
+        # ==== EVALUATION STAGE: Test with Calibrated Model ====
+        print(f"  🧪 EVALUATION STAGE: Testing calibrated {bits}-bit model...")
+
+        # CRITICAL: Switch to EVAL mode for actual quantization
         sp_model.eval()
+
         with torch.no_grad():
             test_text = calibration_texts[0]
             tokens = tokenizer(test_text, return_tensors='pt')['input_ids'].to(device)
@@ -177,17 +223,18 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
             ppl = torch.exp(torch.tensor(loss)).item()
             print(f"    Test loss: {loss:.4f}, PPL: {ppl:.2f}")
 
-        print(f"  ✅ {bits}-bit calibration complete")
+        print(f"  ✅ {bits}-bit calibration and evaluation complete")
 
     # Reset to 16-bit
     sp_model.set_precision(16)
     print("\n✅ Two-pass calibration complete for all precisions")
 
-    # Quick validation check
-    print("\n🧪 Quick calibration quality check...")
+    # ==== FINAL EVALUATION STAGE: Quality Check ====
+    print("\n🧪 FINAL EVALUATION: Calibration quality check...")
     test_text = "Machine learning and artificial intelligence are revolutionizing technology."
     tokens = tokenizer(test_text, return_tensors='pt')['input_ids'].to(device)
 
+    # CRITICAL: Ensure EVAL mode for all final testing
     sp_model.eval()
     results = {}
 
@@ -218,7 +265,10 @@ def test_16bit_equivalence(sp_model, gpt2_model, tokenizer, device):
     print("TEST 1: 16-BIT GPT-2 EQUIVALENCE")
     print("="*60)
 
+    # ==== EVALUATION STAGE: 16-bit Testing ====
     sp_model.set_precision(16)
+
+    # CRITICAL: Both models MUST be in EVAL mode for fair comparison
     sp_model.eval()
     gpt2_model.eval()
 
@@ -346,7 +396,8 @@ def test_quantization_degradation(sp_model, tokenizer, device):
 
         # Calibrate for non-16-bit precisions
         if precision < 16:
-            print(f"      Calibrating {precision}-bit quantizers...")
+            # ==== TRAINING STAGE: Calibration ====
+            print(f"      📈 TRAINING STAGE: Calibrating {precision}-bit quantizers...")
 
             # CRITICAL: Must be in TRAINING mode for statistics collection
             sp_model.train()
@@ -360,6 +411,7 @@ def test_quantization_degradation(sp_model, tokenizer, device):
                     if bits_key in module.quantizers_input:
                         module.quantizers_input[bits_key].start_calibration()
 
+            # Collect statistics in TRAINING mode
             with torch.no_grad():
                 # Use first few sentences for calibration
                 for i in range(min(5, len(test_sentences))):
@@ -367,7 +419,7 @@ def test_quantization_degradation(sp_model, tokenizer, device):
                     input_ids = inputs['input_ids'].to(device)
                     _ = sp_model(input_ids)
 
-            # Finish calibration
+            # Finish calibration (compute scales)
             for name, module in sp_model.named_modules():
                 if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
                     bits_key = f'{precision}bit'
@@ -376,9 +428,12 @@ def test_quantization_degradation(sp_model, tokenizer, device):
                     if bits_key in module.quantizers_input:
                         module.quantizers_input[bits_key].finish_calibration()
 
-            print(f"      Calibration complete")
+            print(f"      ✅ Calibration complete")
 
-        # Now test with calibrated model - switch to EVAL mode
+        # ==== EVALUATION STAGE: Testing ====
+        print(f"   🧪 EVALUATION STAGE: Testing {precision}-bit model...")
+
+        # CRITICAL: Switch to EVAL mode for actual testing
         sp_model.eval()
         losses = []
         perplexities = []
@@ -483,6 +538,8 @@ def test_lora_behavior(sp_model, tokenizer, device):
     inputs = tokenizer(test_input, return_tensors='pt')
     input_ids = inputs['input_ids'].to(device)
 
+    # ==== EVALUATION STAGE: Testing LoRA ====
+    # CRITICAL: MUST be in EVAL mode for testing
     sp_model.eval()
 
     print("Checking LoRA contribution across bit-widths...")
@@ -561,12 +618,13 @@ def test_quantizer_activation(sp_model, tokenizer, device):
         print(f"\n🔧 Testing {bits}-bit precision:")
         sp_model.set_precision(bits)
 
-        # Start manual calibration
-        print(f"   Running calibration...")
+        # ==== TRAINING STAGE: Calibration ====
+        print(f"   📈 TRAINING STAGE: Calibrating {bits}-bit precision...")
 
         # CRITICAL: Must be in TRAINING mode for statistics collection
         sp_model.train()
 
+        # Start manual calibration
         for name, module in sp_model.named_modules():
             if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
                 bits_key = f'{bits}bit'
@@ -575,13 +633,14 @@ def test_quantizer_activation(sp_model, tokenizer, device):
                 if bits_key in module.quantizers_input:
                     module.quantizers_input[bits_key].start_calibration()
 
+        # Collect statistics in TRAINING mode
         with torch.no_grad():
             for text in test_inputs:
                 inputs = tokenizer(text, return_tensors='pt')
                 input_ids = inputs['input_ids'].to(device)
                 _ = sp_model(input_ids)
 
-        # Finish calibration
+        # Finish calibration (compute scales)
         for name, module in sp_model.named_modules():
             if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
                 bits_key = f'{bits}bit'
@@ -590,9 +649,12 @@ def test_quantizer_activation(sp_model, tokenizer, device):
                 if bits_key in module.quantizers_input:
                     module.quantizers_input[bits_key].finish_calibration()
 
-        print(f"   Calibration complete")
+        print(f"   ✅ Calibration complete")
 
-        # Set to eval mode for testing
+        # ==== EVALUATION STAGE: Testing ====
+        print(f"   🧪 EVALUATION STAGE: Testing {bits}-bit precision...")
+
+        # CRITICAL: Switch to EVAL mode for testing
         sp_model.eval()
 
         # Check quantizer state after calibration
@@ -635,10 +697,12 @@ def test_quantizer_activation(sp_model, tokenizer, device):
             'all_calibrated': all(s['calibrated'] for s in quantizer_states)
         }
 
-    # Test 16-bit (should bypass quantization)
-    print(f"\n🔧 Testing 16-bit precision (no quantization):")
+    # ==== EVALUATION STAGE: 16-bit Testing (No Quantization) ====
+    print(f"\n🧪 EVALUATION STAGE: Testing 16-bit precision (no quantization):")
     sp_model.set_precision(16)
-    sp_model.eval()  # Ensure eval mode for 16-bit testing
+
+    # CRITICAL: MUST be in EVAL mode for 16-bit testing
+    sp_model.eval()
 
     losses = []
     with torch.no_grad():
@@ -703,6 +767,8 @@ def test_distillation_setup(sp_model, tokenizer, device):
     inputs = tokenizer(test_input, return_tensors='pt')
     input_ids = inputs['input_ids'].to(device)
 
+    # ==== EVALUATION STAGE: Testing Distillation ====
+    # CRITICAL: MUST be in EVAL mode for distillation testing
     sp_model.eval()
 
     teacher_outputs = None
@@ -763,6 +829,8 @@ def test_comprehensive_ppl(sp_model, tokenizer, device):
     print("TEST 6: COMPREHENSIVE PPL EVALUATION")
     print("="*60)
 
+    # ==== EVALUATION STAGE: Comprehensive Testing ====
+
     # Create a diverse test dataset with various text types
     test_dataset = {
         'technical': [
@@ -815,9 +883,10 @@ def test_comprehensive_ppl(sp_model, tokenizer, device):
         ]
     }
 
+    # CRITICAL: MUST be in EVAL mode for all perplexity testing
     sp_model.eval()
 
-    print("\nEvaluating perplexity across text categories and bit-widths...")
+    print("\n🧪 EVALUATION STAGE: Testing perplexity across text categories and bit-widths...")
 
     comprehensive_results = {}
 
