@@ -127,16 +127,19 @@ def load_pretrained_weights(model):
 
     # Copy transformer blocks - frozen by default (will be unfrozen for 32-bit teacher)
     for i in range(min(len(model.transformer.h), len(pretrained.transformer.h))):
-        # Layer normalizations - frozen by default
-        model.transformer.h[i].ln_1.weight.data = pretrained.transformer.h[i].ln_1.weight.data.clone()
-        model.transformer.h[i].ln_1.bias.data = pretrained.transformer.h[i].ln_1.bias.data.clone()
-        model.transformer.h[i].ln_1.weight.requires_grad = False
-        model.transformer.h[i].ln_1.bias.requires_grad = False
+        # Layer normalizations - load into ALL precision-specific layers
+        # For SwitchableLayerNorm, copy weights to each precision's LayerNorm
+        for ln_key in model.transformer.h[i].ln_1.ln_layers:
+            model.transformer.h[i].ln_1.ln_layers[ln_key].weight.data = pretrained.transformer.h[i].ln_1.weight.data.clone()
+            model.transformer.h[i].ln_1.ln_layers[ln_key].bias.data = pretrained.transformer.h[i].ln_1.bias.data.clone()
+            model.transformer.h[i].ln_1.ln_layers[ln_key].weight.requires_grad = False
+            model.transformer.h[i].ln_1.ln_layers[ln_key].bias.requires_grad = False
 
-        model.transformer.h[i].ln_2.weight.data = pretrained.transformer.h[i].ln_2.weight.data.clone()
-        model.transformer.h[i].ln_2.bias.data = pretrained.transformer.h[i].ln_2.bias.data.clone()
-        model.transformer.h[i].ln_2.weight.requires_grad = False
-        model.transformer.h[i].ln_2.bias.requires_grad = False
+        for ln_key in model.transformer.h[i].ln_2.ln_layers:
+            model.transformer.h[i].ln_2.ln_layers[ln_key].weight.data = pretrained.transformer.h[i].ln_2.weight.data.clone()
+            model.transformer.h[i].ln_2.ln_layers[ln_key].bias.data = pretrained.transformer.h[i].ln_2.bias.data.clone()
+            model.transformer.h[i].ln_2.ln_layers[ln_key].weight.requires_grad = False
+            model.transformer.h[i].ln_2.ln_layers[ln_key].bias.requires_grad = False
 
         # Attention QKV weights - transpose and freeze by default
         model.transformer.h[i].attn.c_attn.linear.weight.data = pretrained.transformer.h[i].attn.c_attn.weight.data.t().contiguous()
@@ -163,10 +166,12 @@ def load_pretrained_weights(model):
         model.transformer.h[i].mlp.c_proj.linear.bias.requires_grad = False
 
     # Final layer normalization - frozen by default
-    model.transformer.ln_f.weight.data = pretrained.transformer.ln_f.weight.data.clone()
-    model.transformer.ln_f.bias.data = pretrained.transformer.ln_f.bias.data.clone()
-    model.transformer.ln_f.weight.requires_grad = False
-    model.transformer.ln_f.bias.requires_grad = False
+    # Copy to all precision-specific LayerNorms
+    for ln_key in model.transformer.ln_f.ln_layers:
+        model.transformer.ln_f.ln_layers[ln_key].weight.data = pretrained.transformer.ln_f.weight.data.clone()
+        model.transformer.ln_f.ln_layers[ln_key].bias.data = pretrained.transformer.ln_f.bias.data.clone()
+        model.transformer.ln_f.ln_layers[ln_key].weight.requires_grad = False
+        model.transformer.ln_f.ln_layers[ln_key].bias.requires_grad = False
 
     # LoRA initialization - TEMPORARY: Commenting out to preserve zero initialization
     # TODO: Revisit this initialization strategy after tests pass
@@ -185,13 +190,21 @@ def load_pretrained_weights(model):
     #             lora_layer.lora_B.requires_grad = True
 
     # Just ensure LoRA parameters are trainable (they're already initialized in LoRALayer)
+    lora_count = 0
     for name, module in model.named_modules():
-        if hasattr(module, 'lora_adapters'):
-            for bit_key, lora_layer in module.lora_adapters.items():
-                if hasattr(lora_layer, 'lora_A') and isinstance(lora_layer.lora_A, nn.Parameter):
-                    lora_layer.lora_A.requires_grad = True
-                if hasattr(lora_layer, 'lora_B') and isinstance(lora_layer.lora_B, nn.Parameter):
-                    lora_layer.lora_B.requires_grad = True
+        try:
+            if module.lora_adapters:  # Will throw AttributeError if not present
+                for bit_key, lora_layer in module.lora_adapters.items():
+                    if isinstance(lora_layer.lora_A, nn.Parameter):
+                        lora_layer.lora_A.requires_grad = True
+                        lora_count += 1
+                    if isinstance(lora_layer.lora_B, nn.Parameter):
+                        lora_layer.lora_B.requires_grad = True
+        except AttributeError:
+            # Module doesn't have lora_adapters, continue
+            pass
+
+    print(f"Enabled {lora_count} LoRA adapter pairs for training")
 
     # Delete pretrained model to free memory immediately
     del pretrained
