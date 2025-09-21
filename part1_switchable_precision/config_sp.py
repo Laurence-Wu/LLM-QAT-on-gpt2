@@ -23,11 +23,11 @@ class ModelConfig:
         self.use_gradient_checkpointing = True
 
         # Quantizer type: 'minmax', 'relu_clip', 'tanh', or 'log'
-        self.quantizer_type = 'log'  # Default to min-max quantization
+        self.quantizer_type = 'log'  # Default to log quantization
         self.quantizer_per_bit = {
-            4: 'log',    # Use relu_clip for 4-bit (better for low precision)
-            8: 'log',    # Use relu_clip for 8-bit (handles outliers well)
-            16: 'log',   # Use relu_clip for 16-bit (non-uniform quantization)
+            6: 'log',    # Use log for 6-bit (non-uniform quantization)
+            8: 'log',    # Use log for 8-bit (non-uniform quantization)
+            16: 'log',   # Use log for 16-bit (non-uniform quantization)
             32: None     # No quantization for 32-bit FP32
         }
 
