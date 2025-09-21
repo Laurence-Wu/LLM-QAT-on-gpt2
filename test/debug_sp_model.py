@@ -48,6 +48,13 @@ from test.test_training_dynamics import (
     test_gradient_accumulation_effects,
     test_batch_norm_training_dynamics
 )
+from test.test_distillation_random_sampling import (
+    test_single_precision_per_batch,
+    test_teacher_cache_effectiveness,
+    test_distillation_loss_computation,
+    test_random_sampling_convergence,
+    run_all_distillation_tests
+)
 
 
 def calibrate_precision_with_debug(sp_model, tokenizer, device, precision, calibration_texts=None):
@@ -396,7 +403,7 @@ def run_comprehensive_test(test_suite: str = "all", quick_mode: bool = False):
     """Run comprehensive test suite with multiple testing modules.
 
     Args:
-        test_suite: Which test suite to run ('all', 'basic', 'precision', 'batchnorm', 'training')
+        test_suite: Which test suite to run ('all', 'basic', 'precision', 'batchnorm', 'training', 'distillation')
         quick_mode: If True, run tests with reduced samples for faster execution
     """
     print("\n" + "="*80)
@@ -535,6 +542,44 @@ def run_comprehensive_test(test_suite: str = "all", quick_mode: bool = False):
         print("\nTest: Batch Norm Training Dynamics")
         test_results['bn_dynamics'] = test_batch_norm_training_dynamics()
 
+    # New distillation tests with random sampling
+    if test_suite in ['all', 'distillation']:
+        print("\n" + "="*60)
+        print("RUNNING DISTILLATION WITH RANDOM SAMPLING TEST SUITE")
+        print("="*60)
+
+        # Test single precision per batch
+        print("\nTest: Single Precision Per Batch")
+        test_results['single_precision_batch'] = test_single_precision_per_batch()
+
+        # Clean up memory
+        gc.collect()
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
+        # Test teacher cache effectiveness
+        print("\nTest: Teacher Cache Effectiveness")
+        test_results['teacher_cache'] = test_teacher_cache_effectiveness()
+
+        # Clean up memory
+        gc.collect()
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
+        # Test distillation loss computation
+        print("\nTest: Distillation Loss Computation")
+        test_results['distill_loss'] = test_distillation_loss_computation()
+
+        # Clean up memory
+        gc.collect()
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
+        # Test random sampling convergence
+        print("\nTest: Random Sampling Convergence")
+        test_results['random_convergence'] = test_random_sampling_convergence()
+
+        # Clean up memory
+        gc.collect()
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
     print("\n" + "="*80)
     print("✅ TEST SUITE COMPLETE")
     print("="*80)
@@ -582,7 +627,7 @@ def print_test_summary(results: Dict):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Comprehensive SP Model Debug Suite')
     parser.add_argument('--suite', type=str, default='all',
-                       choices=['all', 'basic', 'precision', 'batchnorm', 'training'],
+                       choices=['all', 'basic', 'precision', 'batchnorm', 'training', 'distillation'],
                        help='Test suite to run')
     parser.add_argument('--quick', action='store_true',
                        help='Run tests in quick mode with reduced samples')
