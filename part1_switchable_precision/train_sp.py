@@ -256,10 +256,10 @@ def compute_loss_single_precision(model, batch, precision, teacher_bits, distill
                 # Use distillation loss if teacher outputs are available
                 loss = distill_mgr.compute_distillation_loss(outputs, input_ids)
             else:
-                # Fallback to standard cross-entropy if no teacher outputs cached
-                outputs_with_labels = model(input_ids, labels=input_ids, attention_mask=attention_mask)
-                loss = outputs_with_labels['loss']
-                print(f"Warning: No cached teacher for {precision}-bit, using standard loss")
+                # Throw error if no teacher outputs cached for student training
+                raise RuntimeError(f"No cached teacher outputs found for {precision}-bit student training. "
+                                   f"Ensure teacher (32-bit) has processed this batch first. "
+                                   f"Cache stats: {distill_mgr.get_cache_stats() if distill_mgr else 'No distill_mgr'}")
 
     # Clean up
     del outputs, input_ids
