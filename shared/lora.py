@@ -5,13 +5,17 @@ import math
 
 # Try relative imports first, fall back to direct imports
 try:
-    from .quantization import LearnableFakeQuantize
+    from .quant_methods import LearnableFakeQuantize
 except ImportError:
-    from quantization import LearnableFakeQuantize
+    try:
+        from quant_methods import LearnableFakeQuantize
+    except ImportError:
+        # Fallback to old quantization module if quant_methods doesn't exist
+        from quantization import LearnableFakeQuantize
 
 class LoRALayer(nn.Module):
     """LoRA adapter with fake quantization."""
-    def __init__(self, in_features, out_features, rank=8, alpha=16, bits=8):
+    def __init__(self, in_features, out_features, rank=8, alpha=16, bits=8, quantizer_type='minmax'):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -43,8 +47,8 @@ class LoRALayer(nn.Module):
             nn.init.zeros_(self.lora_B)  # This ensures zero contribution initially
 
             # Quantizers for LoRA weights (only for low-bit modes)
-            self.quantize_A = LearnableFakeQuantize(num_bits=bits, symmetric=True)
-            self.quantize_B = LearnableFakeQuantize(num_bits=bits, symmetric=True)
+            self.quantize_A = LearnableFakeQuantize(num_bits=bits, symmetric=True, quantizer_type=quantizer_type)
+            self.quantize_B = LearnableFakeQuantize(num_bits=bits, symmetric=True, quantizer_type=quantizer_type)
 
         # Only allocate buffers if LoRA is enabled to save memory
         if self.enabled:
@@ -74,7 +78,7 @@ class LoRALayer(nn.Module):
 class LinearWithLoRA(nn.Module):
     """Linear layer with LoRA adapter and quantization."""
     def __init__(self, in_features, out_features, bias=True, bits=8,
-                 lora_rank=8, lora_alpha=16, lora_dropout=0.1):
+                 lora_rank=8, lora_alpha=16, lora_dropout=0.1, quantizer_type='minmax'):
         super().__init__()
         self.bits = bits
         self.in_features = in_features
@@ -84,12 +88,12 @@ class LinearWithLoRA(nn.Module):
         self.linear = nn.Linear(in_features, out_features, bias=bias)
 
         # Fake quantizers
-        self.quantize_weight = LearnableFakeQuantize(num_bits=bits, symmetric=True)
-        self.quantize_input = LearnableFakeQuantize(num_bits=bits, symmetric=True)
+        self.quantize_weight = LearnableFakeQuantize(num_bits=bits, symmetric=True, quantizer_type=quantizer_type)
+        self.quantize_input = LearnableFakeQuantize(num_bits=bits, symmetric=True, quantizer_type=quantizer_type)
 
         # LoRA adapter with config parameters
         self.lora = LoRALayer(in_features, out_features,
-                                 rank=lora_rank, alpha=lora_alpha, bits=bits)
+                                 rank=lora_rank, alpha=lora_alpha, bits=bits, quantizer_type=quantizer_type)
 
         # Pre-allocate buffers for quantized tensors
         self.register_buffer('weight_quantized', torch.empty(out_features, in_features))
@@ -148,7 +152,8 @@ class SPLinearWithLoRA(nn.Module):
                  bit_widths=[4, 8, 16],
                  lora_rank_per_bit={4: 32, 8: 16, 16: 8},
                  lora_alpha_per_bit={4: 64, 8: 32, 16: 16},
-                 lora_dropout=0.1):
+                 lora_dropout=0.1,
+                 quantizer_per_bit=None):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -159,12 +164,17 @@ class SPLinearWithLoRA(nn.Module):
         self.linear = nn.Linear(in_features, out_features, bias=bias)
 
         # Create separate quantizers for each bit-width
+        if quantizer_per_bit is None:
+            quantizer_per_bit = {bits: 'minmax' for bits in bit_widths}
+
         self.quantizers_weight = nn.ModuleDict({
-            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True)
+            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True,
+                                                quantizer_type=quantizer_per_bit.get(bits, 'minmax'))
             for bits in bit_widths
         })
         self.quantizers_input = nn.ModuleDict({
-            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True)
+            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True,
+                                                quantizer_type=quantizer_per_bit.get(bits, 'minmax'))
             for bits in bit_widths
         })
 
@@ -175,7 +185,8 @@ class SPLinearWithLoRA(nn.Module):
                 in_features, out_features,
                 rank=lora_rank_per_bit.get(bits, 16),  # Use config value directly
                 alpha=lora_alpha_per_bit.get(bits, 32),
-                bits=bits
+                bits=bits,
+                quantizer_type=quantizer_per_bit.get(bits, 'minmax')
             )
             for bits in bit_widths
         })

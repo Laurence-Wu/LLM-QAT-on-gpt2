@@ -22,6 +22,15 @@ class ModelConfig:
         self.activation_bits = 8  # Bits for activation quantization
         self.use_gradient_checkpointing = True
 
+        # Quantizer type: 'minmax', 'relu_clip', 'tanh', or 'log'
+        self.quantizer_type = 'minmax'  # Default to standard min-max quantization
+        self.quantizer_per_bit = {
+            4: 'minmax',    # Use minmax for 4-bit (standard)
+            8: 'minmax',    # Use minmax for 8-bit (standard)
+            16: 'minmax',   # Use minmax for 16-bit
+            32: None        # No quantization for 32-bit FP32
+        }
+
         # LoRA settings (used when not in switchable mode)
         self.lora_rank = 16
         self.lora_alpha = 32

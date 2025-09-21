@@ -41,6 +41,7 @@ class SPAttention(nn.Module):
                 "Example: config.lora_rank_per_bit = {4: 8, 8: 16, 16: 32}"
             )
         lora_dropout = getattr(config, 'lora_dropout', 0.1)
+        quantizer_per_bit = getattr(config, 'quantizer_per_bit', None)
 
         # Switchable layers with per-bit-width LoRA modules
         self.c_attn = SPLinearWithLoRA(
@@ -48,14 +49,16 @@ class SPAttention(nn.Module):
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
-            lora_dropout=lora_dropout
+            lora_dropout=lora_dropout,
+            quantizer_per_bit=quantizer_per_bit
         )
         self.c_proj = SPLinearWithLoRA(
             config.n_embd, config.n_embd,
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
-            lora_dropout=lora_dropout
+            lora_dropout=lora_dropout,
+            quantizer_per_bit=quantizer_per_bit
         )
 
         # No KV cache quantization needed
@@ -113,6 +116,7 @@ class SPMLP(nn.Module):
                 "Required: lora_rank_per_bit, lora_alpha_per_bit"
             )
         lora_dropout = getattr(config, 'lora_dropout', 0.1)
+        quantizer_per_bit = getattr(config, 'quantizer_per_bit', None)
 
         # Switchable layers with per-bit-width LoRA modules
         self.c_fc = SPLinearWithLoRA(
@@ -120,14 +124,16 @@ class SPMLP(nn.Module):
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
-            lora_dropout=lora_dropout
+            lora_dropout=lora_dropout,
+            quantizer_per_bit=quantizer_per_bit
         )
         self.c_proj = SPLinearWithLoRA(
             4 * config.n_embd, config.n_embd,
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
-            lora_dropout=lora_dropout
+            lora_dropout=lora_dropout,
+            quantizer_per_bit=quantizer_per_bit
         )
         self.act = nn.GELU()
 
