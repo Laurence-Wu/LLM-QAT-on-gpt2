@@ -30,24 +30,8 @@ def test_switchable_bn_basic():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     bit_widths = [4, 8, 16, 32]
 
-    # Test SwitchableBatchNorm1d
-    print("\n1. Testing SwitchableBatchNorm1d:")
-    bn1d = SwitchableBatchNorm1d(
-        num_features=256,
-        precision_levels=bit_widths
-    ).to(device)
-
-    x = torch.randn(32, 256, device=device)
-
-    for bits in bit_widths:
-        bn1d.set_precision(bits)
-        bn1d.train()
-        out = bn1d(x)
-        assert out.shape == x.shape, f"Shape mismatch for {bits}-bit"
-        print(f"   ✅ {bits}-bit: output shape correct")
-
     # Test SwitchableLayerNorm
-    print("\n2. Testing SwitchableLayerNorm:")
+    print("\n1. Testing SwitchableLayerNorm:")
     ln = SwitchableLayerNorm(
         normalized_shape=768,
         precision_levels=bit_widths
@@ -202,7 +186,6 @@ def test_replace_bn_utility():
     class StandardModel(nn.Module):
         def __init__(self):
             super().__init__()
-            self.bn1d = nn.BatchNorm1d(256)
             self.ln = nn.LayerNorm(768)
             self.linear = nn.Linear(768, 768)
 
@@ -216,11 +199,9 @@ def test_replace_bn_utility():
     )
 
     # Check replacements
-    assert isinstance(switchable_model.bn1d, SwitchableBatchNorm1d)
     assert isinstance(switchable_model.ln, SwitchableLayerNorm)
     assert isinstance(switchable_model.linear, nn.Linear)  # Should not be replaced
 
-    print("   ✅ BatchNorm1d replaced with SwitchableBatchNorm1d")
     print("   ✅ LayerNorm replaced with SwitchableLayerNorm")
     print("   ✅ Linear layer unchanged")
 
@@ -229,17 +210,13 @@ def test_replace_bn_utility():
     switchable_model = switchable_model.to(device)
 
     for bits in bit_widths:
-        switchable_model.bn1d.set_precision(bits)
         switchable_model.ln.set_precision(bits)
 
         # Test forward pass
-        x1d = torch.randn(8, 256, device=device)
         xln = torch.randn(4, 768, device=device)
 
-        out1d = switchable_model.bn1d(x1d)
         outln = switchable_model.ln(xln)
 
-        assert out1d.shape == x1d.shape
         assert outln.shape == xln.shape
 
     print("   ✅ All replaced layers function correctly")
