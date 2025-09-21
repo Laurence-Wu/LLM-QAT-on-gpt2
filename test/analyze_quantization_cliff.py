@@ -80,11 +80,12 @@ def analyze_quantization_utilization(model, bits, device):
 
 def analyze_attention_pattern_degradation(model, tokenizer, device, text="The cat sat on the mat."):
     """
-    Compare attention patterns across different bit widths to see where they break down.
+    Compare output distributions across different bit widths to see where they break down.
+    Since the model doesn't support output_attentions, we'll analyze output distributions instead.
     """
     tokens = tokenizer(text, return_tensors='pt')['input_ids'].to(device)
 
-    attention_patterns = {}
+    output_patterns = {}
 
     for bits in [32, 16, 8, 6]:
         if bits not in [6, 8, 16, 32]:  # Skip if not in configured widths
@@ -94,18 +95,22 @@ def analyze_attention_pattern_degradation(model, tokenizer, device, text="The ca
         model.eval()
 
         with torch.no_grad():
-            outputs = model(tokens, output_attentions=True)
+            outputs = model(tokens)
 
-            # Get attention from middle layer
-            if 'attentions' in outputs:
-                mid_layer = len(outputs['attentions']) // 2
-                attention = outputs['attentions'][mid_layer].squeeze(0)  # Remove batch dim
+            # Get logits
+            if isinstance(outputs, dict):
+                logits = outputs['logits']
+            else:
+                logits = outputs
 
-                # Average over heads
-                attention_avg = attention.mean(dim=0).cpu().numpy()
-                attention_patterns[bits] = attention_avg
+            # Get probability distribution for each position
+            probs = torch.softmax(logits, dim=-1)
 
-    return attention_patterns
+            # Store the average probability distribution
+            avg_probs = probs.mean(dim=1).squeeze(0).cpu().numpy()
+            output_patterns[bits] = avg_probs
+
+    return output_patterns
 
 
 def analyze_vocabulary_discrimination(model, tokenizer, device):
@@ -287,30 +292,39 @@ def main():
             for layer in util_stats['poor_layers'][:3]:  # Show first 3
                 print(f"      - {layer['name']}: {layer['unique_values']}/{layer['total_levels']} levels ({layer['utilization']*100:.1f}%)")
 
-    # 2. Analyze attention patterns
+    # 2. Analyze output distributions
     print("\n" + "="*60)
-    print("2. ATTENTION PATTERN ANALYSIS")
+    print("2. OUTPUT DISTRIBUTION ANALYSIS")
     print("="*60)
 
-    attention_patterns = analyze_attention_pattern_degradation(model, tokenizer, device)
-    all_results['attention'] = attention_patterns
+    output_patterns = analyze_attention_pattern_degradation(model, tokenizer, device)
+    all_results['output_patterns'] = output_patterns
 
-    if 8 in attention_patterns and 6 in attention_patterns:
-        # Compare attention patterns
-        pattern_8bit = attention_patterns[8]
-        pattern_6bit = attention_patterns[6]
+    if 8 in output_patterns and 6 in output_patterns:
+        # Compare output distributions
+        pattern_8bit = output_patterns[8]
+        pattern_6bit = output_patterns[6]
 
-        # Calculate correlation
-        from scipy.stats import pearsonr
-        corr, _ = pearsonr(pattern_8bit.flatten(), pattern_6bit.flatten())
-        print(f"\n   Attention pattern correlation (8-bit vs 6-bit): {corr:.4f}")
+        # Calculate KL divergence instead of correlation for probability distributions
+        from scipy.stats import entropy
 
-        if corr < 0.5:
-            print("   ❌ CRITICAL: Attention patterns severely degraded at 6-bit")
-        elif corr < 0.8:
-            print("   ⚠️ WARNING: Attention patterns noticeably degraded at 6-bit")
+        # Add small epsilon to avoid log(0)
+        pattern_8bit_safe = pattern_8bit + 1e-10
+        pattern_6bit_safe = pattern_6bit + 1e-10
+
+        # Normalize to ensure they sum to 1
+        pattern_8bit_safe = pattern_8bit_safe / pattern_8bit_safe.sum()
+        pattern_6bit_safe = pattern_6bit_safe / pattern_6bit_safe.sum()
+
+        kl_div = entropy(pattern_6bit_safe, pattern_8bit_safe)
+        print(f"\n   Output distribution KL divergence (6-bit from 8-bit): {kl_div:.4f}")
+
+        if kl_div > 1.0:
+            print("   ❌ CRITICAL: Output distributions severely degraded at 6-bit")
+        elif kl_div > 0.5:
+            print("   ⚠️ WARNING: Output distributions noticeably degraded at 6-bit")
         else:
-            print("   ✅ Attention patterns relatively preserved at 6-bit")
+            print("   ✅ Output distributions relatively preserved at 6-bit")
 
     # 3. Analyze vocabulary discrimination
     print("\n" + "="*60)
