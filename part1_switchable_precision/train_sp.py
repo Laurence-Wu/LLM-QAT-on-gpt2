@@ -399,25 +399,33 @@ def train_sp(model, train_loader, val_loader, config, model_config):
         if distill_mgr:
             distill_mgr.step()
 
-        # Track statistics (use teacher bits for tracking)
-        stats.update(iteration, total_loss, teacher_bits, optimizer)
+        # Track statistics (use max precision for tracking)
+        stats.update(iteration, total_loss, max(all_bits), optimizer)
 
-        # Update progress bar
+        # Update progress bar with S-BN precision distribution
         if iteration % 20 == 0:
             allocated = torch.cuda.memory_allocated() / 1024**3
             reserved = torch.cuda.memory_reserved() / 1024**3
+            precision_str = ', '.join([f"{b}:{c}" for b, c in sorted(precision_counts.items())])
             progress_bar.set_postfix({
                 'loss': f'{total_loss:.4f}',
-                'bits': f'{student_bits_list}',
+                'precisions': precision_str,
                 'gpu_alloc': f'{allocated:.1f}GB',
                 'gpu_res': f'{reserved:.1f}GB'
             })
 
         # Periodic evaluation
         if should_evaluate(iteration, config):
-            val_loss = evaluate(model, val_loader, device)
-            stats.add_validation(val_loss)
-            print(f"\n[Iter {iteration}] Train: {total_loss:.4f}, Val: {val_loss:.4f}, Training bits: {student_bits_list}")
+            print(f"\n[Iter {iteration}] Evaluating all S-BN precisions...")
+            val_losses = {}
+            for bits in all_bits:
+                model.set_precision(bits)
+                val_loss = evaluate(model, val_loader, device)
+                val_losses[bits] = val_loss
+            avg_val_loss = sum(val_losses.values()) / len(val_losses)
+            stats.add_validation(avg_val_loss)
+            val_str = ', '.join([f"{b}b:{v:.4f}" for b, v in sorted(val_losses.items())])
+            print(f"[Iter {iteration}] Train: {total_loss:.4f}, Val: [{val_str}]")
             model.train()  # Return to training mode
 
         # Periodic memory cleanup

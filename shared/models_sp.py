@@ -15,9 +15,11 @@ from torch.utils.checkpoint import checkpoint
 try:
     from .quantization import LearnableFakeQuantize
     from .lora import SPLinearWithLoRA
+    from .switchable_batchnorm import SwitchableLayerNorm, PrecisionController
 except ImportError:
     from quantization import LearnableFakeQuantize
     from lora import SPLinearWithLoRA
+    from switchable_batchnorm import SwitchableLayerNorm, PrecisionController
 
 
 class SPAttention(nn.Module):
@@ -156,14 +158,25 @@ class SPBlock(nn.Module):
 
     def __init__(self, config: GPT2Config, bit_widths=[4, 8, 16]):
         super().__init__()
-        self.ln_1 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
+        # Use Switchable LayerNorm for multi-precision support
+        self.ln_1 = SwitchableLayerNorm(
+            config.n_embd,
+            precision_levels=bit_widths,
+            eps=config.layer_norm_epsilon
+        )
         self.attn = SPAttention(config, bit_widths)
-        self.ln_2 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
+        self.ln_2 = SwitchableLayerNorm(
+            config.n_embd,
+            precision_levels=bit_widths,
+            eps=config.layer_norm_epsilon
+        )
         self.mlp = SPMLP(config, bit_widths)
 
     def set_precision(self, bits):
-        """Set precision for attention and MLP layers."""
+        """Set precision for all layers including LayerNorm."""
+        self.ln_1.set_precision(bits)
         self.attn.set_precision(bits)
+        self.ln_2.set_precision(bits)
         self.mlp.set_precision(bits)
 
     def forward(self, hidden_states, attention_mask=None, use_checkpoint=False):
@@ -208,17 +221,25 @@ class SPModel(nn.Module):
             for _ in range(config.n_layer)
         ])
 
-        self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
+        # Use Switchable LayerNorm for final layer
+        self.ln_f = SwitchableLayerNorm(
+            config.n_embd,
+            precision_levels=self.bit_widths,
+            eps=config.layer_norm_epsilon
+        )
+
+        # Initialize precision controller
+        self.precision_controller = PrecisionController(self.bit_widths)
+        self.precision_controller.register_module(self)
 
     def set_precision(self, bits):
-        """Set precision for all transformer blocks."""
+        """Set precision for all transformer blocks and normalization layers."""
         if bits not in self.bit_widths:
             raise ValueError(f"Bit width {bits} not in configured widths {self.bit_widths}")
         self.current_bit_width = bits
 
-        # Set precision for all blocks
-        for block in self.h:
-            block.set_precision(bits)
+        # Use precision controller to set precision for entire model
+        self.precision_controller.set_precision(bits)
 
         # Handle weight freezing/unfreezing based on precision
         # 32-bit teacher: Unfreeze all base weights (but not embeddings)
