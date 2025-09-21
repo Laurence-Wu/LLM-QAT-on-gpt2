@@ -82,12 +82,27 @@ class LearnableFakeQuantize(nn.Module):
         self.temp_min = None
         self.temp_max = None
 
-    def finish_calibration(self):
+    def finish_calibration(self, debug=False):
         """Finish calibration and compute final scale/zero_point."""
         if self.num_batches_collected > 0 and self.temp_min is not None:
             # Move temp stats to running stats
             self.running_min.resize_as_(self.temp_min).copy_(self.temp_min)
             self.running_max.resize_as_(self.temp_max).copy_(self.temp_max)
+
+            # Debug output for calibration statistics
+            if debug:
+                print(f"\n      📊 Calibration Debug Stats for {self.num_bits}-bit:")
+                if self.per_channel:
+                    print(f"         Running min (per-channel): mean={self.running_min.mean().item():.6f}, "
+                          f"min={self.running_min.min().item():.6f}, max={self.running_min.max().item():.6f}")
+                    print(f"         Running max (per-channel): mean={self.running_max.mean().item():.6f}, "
+                          f"min={self.running_max.min().item():.6f}, max={self.running_max.max().item():.6f}")
+                else:
+                    print(f"         Running min: {self.running_min.item():.6f}")
+                    print(f"         Running max: {self.running_max.item():.6f}")
+                print(f"         Range: [{self.running_min.min().item() if self.per_channel else self.running_min.item():.6f}, "
+                      f"{self.running_max.max().item() if self.per_channel else self.running_max.item():.6f}]")
+                print(f"         Batches collected: {self.num_batches_collected}")
 
             # Compute scale and zero_point
             with torch.no_grad():
@@ -96,6 +111,10 @@ class LearnableFakeQuantize(nn.Module):
                     abs_max = torch.clamp(abs_max, min=self.eps)
                     self.scale.resize_as_(abs_max).copy_(abs_max / (2**(self.num_bits-1) - 1))
                     self.zero_point.resize_as_(abs_max).zero_()
+
+                    if debug:
+                        print(f"         Computed scale: mean={self.scale.mean().item():.6f}, "
+                              f"min={self.scale.min().item():.6f}, max={self.scale.max().item():.6f}")
                 else:
                     range_val = torch.clamp(self.running_max - self.running_min, min=self.eps)
                     self.scale.resize_as_(range_val).copy_(range_val / (2**self.num_bits - 1))
@@ -110,6 +129,8 @@ class LearnableFakeQuantize(nn.Module):
         else:
             # If no statistics collected, just turn off collection mode
             self.collecting_stats = False
+            if debug:
+                print(f"      ⚠️ No statistics collected for {self.num_bits}-bit quantizer")
 
     def _collect_statistics_batch(self, x):
         """Collect min/max statistics for current batch (Pass 1)."""

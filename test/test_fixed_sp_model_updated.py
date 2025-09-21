@@ -9,7 +9,7 @@ import numpy as np
 from test.dataset_utils import calculate_perplexity_properly, get_calibration_texts
 
 
-def calibrate_precision(sp_model, tokenizer, device, precision, calibration_texts=None):
+def calibrate_precision(sp_model, tokenizer, device, precision, calibration_texts=None, debug=False):
     """Helper function to calibrate a specific precision consistently."""
     if precision >= 32:
         return  # No calibration needed for 32-bit teacher
@@ -41,15 +41,24 @@ def calibrate_precision(sp_model, tokenizer, device, precision, calibration_text
                               max_length=128, truncation=True)['input_ids'].to(device)
             _ = sp_model(tokens)
 
-    # Finish calibration
+    # Finish calibration with debug output
+    debug_enabled = debug or (precision in [4, 8])  # Always debug for 4-bit and 8-bit
+    sample_count = 0
+
     for name, module in sp_model.named_modules():
         if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
             if bits_key in module.quantizers_weight:
-                module.quantizers_weight[bits_key].finish_calibration()
+                # Only show debug for first few modules to avoid clutter
+                show_debug = debug_enabled and sample_count < 2
+                module.quantizers_weight[bits_key].finish_calibration(debug=show_debug)
+                sample_count += 1
             if bits_key in module.quantizers_input:
-                module.quantizers_input[bits_key].finish_calibration()
+                # Only show debug for first few modules
+                show_debug = debug_enabled and sample_count < 4
+                module.quantizers_input[bits_key].finish_calibration(debug=show_debug)
+                sample_count += 1
 
-    print(f"      ✅ Calibrated {calibrated_count} quantizers")
+    print(f"      ✅ Calibrated {calibrated_count} quantizers with {len(calibration_texts)} samples")
 
 
 def test_32bit_equivalence_updated(sp_model, gpt2_model, tokenizer, device):
