@@ -447,80 +447,64 @@ class SPModel(nn.Module):
             return hidden_states
 
     def load_pretrained_weights(self, pretrained_model, device='cuda'):
-        """Load weights from pretrained GPT-2 model."""
-        pretrained_dict = pretrained_model.state_dict()
-        model_dict = self.state_dict()
+        """Load weights from pretrained GPT-2 model with S-BN support."""
 
-        # Map pretrained weights to our model
-        mapped_dict = {}
-        weights_loaded = 0
-        biases_loaded = 0
+        # Copy embeddings - frozen (never trained)
+        self.wte.weight.data = pretrained_model.transformer.wte.weight.data.clone()
+        self.wte.weight.requires_grad = False  # Keep frozen
 
-        for name, param in pretrained_dict.items():
-            # Handle the mapping of pretrained weights to our switchable model
-            if 'wte' in name or 'wpe' in name or 'ln' in name:
-                if name in model_dict and param.shape == model_dict[name].shape:
-                    mapped_dict[name] = param
-                    if 'weight' in name:
-                        weights_loaded += 1
-                    elif 'bias' in name:
-                        biases_loaded += 1
-            # Map attention and MLP weights
-            elif 'attn.c_attn.weight' in name or 'attn.c_proj.weight' in name:
-                new_name = name.replace('.weight', '.linear.weight')
-                if 'c_attn' in name or 'c_proj' in name:
-                    # Handle Conv1D to Linear conversion
-                    if len(param.shape) == 2:
-                        mapped_dict[new_name] = param.t()  # Transpose for Conv1D to Linear
-                        weights_loaded += 1
-                    else:
-                        mapped_dict[new_name] = param
-                        weights_loaded += 1
-            elif 'mlp.c_fc.weight' in name or 'mlp.c_proj.weight' in name:
-                new_name = name.replace('.weight', '.linear.weight')
-                if len(param.shape) == 2:
-                    mapped_dict[new_name] = param.t()  # Transpose for Conv1D to Linear
-                    weights_loaded += 1
-                else:
-                    mapped_dict[new_name] = param
-                    weights_loaded += 1
-            # Map attention and MLP biases
-            elif 'attn.c_attn.bias' in name or 'attn.c_proj.bias' in name:
-                new_name = name.replace('.bias', '.linear.bias')
-                mapped_dict[new_name] = param
-                biases_loaded += 1
-            elif 'mlp.c_fc.bias' in name or 'mlp.c_proj.bias' in name:
-                new_name = name.replace('.bias', '.linear.bias')
-                mapped_dict[new_name] = param
-                biases_loaded += 1
+        self.wpe.weight.data = pretrained_model.transformer.wpe.weight.data.clone()
+        self.wpe.weight.requires_grad = False  # Keep frozen
 
-        print(f"✅ Loaded {len(mapped_dict)} weights from pretrained model")
-        print(f"   - Weights: {weights_loaded}")
-        print(f"   - Biases: {biases_loaded}")
+        # Load transformer blocks with S-BN support
+        for i in range(min(len(self.h), len(pretrained_model.transformer.h))):
+            # Layer normalizations - load into ALL precision-specific layers
+            # For SwitchableLayerNorm, copy weights to each precision's LayerNorm
+            for ln_key in self.h[i].ln_1.ln_layers:
+                self.h[i].ln_1.ln_layers[ln_key].weight.data = pretrained_model.transformer.h[i].ln_1.weight.data.clone()
+                self.h[i].ln_1.ln_layers[ln_key].bias.data = pretrained_model.transformer.h[i].ln_1.bias.data.clone()
+                self.h[i].ln_1.ln_layers[ln_key].weight.requires_grad = False
+                self.h[i].ln_1.ln_layers[ln_key].bias.requires_grad = False
 
-        # Update model weights
-        model_dict.update(mapped_dict)
-        self.load_state_dict(model_dict, strict=False)
-        self.to(device)
+            for ln_key in self.h[i].ln_2.ln_layers:
+                self.h[i].ln_2.ln_layers[ln_key].weight.data = pretrained_model.transformer.h[i].ln_2.weight.data.clone()
+                self.h[i].ln_2.ln_layers[ln_key].bias.data = pretrained_model.transformer.h[i].ln_2.bias.data.clone()
+                self.h[i].ln_2.ln_layers[ln_key].weight.requires_grad = False
+                self.h[i].ln_2.ln_layers[ln_key].bias.requires_grad = False
 
-        # Verify critical weights were loaded
-        loaded_weights = set(mapped_dict.keys())
-        expected_patterns = ['wte', 'wpe', 'ln', 'attn.c_attn', 'attn.c_proj', 'mlp.c_fc', 'mlp.c_proj']
-        missing_patterns = []
-        for pattern in expected_patterns:
-            if not any(pattern in name for name in loaded_weights):
-                missing_patterns.append(pattern)
+            # Attention QKV weights - transpose and freeze by default
+            self.h[i].attn.c_attn.linear.weight.data = pretrained_model.transformer.h[i].attn.c_attn.weight.data.t().contiguous()
+            self.h[i].attn.c_attn.linear.bias.data = pretrained_model.transformer.h[i].attn.c_attn.bias.data.clone()
+            self.h[i].attn.c_attn.linear.weight.requires_grad = False
+            self.h[i].attn.c_attn.linear.bias.requires_grad = False
 
-        if missing_patterns:
-            print(f"⚠️ Warning: Missing weight patterns: {missing_patterns}")
+            # Attention projection weights - transpose and freeze by default
+            self.h[i].attn.c_proj.linear.weight.data = pretrained_model.transformer.h[i].attn.c_proj.weight.data.t().contiguous()
+            self.h[i].attn.c_proj.linear.bias.data = pretrained_model.transformer.h[i].attn.c_proj.bias.data.clone()
+            self.h[i].attn.c_proj.linear.weight.requires_grad = False
+            self.h[i].attn.c_proj.linear.bias.requires_grad = False
 
-        print(f"✅ Loaded {len(mapped_dict)} weights from pretrained model")
+            # MLP weights - transpose and freeze by default
+            self.h[i].mlp.c_fc.linear.weight.data = pretrained_model.transformer.h[i].mlp.c_fc.weight.data.t().contiguous()
+            self.h[i].mlp.c_fc.linear.bias.data = pretrained_model.transformer.h[i].mlp.c_fc.bias.data.clone()
+            self.h[i].mlp.c_fc.linear.weight.requires_grad = False
+            self.h[i].mlp.c_fc.linear.bias.requires_grad = False
 
-        # Count biases loaded
-        bias_count = sum(1 for name in mapped_dict if 'bias' in name)
-        weight_count = sum(1 for name in mapped_dict if 'weight' in name)
-        print(f"   - Weights: {weight_count}")
-        print(f"   - Biases: {bias_count}")
+            self.h[i].mlp.c_proj.linear.weight.data = pretrained_model.transformer.h[i].mlp.c_proj.weight.data.t().contiguous()
+            self.h[i].mlp.c_proj.linear.bias.data = pretrained_model.transformer.h[i].mlp.c_proj.bias.data.clone()
+            self.h[i].mlp.c_proj.linear.weight.requires_grad = False
+            self.h[i].mlp.c_proj.linear.bias.requires_grad = False
+
+        # Final layer normalization - frozen by default
+        # Copy to all precision-specific LayerNorms
+        for ln_key in self.ln_f.ln_layers:
+            self.ln_f.ln_layers[ln_key].weight.data = pretrained_model.transformer.ln_f.weight.data.clone()
+            self.ln_f.ln_layers[ln_key].bias.data = pretrained_model.transformer.ln_f.bias.data.clone()
+            self.ln_f.ln_layers[ln_key].weight.requires_grad = False
+            self.ln_f.ln_layers[ln_key].bias.requires_grad = False
+
+        print(f"✅ Loaded pretrained weights with S-BN support")
+        print(f"   - All precision-specific LayerNorm layers initialized")
 
         return self
 
