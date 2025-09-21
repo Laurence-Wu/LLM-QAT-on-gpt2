@@ -208,10 +208,12 @@ class LearnableFakeQuantize(nn.Module):
         Uses the formula: X_Q = α⌊X_R/α⌉ where α = max(|X_R|)/(2^(N-1) - 1)
         """
         # Apply standard min-max quantization
-        return MinMaxQuantizationFunction.apply(
+        x_quant = MinMaxQuantizationFunction.apply(
             x, self.scale, self.zero_point,
             self.num_bits, self.symmetric
         )
+        # Straight-through estimator is handled in the Function
+        return x_quant
 
     def _quantize_relu_clip(self, x):
         """
@@ -225,9 +227,8 @@ class LearnableFakeQuantize(nn.Module):
         x_quant = ReLUClipQuantizationFunction.apply(
             x, self.scale, max_val, self.num_bits
         )
-
-        # Straight-through estimator
-        return x + (x_quant - x).detach()
+        # Straight-through estimator is handled in the Function
+        return x_quant
 
     def _quantize_tanh(self, x):
         """
@@ -244,9 +245,8 @@ class LearnableFakeQuantize(nn.Module):
         x_quant = TanhQuantizationFunction.apply(
             x, input_scale, self.num_bits, self.symmetric
         )
-
-        # Straight-through estimator
-        return x + (x_quant - x).detach()
+        # Straight-through estimator is handled in the Function
+        return x_quant
 
     def _quantize_log(self, x):
         """
@@ -271,9 +271,8 @@ class LearnableFakeQuantize(nn.Module):
         x_quant = LogQuantizationFunction.apply(
             x, log_min, log_range, self.num_bits
         )
-
-        # Straight-through estimator
-        return x + (x_quant - x).detach()
+        # Straight-through estimator is handled in the Function
+        return x_quant
 
     def _perform_one_shot_calibration(self, x):
         """
