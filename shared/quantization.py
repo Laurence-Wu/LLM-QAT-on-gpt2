@@ -116,6 +116,34 @@ class LearnableFakeQuantize(nn.Module):
                     range_val = torch.clamp(self.running_max, min=self.eps)
                     self.scale.resize_as_(range_val).copy_(range_val / (2**self.num_bits - 1))
                     self.zero_point.resize_as_(range_val).zero_()
+                elif self.quantizer_type == 'log':
+                    # For log quantization, compute and store the log₂ range from running min/max
+                    # We'll use scale and zero_point to store log_min and log_range
+                    non_zero_mask = (self.running_min != 0) | (self.running_max != 0)
+                    if non_zero_mask.any():
+                        abs_values = torch.cat([
+                            torch.abs(self.running_min[non_zero_mask]),
+                            torch.abs(self.running_max[non_zero_mask])
+                        ])
+                        abs_values = torch.clamp(abs_values, min=self.eps)
+                        log_values = torch.log2(abs_values)  # Use log₂ as per paper
+                        log_min = log_values.min()
+                        log_max = log_values.max()
+                    else:
+                        # Fallback if all values are zero
+                        log_min = torch.log2(torch.tensor(self.eps))
+                        log_max = torch.log2(torch.tensor(1.0))
+
+                    log_range = log_max - log_min
+                    # Store log_min in zero_point and log_range in scale for efficiency
+                    self.zero_point.resize_as_(self.running_max).fill_(log_min.item())
+                    self.scale.resize_as_(self.running_max).fill_(log_range.item())
+                elif self.quantizer_type == 'tanh':
+                    # For tanh quantization, scale represents the input range
+                    abs_max = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
+                    abs_max = torch.clamp(abs_max, min=self.eps)
+                    self.scale.resize_as_(abs_max).copy_(abs_max)
+                    self.zero_point.resize_as_(abs_max).zero_()
                 elif self.symmetric:
                     abs_max = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
                     abs_max = torch.clamp(abs_max, min=self.eps)
@@ -250,22 +278,15 @@ class LearnableFakeQuantize(nn.Module):
 
     def _quantize_log(self, x):
         """
-        Logarithmic quantization - non-uniform quantization.
-        Allocates more levels to smaller values.
-        """
-        # Get log range from calibration stats
-        if self.calibrated:
-            abs_min = torch.abs(self.running_min) + self.eps
-            abs_max = torch.abs(self.running_max) + self.eps
-            log_min = torch.log2(abs_min)
-            log_max = torch.log2(abs_max)
-        else:
-            abs_x = torch.abs(x) + self.eps
-            log_x = torch.log2(abs_x)
-            log_min = log_x.min()
-            log_max = log_x.max()
+        Logarithmic quantization following LogQuant formula.
+        LogQuant(x) = 0 if x = 0, else 2^x_hat · sign(x)
 
-        log_range = log_max - log_min + self.eps
+        Uses precomputed log_min and log_range from calibration.
+        """
+        # Use precomputed log_min and log_range from calibration
+        # They are stored in zero_point and scale respectively
+        log_min = self.zero_point
+        log_range = self.scale
 
         # Apply logarithmic quantization
         x_quant = LogQuantizationFunction.apply(
@@ -297,6 +318,28 @@ class LearnableFakeQuantize(nn.Module):
                 range_val = torch.clamp(self.running_max, min=self.eps)
                 self.scale.resize_as_(range_val).copy_(range_val / (2**self.num_bits - 1))
                 self.zero_point.resize_as_(range_val).zero_()
+            elif self.quantizer_type == 'log':
+                # For log quantization, compute log range from the already collected min/max
+                # min_val and max_val already contain the actual data range
+                abs_min = torch.abs(min_val)
+                abs_max = torch.abs(max_val)
+                # Get the range of absolute values (excluding zeros)
+                abs_values = torch.stack([abs_min, abs_max])
+                abs_values = abs_values[abs_values > 0]  # Filter out zeros
+                if abs_values.numel() > 0:
+                    abs_values = torch.clamp(abs_values, min=self.eps)
+                    log_values = torch.log2(abs_values)  # Use log₂ as per paper
+                    log_min = log_values.min()
+                    log_max = log_values.max()
+                else:
+                    # Fallback if all values are zero
+                    log_min = torch.log2(torch.tensor(self.eps))
+                    log_max = torch.log2(torch.tensor(1.0))
+
+                log_range = log_max - log_min
+                # Store log_min in zero_point and log_range in scale for use in _quantize_log
+                self.zero_point.resize_as_(max_val).fill_(log_min.item())
+                self.scale.resize_as_(max_val).fill_(log_range.item())
             elif self.symmetric:
                 abs_max = torch.max(torch.abs(min_val), torch.abs(max_val))
                 abs_max = torch.clamp(abs_max, min=self.eps)

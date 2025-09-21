@@ -118,52 +118,84 @@ class TanhQuantizationFunction(torch.autograd.Function):
 
 
 class LogQuantizationFunction(torch.autograd.Function):
-    """Logarithmic quantization for non-uniform quantization levels."""
+    """
+    Logarithmic quantization following the SP-Net paper formula:
+    LogQuant(x) = 0 if x = 0, else 2^x_hat · sign(x)
+    where x_hat = rescale(Q(normalize(|log₂(x)|)))
+    """
     @staticmethod
     def forward(ctx, input, log_min, log_range, num_bits):
-        ctx.save_for_backward(input, log_min.clone(), log_range.clone())
-        ctx.num_bits = num_bits
-
+        """
+        Args:
+            input: Tensor to quantize
+            log_min: Pre-calibrated min for log₂ space
+            log_range: Pre-calibrated range for log₂ space
+            num_bits: Number of bits for quantization
+        """
         eps = 1e-7
 
-        # Separate sign and magnitude
+        # Save for backward pass
+        ctx.save_for_backward(input)
+        ctx.num_bits = num_bits
+
+        # Step 1: Handle exact zeros (LogQuant(x) = 0 if x = 0)
+        zero_mask = (torch.abs(input) < eps)
+
+        # Step 2: Extract sign s(x) = sign(x)
         sign_input = torch.sign(input)
-        abs_input = torch.abs(input) + eps
 
-        # Apply logarithm to magnitude
-        log_input = torch.log2(abs_input)
+        # Step 3: Get absolute value and prevent log(0)
+        abs_input = torch.abs(input).clamp(min=eps)
 
-        # Normalize to [0, 1] using calibrated range
-        log_normalized = (log_input - log_min) / (log_range + eps)
+        # Step 4: Apply base-2 logarithm as specified in the paper
+        # Paper states: "logarithm base-2 was used"
+        log_abs_input = torch.log2(abs_input)  # Critical: use log₂
+
+        # Step 5: Normalize using calibrated stats
+        # normalize(x) = (x - min(x))/(max(x) - min(x))
+        log_normalized = (log_abs_input - log_min) / (log_range.clamp(min=eps))
         log_normalized = torch.clamp(log_normalized, 0, 1)
 
-        # Quantize uniformly in log space
-        quantized = torch.round(log_normalized * (2**num_bits - 1))
-        quantized = torch.clamp(quantized, 0, 2**num_bits - 1)
+        # Step 6: Quantize Q(normalized) with num_bits levels
+        n_levels = 2**num_bits - 1
+        quantized = torch.round(log_normalized * n_levels)
+        quantized = torch.clamp(quantized, 0, n_levels)
 
-        # Dequantize
-        log_dequant_normalized = quantized / (2**num_bits - 1)
-        log_dequant = log_dequant_normalized * log_range + log_min
+        # Step 7: Dequantize back to normalized space [0, 1]
+        q_normalized = quantized / n_levels
 
-        # Convert back to linear space
-        abs_output = torch.pow(2, log_dequant)
-        output = sign_input * abs_output
+        # Step 8: Rescale back to original log space
+        # rescale(x) = x · (max(x) - min(x)) + min(x)
+        x_hat = q_normalized * log_range + log_min
 
-        # Handle zeros (input values that were very close to zero)
-        output = torch.where(torch.abs(input) < eps, torch.zeros_like(input), output)
+        # Step 9: Apply 2^x_hat (NOT e^x_hat!) to return to linear space
+        # This is critical - must use same base as the logarithm
+        magnitude = torch.pow(2, x_hat)  # 2^x_hat, not e^x_hat
+
+        # Step 10: Apply sign: 2^x_hat · sign(x)
+        output = magnitude * sign_input
+
+        # Step 11: Restore exact zeros
+        output = torch.where(zero_mask, torch.zeros_like(input), output)
+
+        # Store statistics for potential reuse
+        ctx.log_min = log_min
+        ctx.log_range = log_range
 
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
-        # Straight-through estimator
-        input, log_min, log_range = ctx.saved_tensors
+        """
+        Straight-through estimator as mentioned in the paper
+        """
+        input, = ctx.saved_tensors
+
+        # Basic STE: pass gradients through
         grad_input = grad_output.clone()
 
-        # Optional: Scale gradient by logarithmic derivative
-        # eps = 1e-7
-        # abs_input = torch.abs(input) + eps
-        # log_derivative = 1 / (abs_input * torch.log(2))
-        # grad_input = grad_output * log_derivative
+        # Optional: clip gradients for stability with logarithmic quantization
+        # This helps prevent gradient explosion near zero values
+        grad_input = torch.clamp(grad_input, -10, 10)
 
         return grad_input, None, None, None
