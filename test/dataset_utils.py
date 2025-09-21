@@ -127,26 +127,40 @@ def calculate_perplexity_properly(model, tokenizer, device, dataset_name='wikite
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
 
-    # Tokenize as one long sequence
-    encodings = tokenizer(text, return_tensors='pt')
-
-    # Limit to model's max position embeddings to avoid indexing errors
+    # Tokenize with truncation to avoid the warning
+    # We'll process in chunks if needed
     max_model_length = 1024  # GPT-2's max position embeddings
-    if encodings.input_ids.size(1) > max_model_length:
-        print(f"   Truncating to model's max length: {max_model_length}")
-        encodings.input_ids = encodings.input_ids[:, :max_model_length]
 
-    # Further limit if specified
-    if max_samples and encodings.input_ids.size(1) > max_samples:
-        encodings.input_ids = encodings.input_ids[:, :max_samples]
+    # First, tokenize with truncation to get initial tokens
+    if max_samples and max_samples < max_model_length:
+        target_length = max_samples
+    else:
+        target_length = max_model_length
+
+    # Tokenize with explicit max_length to avoid warning
+    encodings = tokenizer(
+        text,
+        return_tensors='pt',
+        max_length=target_length,
+        truncation=True,
+        padding=False
+    )
+
+    # Verify we have the expected length
+    actual_length = encodings.input_ids.size(1)
+    if actual_length < target_length and not max_samples:
+        # If we got less than expected, try to get more text
+        # This means the entire dataset was shorter than our target
+        print(f"   Dataset has {actual_length} tokens (less than target {target_length})")
 
     # Evaluate in sliding windows
     nlls = []  # Negative log likelihoods
     prev_end_loc = 0
 
     total_tokens = encodings.input_ids.size(1)
-    print(f"   Total tokens to evaluate: {total_tokens:,}")
-    print(f"   Window size: {max_length}, Stride: {stride}")
+    if total_tokens > 0:
+        print(f"   Total tokens to evaluate: {total_tokens:,}")
+        print(f"   Window size: {max_length}, Stride: {stride}")
 
     # Process windows
     for i in range(0, encodings.input_ids.size(1), stride):

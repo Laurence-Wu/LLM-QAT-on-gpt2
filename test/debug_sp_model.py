@@ -17,6 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from test.fix_model_initialization import create_properly_initialized_model
 from test.dataset_utils import calculate_perplexity_properly, get_calibration_texts
+from test.calculate_perplexity_chunked import calculate_perplexity_chunked
 
 
 def calibrate_precision_with_debug(sp_model, tokenizer, device, precision, calibration_texts=None):
@@ -368,7 +369,11 @@ def run_comprehensive_test():
     sp_model, sp_config = create_properly_initialized_model(use_pretrained=True, num_layers=12)
     sp_model = sp_model.to(device)
 
-    gpt2_model = GPT2LMHeadModel.from_pretrained('gpt2')
+    # Load GPT-2 with warning suppression
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*loss_type.*")
+        gpt2_model = GPT2LMHeadModel.from_pretrained('gpt2')
     gpt2_model = gpt2_model.to(device)
 
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
