@@ -124,13 +124,14 @@ class LogQuantizationFunction(torch.autograd.Function):
     where x_hat = rescale(Q(normalize(|log₂(x)|)))
     """
     @staticmethod
-    def forward(ctx, input, log_min, log_range, num_bits):
+    def forward(ctx, input, log_min, log_range, num_bits, debug=False):
         """
         Args:
             input: Tensor to quantize
             log_min: Pre-calibrated min for log₂ space
             log_range: Pre-calibrated range for log₂ space
             num_bits: Number of bits for quantization
+            debug: Whether to print debug information
         """
         eps = 1e-7
 
@@ -138,8 +139,16 @@ class LogQuantizationFunction(torch.autograd.Function):
         ctx.save_for_backward(input)
         ctx.num_bits = num_bits
 
+        if debug:
+            print(f"    🔧 LogQuant Debug ({num_bits}-bit):")
+            print(f"       Input shape: {input.shape}")
+            print(f"       Input range: [{input.min().item():.6f}, {input.max().item():.6f}]")
+            print(f"       Calibrated log_min: {log_min.item():.6f}")
+            print(f"       Calibrated log_range: {log_range.item():.6f}")
+
         # Step 1: Handle exact zeros (LogQuant(x) = 0 if x = 0)
         zero_mask = (torch.abs(input) < eps)
+        zero_count = zero_mask.sum().item()
 
         # Step 2: Extract sign s(x) = sign(x)
         sign_input = torch.sign(input)
@@ -151,6 +160,10 @@ class LogQuantizationFunction(torch.autograd.Function):
         # Paper states: "logarithm base-2 was used"
         log_abs_input = torch.log2(abs_input)  # Critical: use log₂
 
+        if debug:
+            print(f"       Zero values: {zero_count}/{input.numel()}")
+            print(f"       Log₂ range: [{log_abs_input.min().item():.6f}, {log_abs_input.max().item():.6f}]")
+
         # Step 5: Normalize using calibrated stats
         # normalize(x) = (x - min(x))/(max(x) - min(x))
         log_normalized = (log_abs_input - log_min) / (log_range.clamp(min=eps))
@@ -160,6 +173,11 @@ class LogQuantizationFunction(torch.autograd.Function):
         n_levels = 2**num_bits - 1
         quantized = torch.round(log_normalized * n_levels)
         quantized = torch.clamp(quantized, 0, n_levels)
+
+        if debug:
+            print(f"       Normalized range: [{log_normalized.min().item():.6f}, {log_normalized.max().item():.6f}]")
+            print(f"       Quantization levels: {n_levels+1} ({num_bits}-bit)")
+            print(f"       Quantized levels used: {len(torch.unique(quantized))}/{n_levels+1}")
 
         # Step 7: Dequantize back to normalized space [0, 1]
         q_normalized = quantized / n_levels
@@ -177,6 +195,12 @@ class LogQuantizationFunction(torch.autograd.Function):
 
         # Step 11: Restore exact zeros
         output = torch.where(zero_mask, torch.zeros_like(input), output)
+
+        if debug:
+            quantization_error = torch.mean(torch.abs(output - input)).item()
+            print(f"       Output range: [{output.min().item():.6f}, {output.max().item():.6f}]")
+            print(f"       Mean quantization error: {quantization_error:.6f}")
+            print(f"       Relative error: {quantization_error / (torch.abs(input).mean().item() + eps):.4f}")
 
         # Store statistics for potential reuse
         ctx.log_min = log_min
