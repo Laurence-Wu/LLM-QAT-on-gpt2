@@ -139,7 +139,11 @@ def test_multi_batch_training():
 
             # Forward pass - Student
             student_output = student_model(tokens)
-            student_logits = student_output['logits']
+            # Handle different output formats from SP model
+            if isinstance(student_output, dict):
+                student_logits = student_output['logits']
+            else:
+                student_logits = student_output
 
             # Forward pass - Teacher
             with torch.no_grad():
@@ -287,7 +291,11 @@ def test_quantization_aware_training():
 
                 # Forward pass
                 outputs = model(tokens)
-                logits = outputs['logits']
+                # Handle different output formats from SP model
+                if isinstance(outputs, dict):
+                    logits = outputs['logits']
+                else:
+                    logits = outputs
 
                 # Compute loss
                 shift_logits = logits[..., :-1, :].contiguous()
@@ -401,9 +409,15 @@ def test_distillation_effectiveness():
                 with torch.no_grad():
                     teacher_output = teacher_model(tokens)
 
+                # Handle different output formats from SP model
+                if isinstance(student_output, dict):
+                    student_logits = student_output['logits']
+                else:
+                    student_logits = student_output
+
                 # Distillation loss with specified temperature
                 distill_loss = compute_distillation_loss(
-                    student_output['logits'],
+                    student_logits,
                     teacher_output.logits,
                     temperature=temp
                 )
@@ -495,7 +509,11 @@ def test_gradient_accumulation_effects():
 
                 # Forward pass
                 outputs = model(tokens)
-                logits = outputs['logits']
+                # Handle different output formats from SP model
+                if isinstance(outputs, dict):
+                    logits = outputs['logits']
+                else:
+                    logits = outputs
 
                 # Compute loss
                 shift_logits = logits[..., :-1, :].contiguous()
@@ -596,7 +614,11 @@ def test_batch_norm_training_dynamics():
 
         # Forward pass
         outputs = model(tokens)
-        logits = outputs['logits']
+        # Handle different output formats from SP model
+        if isinstance(outputs, dict):
+            logits = outputs['logits']
+        else:
+            logits = outputs
 
         # Compute loss
         shift_logits = logits[..., :-1, :].contiguous()
