@@ -20,7 +20,7 @@ from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from test.fix_model_initialization import create_properly_initialized_model
 from test.dataset_utils import get_calibration_texts
 from part1_switchable_precision.distillation_manager import DistillationManager
-from part1_switchable_precision.config_qat import TrainingConfig
+from part1_switchable_precision.config_sp import TrainingConfig
 
 
 def test_single_precision_per_batch():
