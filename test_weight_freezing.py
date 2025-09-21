@@ -58,10 +58,17 @@ def test_precision_switching():
         print(f"  - Embeddings (wte): {embed_status}")
         assert embed_status == "frozen", f"ERROR: Embeddings should be frozen for {bits}-bit"
 
-        # LM Head (should always be frozen since it's tied to embeddings)
-        lm_head_status = details.get('lm_head.weight', 'NOT FOUND')
-        print(f"  - LM Head: {lm_head_status}")
-        assert lm_head_status == "frozen", f"ERROR: LM Head should be frozen for {bits}-bit"
+        # LM Head (weight is tied to embeddings, so it won't appear as a separate parameter)
+        # Check if lm_head.weight exists as a separate parameter or is tied
+        if 'lm_head.weight' in details:
+            lm_head_status = details.get('lm_head.weight')
+            print(f"  - LM Head: {lm_head_status}")
+            assert lm_head_status == "frozen", f"ERROR: LM Head should be frozen for {bits}-bit"
+        else:
+            print(f"  - LM Head: tied to embeddings (wte.weight)")
+            # Verify that weights are actually tied
+            assert model.lm_head.weight.data_ptr() == model.transformer.wte.weight.data_ptr(), \
+                "ERROR: LM head weights should be tied to embeddings"
 
         # Check transformer blocks for 32-bit
         if bits == 32:
