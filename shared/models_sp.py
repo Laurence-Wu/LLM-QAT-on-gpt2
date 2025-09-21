@@ -450,56 +450,56 @@ class SPModel(nn.Module):
         """Load weights from pretrained GPT-2 model with S-BN support."""
 
         # Copy embeddings - frozen (never trained)
-        self.wte.weight.data = pretrained_model.transformer.wte.weight.data.clone()
+        self.wte.weight.data = pretrained_model.wte.weight.data.clone()
         self.wte.weight.requires_grad = False  # Keep frozen
 
-        self.wpe.weight.data = pretrained_model.transformer.wpe.weight.data.clone()
+        self.wpe.weight.data = pretrained_model.wpe.weight.data.clone()
         self.wpe.weight.requires_grad = False  # Keep frozen
 
         # Load transformer blocks with S-BN support
-        for i in range(min(len(self.h), len(pretrained_model.transformer.h))):
+        for i in range(min(len(self.h), len(pretrained_model.h))):
             # Layer normalizations - load into ALL precision-specific layers
             # For SwitchableLayerNorm, copy weights to each precision's LayerNorm
             for ln_key in self.h[i].ln_1.ln_layers:
-                self.h[i].ln_1.ln_layers[ln_key].weight.data = pretrained_model.transformer.h[i].ln_1.weight.data.clone()
-                self.h[i].ln_1.ln_layers[ln_key].bias.data = pretrained_model.transformer.h[i].ln_1.bias.data.clone()
+                self.h[i].ln_1.ln_layers[ln_key].weight.data = pretrained_model.h[i].ln_1.weight.data.clone()
+                self.h[i].ln_1.ln_layers[ln_key].bias.data = pretrained_model.h[i].ln_1.bias.data.clone()
                 self.h[i].ln_1.ln_layers[ln_key].weight.requires_grad = False
                 self.h[i].ln_1.ln_layers[ln_key].bias.requires_grad = False
 
             for ln_key in self.h[i].ln_2.ln_layers:
-                self.h[i].ln_2.ln_layers[ln_key].weight.data = pretrained_model.transformer.h[i].ln_2.weight.data.clone()
-                self.h[i].ln_2.ln_layers[ln_key].bias.data = pretrained_model.transformer.h[i].ln_2.bias.data.clone()
+                self.h[i].ln_2.ln_layers[ln_key].weight.data = pretrained_model.h[i].ln_2.weight.data.clone()
+                self.h[i].ln_2.ln_layers[ln_key].bias.data = pretrained_model.h[i].ln_2.bias.data.clone()
                 self.h[i].ln_2.ln_layers[ln_key].weight.requires_grad = False
                 self.h[i].ln_2.ln_layers[ln_key].bias.requires_grad = False
 
             # Attention QKV weights - transpose and freeze by default
-            self.h[i].attn.c_attn.linear.weight.data = pretrained_model.transformer.h[i].attn.c_attn.weight.data.t().contiguous()
-            self.h[i].attn.c_attn.linear.bias.data = pretrained_model.transformer.h[i].attn.c_attn.bias.data.clone()
+            self.h[i].attn.c_attn.linear.weight.data = pretrained_model.h[i].attn.c_attn.weight.data.t().contiguous()
+            self.h[i].attn.c_attn.linear.bias.data = pretrained_model.h[i].attn.c_attn.bias.data.clone()
             self.h[i].attn.c_attn.linear.weight.requires_grad = False
             self.h[i].attn.c_attn.linear.bias.requires_grad = False
 
             # Attention projection weights - transpose and freeze by default
-            self.h[i].attn.c_proj.linear.weight.data = pretrained_model.transformer.h[i].attn.c_proj.weight.data.t().contiguous()
-            self.h[i].attn.c_proj.linear.bias.data = pretrained_model.transformer.h[i].attn.c_proj.bias.data.clone()
+            self.h[i].attn.c_proj.linear.weight.data = pretrained_model.h[i].attn.c_proj.weight.data.t().contiguous()
+            self.h[i].attn.c_proj.linear.bias.data = pretrained_model.h[i].attn.c_proj.bias.data.clone()
             self.h[i].attn.c_proj.linear.weight.requires_grad = False
             self.h[i].attn.c_proj.linear.bias.requires_grad = False
 
             # MLP weights - transpose and freeze by default
-            self.h[i].mlp.c_fc.linear.weight.data = pretrained_model.transformer.h[i].mlp.c_fc.weight.data.t().contiguous()
-            self.h[i].mlp.c_fc.linear.bias.data = pretrained_model.transformer.h[i].mlp.c_fc.bias.data.clone()
+            self.h[i].mlp.c_fc.linear.weight.data = pretrained_model.h[i].mlp.c_fc.weight.data.t().contiguous()
+            self.h[i].mlp.c_fc.linear.bias.data = pretrained_model.h[i].mlp.c_fc.bias.data.clone()
             self.h[i].mlp.c_fc.linear.weight.requires_grad = False
             self.h[i].mlp.c_fc.linear.bias.requires_grad = False
 
-            self.h[i].mlp.c_proj.linear.weight.data = pretrained_model.transformer.h[i].mlp.c_proj.weight.data.t().contiguous()
-            self.h[i].mlp.c_proj.linear.bias.data = pretrained_model.transformer.h[i].mlp.c_proj.bias.data.clone()
+            self.h[i].mlp.c_proj.linear.weight.data = pretrained_model.h[i].mlp.c_proj.weight.data.t().contiguous()
+            self.h[i].mlp.c_proj.linear.bias.data = pretrained_model.h[i].mlp.c_proj.bias.data.clone()
             self.h[i].mlp.c_proj.linear.weight.requires_grad = False
             self.h[i].mlp.c_proj.linear.bias.requires_grad = False
 
         # Final layer normalization - frozen by default
         # Copy to all precision-specific LayerNorms
         for ln_key in self.ln_f.ln_layers:
-            self.ln_f.ln_layers[ln_key].weight.data = pretrained_model.transformer.ln_f.weight.data.clone()
-            self.ln_f.ln_layers[ln_key].bias.data = pretrained_model.transformer.ln_f.bias.data.clone()
+            self.ln_f.ln_layers[ln_key].weight.data = pretrained_model.ln_f.weight.data.clone()
+            self.ln_f.ln_layers[ln_key].bias.data = pretrained_model.ln_f.bias.data.clone()
             self.ln_f.ln_layers[ln_key].weight.requires_grad = False
             self.ln_f.ln_layers[ln_key].bias.requires_grad = False
 
