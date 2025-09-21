@@ -23,11 +23,11 @@ class ModelConfig:
         self.use_gradient_checkpointing = True
 
         # Quantizer type: 'minmax', 'relu_clip', 'tanh', or 'log'
-        self.quantizer_type = 'minmax'  # Default to standard min-max quantization
+        self.quantizer_type = 'log'  # Default to standard min-max quantization
         self.quantizer_per_bit = {
-            4: 'minmax',    # Use minmax for 4-bit (standard)
-            8: 'minmax',    # Use minmax for 8-bit (standard)
-            16: 'minmax',   # Use minmax for 16-bit
+            4: 'log',    # Use minmax for 4-bit (standard)
+            8: 'log',    # Use minmax for 8-bit (standard)
+            16: 'log',   # Use minmax for 16-bit
             32: None        # No quantization for 32-bit FP32
         }
 
