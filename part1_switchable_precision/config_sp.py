@@ -23,11 +23,11 @@ class ModelConfig:
         self.use_gradient_checkpointing = True
 
         # Quantizer type: 'minmax', 'relu_clip', 'tanh', or 'log'
-        self.quantizer_type = 'minmax'  # Default to min-max quantization
+        self.quantizer_type = 'log'  # Default to min-max quantization
         self.quantizer_per_bit = {
-            4: 'minmax',    # Use relu_clip for 4-bit (better for low precision)
-            8: 'minmax',    # Use relu_clip for 8-bit (handles outliers well)
-            16: 'minmax',   # Use relu_clip for 16-bit (non-uniform quantization)
+            4: 'log',    # Use relu_clip for 4-bit (better for low precision)
+            8: 'log',    # Use relu_clip for 8-bit (handles outliers well)
+            16: 'log',   # Use relu_clip for 16-bit (non-uniform quantization)
             32: None     # No quantization for 32-bit FP32
         }
 
@@ -40,8 +40,6 @@ class ModelConfig:
         self.bit_widths = [4, 8, 16, 32]  # Include teacher bit-width in list
         self.teacher_bits = 32  # Teacher uses FP32 (no quantization)
 
-        # Training precision - set this to the desired bit-width for training
-        self.training_bits = 8  # Default to 8-bit training
 
         # Lower precision uses lower rank for efficiency
         # CRITICAL: 32-bit must have rank=0 (no LoRA for teacher)
