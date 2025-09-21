@@ -200,7 +200,7 @@ class LearnableFakeQuantize(nn.Module):
 
             self.num_batches_collected += 1
 
-    def forward(self, x, debug=False):
+    def forward(self, x, debug=True):
         """
         Forward pass with multiple quantization strategies.
         The quantizer type determines how we transform and quantize the input.
