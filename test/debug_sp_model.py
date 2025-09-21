@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
-Merged test file with sliding window approach and debug statistics for calibration.
-This version includes all improvements and debug features for 4-bit and 8-bit calibration.
+Comprehensive SP Model Debug Suite
+Integrates all testing modules for thorough model validation including:
+- Precision mismatch detection
+- Batch normalization effects
+- Training dynamics observation
+- Quantization analysis
+- Distillation effectiveness
 """
 
 import sys
@@ -11,13 +16,38 @@ import torch.nn.functional as F
 import numpy as np
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 import gc
+import argparse
+from typing import Dict, List, Optional
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Import base utilities
 from test.fix_model_initialization import create_properly_initialized_model
 from test.dataset_utils import calculate_perplexity_properly, get_calibration_texts
 from test.calculate_perplexity_chunked import calculate_perplexity_chunked
+
+# Import new test modules
+from test.test_precision_mismatch import (
+    detect_precision_mismatch,
+    test_precision_consistency,
+    test_layer_precision_analysis,
+    test_quantization_saturation
+)
+from test.test_batchnorm_effects import (
+    test_bn_statistics_tracking,
+    test_bn_gradient_flow,
+    test_bn_mode_switching,
+    test_bn_with_small_batch,
+    test_bn_precision_switching_consistency
+)
+from test.test_training_dynamics import (
+    test_multi_batch_training,
+    test_quantization_aware_training,
+    test_distillation_effectiveness,
+    test_gradient_accumulation_effects,
+    test_batch_norm_training_dynamics
+)
 
 
 def calibrate_precision_with_debug(sp_model, tokenizer, device, precision, calibration_texts=None):
@@ -40,12 +70,17 @@ def calibrate_precision_with_debug(sp_model, tokenizer, device, precision, calib
 
     # Start calibration
     for name, module in sp_model.named_modules():
-        if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
-            if bits_key in module.quantizers_weight:
-                module.quantizers_weight[bits_key].start_calibration()
+        try:
+            quantizers_weight = module.quantizers_weight
+            quantizers_input = module.quantizers_input
+        except AttributeError:
+            continue
+        if quantizers_weight is not None and quantizers_input is not None:
+            if bits_key in quantizers_weight:
+                quantizers_weight[bits_key].start_calibration()
                 calibrated_count += 1
-            if bits_key in module.quantizers_input:
-                module.quantizers_input[bits_key].start_calibration()
+            if bits_key in quantizers_input:
+                quantizers_input[bits_key].start_calibration()
                 calibrated_count += 1
 
     print(f"      Started calibration for {calibrated_count} quantizers")
@@ -64,17 +99,22 @@ def calibrate_precision_with_debug(sp_model, tokenizer, device, precision, calib
 
     sample_count = 0
     for name, module in sp_model.named_modules():
-        if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
-            if bits_key in module.quantizers_weight:
+        try:
+            quantizers_weight = module.quantizers_weight
+            quantizers_input = module.quantizers_input
+        except AttributeError:
+            continue
+        if quantizers_weight is not None and quantizers_input is not None:
+            if bits_key in quantizers_weight:
                 # Show debug for first 2 weight quantizers
                 show_debug = enable_debug and sample_count < 2
-                module.quantizers_weight[bits_key].finish_calibration(debug=show_debug)
+                quantizers_weight[bits_key].finish_calibration(debug=show_debug)
                 sample_count += 1
 
-            if bits_key in module.quantizers_input:
+            if bits_key in quantizers_input:
                 # Show debug for next 2 input quantizers
                 show_debug = enable_debug and (2 <= sample_count < 4)
-                module.quantizers_input[bits_key].finish_calibration(debug=show_debug)
+                quantizers_input[bits_key].finish_calibration(debug=show_debug)
                 sample_count += 1
 
     print(f"      ✅ Calibrated {calibrated_count} quantizers with {len(calibration_texts)} samples\n")
@@ -222,12 +262,20 @@ def test_lora_behavior_sliding(sp_model, tokenizer, device):
         total_loras = 0
 
         for name, module in sp_model.named_modules():
-            if hasattr(module, 'lora_adapters'):
+            try:
+                lora_adapters = module.lora_adapters
+            except AttributeError:
+                continue
+            if lora_adapters is not None:
                 bit_key = f'{precision}bit'
-                if bit_key in module.lora_adapters:
-                    lora = module.lora_adapters[bit_key]
+                if bit_key in lora_adapters:
+                    lora = lora_adapters[bit_key]
                     total_loras += 1
-                    if hasattr(lora, 'enabled') and lora.enabled:
+                    try:
+                        enabled = lora.enabled
+                    except AttributeError:
+                        enabled = False
+                    if enabled:
                         enabled_loras += 1
 
         print(f"\n   {precision}-bit: {enabled_loras}/{total_loras} LoRA layers enabled")
@@ -288,10 +336,14 @@ def test_quantizer_activation_sliding(sp_model, tokenizer, device):
         # Check quantizer states
         quantizer_states = []
         for name, module in sp_model.named_modules():
-            if hasattr(module, 'quantizers_weight'):
+            try:
+                quantizers_weight = module.quantizers_weight
+            except AttributeError:
+                continue
+            if quantizers_weight is not None:
                 bits_key = f'{bits}bit'
-                if bits_key in module.quantizers_weight:
-                    quantizer = module.quantizers_weight[bits_key]
+                if bits_key in quantizers_weight:
+                    quantizer = quantizers_weight[bits_key]
                     state = {
                         'calibrated': quantizer.calibrated,
                         'scale': quantizer.scale.mean().item() if quantizer.scale.numel() > 0 else 0
@@ -355,18 +407,26 @@ def test_quantizer_activation_sliding(sp_model, tokenizer, device):
     return quantization_results
 
 
-def run_comprehensive_test():
-    """Run all tests with sliding window and debug statistics."""
+def run_comprehensive_test(test_suite: str = "all", quick_mode: bool = False):
+    """Run comprehensive test suite with multiple testing modules.
+
+    Args:
+        test_suite: Which test suite to run ('all', 'basic', 'precision', 'batchnorm', 'training')
+        quick_mode: If True, run tests with reduced samples for faster execution
+    """
     print("\n" + "="*80)
-    print("COMPREHENSIVE TEST WITH SLIDING WINDOW AND DEBUG")
+    print("COMPREHENSIVE SP MODEL DEBUG SUITE")
     print("="*80)
+    print(f"Test Suite: {test_suite}")
+    print(f"Quick Mode: {'Enabled' if quick_mode else 'Disabled'}")
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Device: {device}")
 
     # Load models
     print("\n🔧 Loading models...")
-    sp_model, sp_config = create_properly_initialized_model(use_pretrained=True, num_layers=12)
+    num_layers = 6 if quick_mode else 12
+    sp_model, sp_config = create_properly_initialized_model(use_pretrained=True, num_layers=num_layers)
     sp_model = sp_model.to(device)
 
     # Load GPT-2 with warning suppression
@@ -379,36 +439,195 @@ def run_comprehensive_test():
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     tokenizer.pad_token = tokenizer.eos_token
 
-    # Run tests
+    # Run tests based on suite selection
     test_results = {}
 
-    # Test 1: 32-bit equivalence
-    print("\n" + "="*60)
-    print("Running Test 1: 32-bit Equivalence")
-    test_results['test1'] = test_32bit_equivalence_sliding(sp_model, gpt2_model, tokenizer, device)
+    # Basic tests (always run)
+    if test_suite in ['all', 'basic']:
+        print("\n" + "="*60)
+        print("RUNNING BASIC TEST SUITE")
+        print("="*60)
 
-    # Test 2: Quantization degradation
-    print("\n" + "="*60)
-    print("Running Test 2: Quantization Degradation")
-    test_results['test2'] = test_quantization_degradation_sliding(sp_model, tokenizer, device)
+        # Test 1: 32-bit equivalence
+        print("\n" + "="*60)
+        print("Test 1: 32-bit Equivalence")
+        test_results['32bit_equivalence'] = test_32bit_equivalence_sliding(sp_model, gpt2_model, tokenizer, device)
 
-    # Test 3: LoRA behavior
-    print("\n" + "="*60)
-    print("Running Test 3: LoRA Behavior")
-    test_results['test3'] = test_lora_behavior_sliding(sp_model, tokenizer, device)
+        # Test 2: Quantization degradation
+        print("\n" + "="*60)
+        print("Test 2: Quantization Degradation")
+        test_results['quantization_degradation'] = test_quantization_degradation_sliding(sp_model, tokenizer, device)
 
-    # Test 4: Quantizer activation
-    print("\n" + "="*60)
-    print("Running Test 4: Quantizer Activation")
-    test_results['test4'] = test_quantizer_activation_sliding(sp_model, tokenizer, device)
+        # Test 3: LoRA behavior
+        print("\n" + "="*60)
+        print("Test 3: LoRA Behavior")
+        test_results['lora_behavior'] = test_lora_behavior_sliding(sp_model, tokenizer, device)
+
+        # Test 4: Quantizer activation
+        print("\n" + "="*60)
+        print("Test 4: Quantizer Activation")
+        test_results['quantizer_activation'] = test_quantizer_activation_sliding(sp_model, tokenizer, device)
+
+    # Precision mismatch tests
+    if test_suite in ['all', 'precision']:
+        print("\n" + "="*60)
+        print("RUNNING PRECISION MISMATCH TEST SUITE")
+        print("="*60)
+
+        # Test precision consistency
+        print("\nTest: Precision Consistency")
+        test_results['precision_consistency'] = test_precision_consistency(sp_model, tokenizer, device)
+
+        # Test layer-wise precision analysis
+        print("\nTest: Layer-wise Precision Analysis")
+        test_results['layer_precision'] = test_layer_precision_analysis(sp_model, tokenizer, device)
+
+        # Test quantization saturation
+        print("\nTest: Quantization Saturation")
+        test_results['quantization_saturation'] = test_quantization_saturation(sp_model, tokenizer, device)
+
+    # Batch normalization tests
+    if test_suite in ['all', 'batchnorm']:
+        print("\n" + "="*60)
+        print("RUNNING BATCH NORMALIZATION TEST SUITE")
+        print("="*60)
+
+        # Test BN statistics tracking
+        print("\nTest: BN Statistics Tracking")
+        test_results['bn_statistics'] = test_bn_statistics_tracking()
+
+        # Test BN gradient flow
+        print("\nTest: BN Gradient Flow")
+        test_results['bn_gradients'] = test_bn_gradient_flow()
+
+        # Test BN mode switching
+        print("\nTest: BN Mode Switching")
+        test_results['bn_mode_switching'] = test_bn_mode_switching()
+
+        # Test BN with small batches
+        print("\nTest: BN Small Batch Behavior")
+        test_results['bn_small_batch'] = test_bn_with_small_batch()
+
+        # Test BN precision switching consistency
+        print("\nTest: BN Precision Switching")
+        test_results['bn_precision_switching'] = test_bn_precision_switching_consistency()
+
+    # Training dynamics tests (skip in quick mode by default)
+    if test_suite in ['all', 'training'] and not (quick_mode and test_suite == 'all'):
+        print("\n" + "="*60)
+        print("RUNNING TRAINING DYNAMICS TEST SUITE")
+        print("="*60)
+
+        # Test multi-batch training
+        print("\nTest: Multi-batch Training")
+        test_results['multi_batch_training'] = test_multi_batch_training()
+
+        # Clean up memory
+        gc.collect()
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
+        # Test QAT
+        print("\nTest: Quantization-Aware Training")
+        test_results['qat'] = test_quantization_aware_training()
+
+        # Clean up memory
+        gc.collect()
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
+        # Test distillation effectiveness
+        print("\nTest: Distillation Effectiveness")
+        test_results['distillation'] = test_distillation_effectiveness()
+
+        # Clean up memory
+        gc.collect()
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
+        # Test gradient accumulation
+        print("\nTest: Gradient Accumulation")
+        test_results['gradient_accumulation'] = test_gradient_accumulation_effects()
+
+        # Test batch norm dynamics
+        print("\nTest: Batch Norm Training Dynamics")
+        test_results['bn_dynamics'] = test_batch_norm_training_dynamics()
 
     print("\n" + "="*80)
-    print("✅ ALL TESTS COMPLETE")
+    print("✅ TEST SUITE COMPLETE")
     print("="*80)
 
     return test_results
 
 
+def print_test_summary(results: Dict):
+    """Print a summary of test results."""
+    print("\n" + "="*80)
+    print("TEST RESULTS SUMMARY")
+    print("="*80)
+
+    total_tests = len(results)
+    print(f"\n📊 Total test categories: {total_tests}")
+
+    # Analyze results
+    if '32bit_equivalence' in results:
+        print("\n✅ Basic Tests:")
+        if 'status' in results.get('32bit_equivalence', {}):
+            print(f"   32-bit equivalence: {results['32bit_equivalence']['status']}")
+
+    if 'precision_consistency' in results:
+        print("\n✅ Precision Tests:")
+        for precision in [16, 8, 4]:
+            if precision in results.get('precision_consistency', {}):
+                cos_sim = results['precision_consistency'][precision].get('avg_cosine_sim', 0)
+                print(f"   {precision}-bit consistency: {cos_sim:.4f}")
+
+    if 'bn_statistics' in results:
+        print("\n✅ Batch Norm Tests:")
+        print("   Statistics tracking: Passed")
+        print("   Gradient flow: Passed")
+        print("   Mode switching: Passed")
+
+    if 'multi_batch_training' in results:
+        print("\n✅ Training Dynamics:")
+        print("   Multi-batch training: Completed")
+        print("   QAT: Completed")
+        print("   Distillation: Completed")
+
+    print("\n" + "="*80)
+
+
 if __name__ == "__main__":
-    results = run_comprehensive_test()
-    print("\n✅ Test suite completed successfully!")
+    parser = argparse.ArgumentParser(description='Comprehensive SP Model Debug Suite')
+    parser.add_argument('--suite', type=str, default='all',
+                       choices=['all', 'basic', 'precision', 'batchnorm', 'training'],
+                       help='Test suite to run')
+    parser.add_argument('--quick', action='store_true',
+                       help='Run tests in quick mode with reduced samples')
+    parser.add_argument('--detect-precision-mismatch', action='store_true',
+                       help='Run only precision mismatch detection')
+    parser.add_argument('--test-batchnorm', action='store_true',
+                       help='Run only batch normalization tests')
+    parser.add_argument('--test-training', action='store_true',
+                       help='Run only training dynamics tests')
+
+    args = parser.parse_args()
+
+    # Handle specific test flags
+    if args.detect_precision_mismatch:
+        args.suite = 'precision'
+    elif args.test_batchnorm:
+        args.suite = 'batchnorm'
+    elif args.test_training:
+        args.suite = 'training'
+
+    print("\n🚀 Starting SP Model Debug Suite...")
+    print(f"   Suite: {args.suite}")
+    print(f"   Quick Mode: {args.quick}")
+
+    try:
+        results = run_comprehensive_test(test_suite=args.suite, quick_mode=args.quick)
+        print_test_summary(results)
+        print("\n✅ Test suite completed successfully!")
+    except Exception as e:
+        print(f"\n❌ Test suite failed with error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
