@@ -327,7 +327,11 @@ def test_quantization_saturation(model, tokenizer, device):
 
     saturation_results = {}
 
-    for precision in [8, 4]:  # Focus on lower precisions
+    # Get configured bit widths from model, focus on lower precisions
+    bit_widths = model.transformer.bit_widths if hasattr(model.transformer, 'bit_widths') else [6, 8, 16, 32]
+    test_precisions = [b for b in bit_widths if b <= 8]  # Test 6 and 8-bit
+
+    for precision in test_precisions:
         print(f"\n🔍 Testing {precision}-bit saturation:")
         model.set_precision(precision)
         model.eval()
