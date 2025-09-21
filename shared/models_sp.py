@@ -432,13 +432,14 @@ class SPLMHeadModel(nn.Module):
         """Set precision for the model."""
         self.transformer.set_precision(bits)
 
-        # Also handle LM head weight freezing/unfreezing
-        # 32-bit teacher: Unfreeze LM head weights
-        # Other precisions: Keep frozen (only LoRA trains)
-        if bits == 32:
-            self.lm_head.weight.requires_grad = True
-        else:
-            self.lm_head.weight.requires_grad = False
+        # Handle LM head weight freezing/unfreezing
+        # IMPORTANT: lm_head.weight is tied to transformer.wte.weight
+        # We should NOT unfreeze it since embeddings must remain frozen
+        # The 32-bit teacher will train the transformer block weights but keep embeddings/lm_head frozen
+
+        # Keep lm_head frozen for ALL precisions (including 32-bit)
+        # This is correct because lm_head is tied to embeddings which should never be trained
+        self.lm_head.weight.requires_grad = False
 
     def get_current_precision(self):
         """Get current precision setting."""
