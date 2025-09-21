@@ -222,4 +222,4 @@ class LogQuantizationFunction(torch.autograd.Function):
         # This helps prevent gradient explosion near zero values
         grad_input = torch.clamp(grad_input, -10, 10)
 
-        return grad_input, None, None, None
+        return grad_input, None, None, None, None

@@ -200,10 +200,14 @@ class LearnableFakeQuantize(nn.Module):
 
             self.num_batches_collected += 1
 
-    def forward(self, x):
+    def forward(self, x, debug=False):
         """
         Forward pass with multiple quantization strategies.
         The quantizer type determines how we transform and quantize the input.
+
+        Args:
+            x: Input tensor to quantize
+            debug: Enable debug output for this quantization step
         """
         # Skip quantization for 32-bit FP32 teacher
         if self.num_bits >= 32:
@@ -226,7 +230,7 @@ class LearnableFakeQuantize(nn.Module):
         elif self.quantizer_type == 'tanh':
             return self._quantize_tanh(x)
         elif self.quantizer_type == 'log':
-            return self._quantize_log(x)
+            return self._quantize_log(x, debug=debug)
         else:
             raise ValueError(f"Unknown quantizer type: {self.quantizer_type}")
 
@@ -276,7 +280,7 @@ class LearnableFakeQuantize(nn.Module):
         # Straight-through estimator is handled in the Function
         return x_quant
 
-    def _quantize_log(self, x):
+    def _quantize_log(self, x, debug=False):
         """
         Logarithmic quantization following LogQuant formula.
         LogQuant(x) = 0 if x = 0, else 2^x_hat · sign(x)
@@ -290,7 +294,7 @@ class LearnableFakeQuantize(nn.Module):
 
         # Apply logarithmic quantization
         x_quant = LogQuantizationFunction.apply(
-            x, log_min, log_range, self.num_bits
+            x, log_min, log_range, self.num_bits, debug
         )
         # Straight-through estimator is handled in the Function
         return x_quant
