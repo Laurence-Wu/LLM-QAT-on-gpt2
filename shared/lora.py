@@ -146,8 +146,8 @@ class SPLinearWithLoRA(nn.Module):
 
     def __init__(self, in_features, out_features, bias=True,
                  bit_widths=[6, 8, 16],
-                 lora_rank_per_bit=[6: 32, 8: 16, 16: 8},
-                 lora_alpha_per_bit=[6: 64, 8: 32, 16: 16},
+                 lora_rank_per_bit={6: 12, 8: 16, 16: 16},
+                 lora_alpha_per_bit={6: 12, 8: 32, 16: 32},
                  lora_dropout=0.1,
                  quantizer_per_bit=None):
         super().__init__()
