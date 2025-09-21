@@ -15,7 +15,7 @@ from typing import Dict, List, Tuple, Optional
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.quantization import LearnableFakeQuantize
-from shared.switchable_batchnorm import SwitchableBatchNorm1d, SwitchableLayerNorm
+from shared.switchable_batchnorm import SwitchableLayerNorm
 from test.fix_model_initialization import create_properly_initialized_model
 from transformers import GPT2Tokenizer
 
