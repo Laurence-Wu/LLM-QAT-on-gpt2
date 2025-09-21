@@ -53,6 +53,7 @@ def create_properly_initialized_model(use_pretrained=True, num_layers=None):
     gpt2_config.lora_rank_per_bit = sp_config.lora_rank_per_bit
     gpt2_config.lora_alpha_per_bit = sp_config.lora_alpha_per_bit
     gpt2_config.activation_bits_per_bit = sp_config.activation_bits_per_bit
+    gpt2_config.quantizer_per_bit = sp_config.quantizer_per_bit  # Add quantizer type configuration
 
     # Create model with proper config
     sp_model = SPLMHeadModel(gpt2_config)
