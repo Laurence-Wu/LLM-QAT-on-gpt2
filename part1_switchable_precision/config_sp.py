@@ -43,11 +43,11 @@ class ModelConfig:
 
         # Lower precision uses lower rank for efficiency
         # CRITICAL: 32-bit must have rank=0 (no LoRA for teacher)
-        self.lora_rank_per_bit = {4: 8, 8: 16, 16: 16, 32: 0}  # 32-bit has rank=0 (disabled)
-        self.lora_alpha_per_bit = {4: 16, 8: 32, 16: 32, 32: 0}  # 32-bit has alpha=0 (disabled)
+        self.lora_rank_per_bit = {6: 12, 8: 16, 16: 16, 32: 0}  # 32-bit has rank=0 (disabled)
+        self.lora_alpha_per_bit = {6: 12, 8: 32, 16: 32, 32: 0}  # 32-bit has alpha=0 (disabled)
 
         # Activation bits per weight precision
-        self.activation_bits_per_bit = {4: 4, 8: 8, 16: 16}  # Match weight precision
+        self.activation_bits_per_bit = {6: 6, 8: 8, 16: 16}  # Match weight precision
 
 
 class TrainingConfig:

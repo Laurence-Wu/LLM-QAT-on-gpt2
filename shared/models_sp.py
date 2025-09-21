@@ -40,7 +40,7 @@ class SPAttention(nn.Module):
             raise AttributeError(
                 f"Config missing required switchable precision attributes: {e}\n"
                 "Required: lora_rank_per_bit, lora_alpha_per_bit\n"
-                "Example: config.lora_rank_per_bit = {4: 8, 8: 16, 16: 32}"
+                "Example: config.lora_rank_per_bit = [6: 8, 8: 16, 16: 32}"
             )
         lora_dropout = getattr(config, 'lora_dropout', 0.1)
         quantizer_per_bit = getattr(config, 'quantizer_per_bit', None)

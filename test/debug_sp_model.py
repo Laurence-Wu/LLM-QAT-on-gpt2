@@ -179,11 +179,15 @@ def test_quantization_degradation_sliding(sp_model, tokenizer, device):
     print("TEST 2: QUANTIZATION DEGRADATION WITH SLIDING WINDOW")
     print("="*60)
 
+    # Get configured bit widths from model
+    bit_widths = sp_model.transformer.bit_widths if hasattr(sp_model.transformer, 'bit_widths') else [6, 8, 16, 32]
+    student_precisions = [b for b in bit_widths if b < 32]
+
     # Calibrate all student precisions with debug
     print("\n📊 Calibrating all student precisions with debug statistics...")
     calibration_texts = get_calibration_texts(num_texts=16)
 
-    for precision in [16, 8, 4]:  # Students only
+    for precision in student_precisions:  # Students only
         calibrate_precision_with_debug(sp_model, tokenizer, device, precision, calibration_texts)
 
     print("✅ All calibrations complete\n")
@@ -192,7 +196,7 @@ def test_quantization_degradation_sliding(sp_model, tokenizer, device):
     results = {}
     sp_model.eval()
 
-    for precision in [32, 16, 8, 4]:
+    for precision in bit_widths:
         sp_model.set_precision(precision)
         print(f"\nTesting {precision}-bit with sliding window...")
 
@@ -221,7 +225,7 @@ def test_quantization_degradation_sliding(sp_model, tokenizer, device):
     baseline_ppl = results[32]['ppl']
     print(f"   Baseline (32-bit): PPL = {baseline_ppl:.2f}")
 
-    for bits in [16, 8, 4]:
+    for bits in student_precisions:
         ppl = results[bits]['ppl']
         degradation = ((ppl - baseline_ppl) / baseline_ppl) * 100
 
@@ -229,7 +233,9 @@ def test_quantization_degradation_sliding(sp_model, tokenizer, device):
             status = "✅" if degradation < 10 else "⚠️" if degradation < 30 else "❌"
         elif bits == 8:
             status = "✅" if degradation < 50 else "⚠️" if degradation < 150 else "❌"
-        else:  # 4-bit
+        elif bits == 6:  # 6-bit instead of 4-bit
+            status = "✅" if degradation < 100 else "⚠️" if degradation < 300 else "❌"
+        else:  # 4-bit or other
             status = "✅" if degradation < 200 else "⚠️" if degradation < 500 else "❌"
 
         print(f"   {bits:2d}-bit: +{degradation:.1f}% (PPL: {ppl:.2f}) {status}")
@@ -243,11 +249,15 @@ def test_lora_behavior_sliding(sp_model, tokenizer, device):
     print("TEST 3: LORA BEHAVIOR WITH SLIDING WINDOW")
     print("="*60)
 
+    # Get configured bit widths from model
+    bit_widths = sp_model.transformer.bit_widths if hasattr(sp_model.transformer, 'bit_widths') else [6, 8, 16, 32]
+    student_precisions = [b for b in bit_widths if b < 32]
+
     # Calibrate students
     print("\n📊 Calibrating for LoRA testing...")
     calibration_texts = get_calibration_texts(num_texts=12)
 
-    for precision in [16, 8, 4]:
+    for precision in student_precisions:
         calibrate_precision_with_debug(sp_model, tokenizer, device, precision, calibration_texts)
 
     sp_model.eval()
@@ -255,7 +265,7 @@ def test_lora_behavior_sliding(sp_model, tokenizer, device):
 
     print("\nTesting LoRA contributions...")
 
-    for precision in [32, 16, 8, 4]:
+    for precision in bit_widths:
         sp_model.set_precision(precision)
 
         # Count LoRA layers
@@ -301,7 +311,7 @@ def test_lora_behavior_sliding(sp_model, tokenizer, device):
     else:
         print("   ❌ 32-bit teacher: LoRA should be disabled!")
 
-    for bits in [16, 8, 4]:
+    for bits in student_precisions:
         if lora_results[bits]['enabled_loras'] > 0:
             print(f"   ✅ {bits}-bit student: LoRA enabled")
         else:
@@ -318,7 +328,11 @@ def test_quantizer_activation_sliding(sp_model, tokenizer, device):
 
     quantization_results = {}
 
-    for bits in [6, 8]:
+    # Get configured bit widths, filter for low-precision testing
+    bit_widths = sp_model.transformer.bit_widths if hasattr(sp_model.transformer, 'bit_widths') else [6, 8, 16, 32]
+    test_precisions = [b for b in bit_widths if b in [6, 8]]  # Test 6 and 8-bit if available
+
+    for bits in test_precisions:
         print(f"\n🔧 Testing {bits}-bit precision:")
 
         # Calibrate with debug
@@ -385,16 +399,18 @@ def test_quantizer_activation_sliding(sp_model, tokenizer, device):
 
     # Analysis
     print("\n📊 QUANTIZATION ANALYSIS:")
-    for bits in [6, 8]:
+    for bits in test_precisions:
         all_calibrated = all(s['calibrated'] for s in quantization_results[bits]['quantizer_states'])
         print(f"   {bits}-bit: {len(quantization_results[bits]['quantizer_states'])} quantizers, "
               f"All calibrated: {all_calibrated}")
 
-    degradation_8 = ((quantization_results[8]['ppl'] - result_16['perplexity']) / result_16['perplexity']) * 100
-    degradation_4 = ((quantization_results[6]['ppl'] - result_16['perplexity']) / result_16['perplexity']) * 100
-
-    print(f"   8-bit degradation from 16-bit: {degradation_8:.1f}%")
-    print(f"   4-bit degradation from 16-bit: {degradation_4:.1f}%")
+    # Calculate degradation for available precisions
+    if 8 in test_precisions:
+        degradation_8 = ((quantization_results[8]['ppl'] - result_16['perplexity']) / result_16['perplexity']) * 100
+        print(f"   8-bit degradation from 16-bit: {degradation_8:.1f}%")
+    if 6 in test_precisions:
+        degradation_6 = ((quantization_results[6]['ppl'] - result_16['perplexity']) / result_16['perplexity']) * 100
+        print(f"   6-bit degradation from 16-bit: {degradation_6:.1f}%")
 
     return quantization_results
 
@@ -604,7 +620,9 @@ def print_test_summary(results: Dict):
 
     if 'precision_consistency' in results:
         print("\n✅ Precision Tests:")
-        for precision in [16, 8, 4]:
+        # Get configured precisions from results keys
+        test_precisions = sorted([p for p in results.get('precision_consistency', {}).keys() if isinstance(p, int)])
+        for precision in test_precisions:
             if precision in results.get('precision_consistency', {}):
                 cos_sim = results['precision_consistency'][precision].get('avg_cosine_sim', 0)
                 print(f"   {precision}-bit consistency: {cos_sim:.4f}")
