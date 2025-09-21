@@ -36,7 +36,7 @@ class QuantizationFunction(torch.autograd.Function):
 
 
 class LearnableFakeQuantize(nn.Module):
-    def __init__(self, num_bits=8, symmetric=True, per_channel=False,
+    def __init__(self, num_bits=8, symmetric=False, per_channel=False,
                  channel_dim=0, quantizer_type='minmax'):
         """
         Initialize the quantization layer with configurable quantizer type.
