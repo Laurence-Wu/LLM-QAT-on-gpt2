@@ -10,7 +10,7 @@ class ModelConfig:
         self.vocab_size = 50257
         self.n_positions = 1024  # Match GPT-2's position embeddings
         self.n_embd = 768        # GPT-2 small embedding dimension
-        self.n_layer = 12        # GPT-2 small number of layers (full model)
+        self.n_layer = 12        # CRITICAL: Must be 12 for proper GPT-2 weight loading
         self.n_head = 12         # GPT-2 small number of attention heads
 
         # Regularization
