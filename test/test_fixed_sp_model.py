@@ -58,6 +58,68 @@ def ensure_mode(model, mode, stage_name=""):
         raise RuntimeError(f"Failed to set train mode for {stage_name}")
 
 
+def calibrate_precision(sp_model, tokenizer, device, precision, calibration_texts=None):
+    """Helper function to calibrate a specific precision consistently.
+
+    Args:
+        sp_model: The model to calibrate
+        tokenizer: Tokenizer for text processing
+        device: Device to run on
+        precision: Bit-width to calibrate (4, 8, 16)
+        calibration_texts: Optional list of calibration texts
+    """
+    if precision >= 32:
+        # No calibration needed for 32-bit teacher
+        return
+
+    if calibration_texts is None:
+        # Default calibration texts
+        calibration_texts = [
+            "Machine learning algorithms optimize complex objective functions.",
+            "Neural networks learn hierarchical representations from data.",
+            "Natural language processing enables computer understanding.",
+            "Deep learning has revolutionized artificial intelligence.",
+            "Transformers use self-attention for sequence modeling.",
+            "Gradient descent iteratively improves model parameters.",
+            "Regularization techniques prevent model overfitting.",
+            "Batch normalization stabilizes neural network training.",
+        ]
+
+    print(f"   📊 Calibrating {precision}-bit precision...")
+    sp_model.set_precision(precision)
+    sp_model.train()  # Must be in training mode
+
+    # Start calibration for all quantizers
+    bits_key = f'{precision}bit'
+    calibrated_count = 0
+
+    for name, module in sp_model.named_modules():
+        if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
+            if bits_key in module.quantizers_weight:
+                module.quantizers_weight[bits_key].start_calibration()
+                calibrated_count += 1
+            if bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].start_calibration()
+                calibrated_count += 1
+
+    # Collect statistics
+    with torch.no_grad():
+        for i, text in enumerate(calibration_texts):
+            tokens = tokenizer(text, return_tensors='pt',
+                              max_length=128, truncation=True)['input_ids'].to(device)
+            _ = sp_model(tokens)
+
+    # Finish calibration
+    for name, module in sp_model.named_modules():
+        if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
+            if bits_key in module.quantizers_weight:
+                module.quantizers_weight[bits_key].finish_calibration()
+            if bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].finish_calibration()
+
+    print(f"      ✅ Calibrated {calibrated_count} quantizers with {len(calibration_texts)} samples")
+
+
 def get_memory_info(stage_name=""):
     """Get current memory usage information."""
     if torch.cuda.is_available():
@@ -551,11 +613,52 @@ def test_lora_behavior(sp_model, tokenizer, device):
     inputs = tokenizer(test_input, return_tensors='pt')
     input_ids = inputs['input_ids'].to(device)
 
+    # Calibration texts for each precision
+    calibration_texts = [
+        "Neural networks learn complex patterns from data.",
+        "Machine learning models require proper training.",
+        "Deep learning has revolutionized artificial intelligence.",
+        "Gradient descent optimizes model parameters iteratively.",
+    ]
+
+    # ==== CALIBRATION STAGE: Calibrate each precision ====
+    print("\n📊 Calibrating quantizers for each precision...")
+
+    for precision in [16, 8, 4]:  # Only calibrate students, not 32-bit teacher
+        print(f"   Calibrating {precision}-bit...")
+        sp_model.set_precision(precision)
+        sp_model.train()
+
+        # Start calibration
+        bits_key = f'{precision}bit'
+        for name, module in sp_model.named_modules():
+            if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
+                if bits_key in module.quantizers_weight:
+                    module.quantizers_weight[bits_key].start_calibration()
+                if bits_key in module.quantizers_input:
+                    module.quantizers_input[bits_key].start_calibration()
+
+        # Collect statistics
+        with torch.no_grad():
+            for text in calibration_texts:
+                cal_inputs = tokenizer(text, return_tensors='pt')['input_ids'].to(device)
+                _ = sp_model(cal_inputs)
+
+        # Finish calibration
+        for name, module in sp_model.named_modules():
+            if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
+                if bits_key in module.quantizers_weight:
+                    module.quantizers_weight[bits_key].finish_calibration()
+                if bits_key in module.quantizers_input:
+                    module.quantizers_input[bits_key].finish_calibration()
+
+    print("   ✅ Calibration complete for all student precisions")
+
     # ==== EVALUATION STAGE: Testing LoRA ====
     # CRITICAL: MUST be in EVAL mode for testing
     sp_model.eval()
 
-    print("Checking LoRA contribution across bit-widths...")
+    print("\nChecking LoRA contribution across bit-widths...")
 
     lora_contributions = {}
 
@@ -849,6 +952,54 @@ def test_comprehensive_ppl(sp_model, tokenizer, device):
     print("\n" + "="*60)
     print("TEST 6: COMPREHENSIVE PPL EVALUATION")
     print("="*60)
+
+    # ==== CALIBRATION STAGE: Calibrate before evaluation ====
+    print("\n📊 Calibrating quantizers for comprehensive evaluation...")
+
+    # Calibration texts - use diverse samples for better statistics
+    calibration_texts = [
+        "Machine learning algorithms optimize complex objective functions efficiently.",
+        "Natural language processing enables computers to understand human communication.",
+        "Deep neural networks learn hierarchical representations from raw data.",
+        "Artificial intelligence systems demonstrate increasingly sophisticated capabilities.",
+        "Computer vision models extract meaningful features from visual information.",
+        "Reinforcement learning agents learn optimal policies through trial and error.",
+        "Transformer architectures have revolutionized sequence modeling tasks.",
+        "Gradient descent iteratively improves model parameters during training.",
+    ]
+
+    for precision in [16, 8, 4]:  # Calibrate all student precisions
+        print(f"   Calibrating {precision}-bit precision...")
+        sp_model.set_precision(precision)
+        sp_model.train()  # Training mode for calibration
+
+        # Start calibration
+        bits_key = f'{precision}bit'
+        for name, module in sp_model.named_modules():
+            if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
+                if bits_key in module.quantizers_weight:
+                    module.quantizers_weight[bits_key].start_calibration()
+                if bits_key in module.quantizers_input:
+                    module.quantizers_input[bits_key].start_calibration()
+
+        # Collect statistics from calibration texts
+        with torch.no_grad():
+            for text in calibration_texts:
+                cal_inputs = tokenizer(text, return_tensors='pt',
+                                      max_length=128, truncation=True)['input_ids'].to(device)
+                _ = sp_model(cal_inputs)
+
+        # Finish calibration
+        for name, module in sp_model.named_modules():
+            if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
+                if bits_key in module.quantizers_weight:
+                    module.quantizers_weight[bits_key].finish_calibration()
+                if bits_key in module.quantizers_input:
+                    module.quantizers_input[bits_key].finish_calibration()
+
+        print(f"      ✅ {precision}-bit calibration complete")
+
+    print("\n   ✅ All calibrations complete, proceeding to evaluation")
 
     # ==== EVALUATION STAGE: Comprehensive Testing ====
 
