@@ -13,7 +13,6 @@ import torch.nn as nn
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.switchable_batchnorm import (
-    SwitchableBatchNorm1d,
     SwitchableLayerNorm,
     replace_bn_with_switchable
 )

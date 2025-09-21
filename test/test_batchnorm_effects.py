@@ -15,11 +15,7 @@ from typing import Dict, List, Tuple, Optional
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared.switchable_batchnorm import (
-    SwitchableBatchNorm1d,
-    SwitchableLayerNorm,
-    PrecisionController
-)
+from shared.switchable_batchnorm import SwitchableLayerNorm
 from test.fix_model_initialization import create_properly_initialized_model
 from transformers import GPT2Tokenizer
 
@@ -36,7 +32,7 @@ def test_bn_statistics_tracking():
     precisions = [4, 8, 16, 32]
 
     # Create switchable batch norm layer
-    sbn = SwitchableBatchNorm1d(256, precision_levels=precisions).to(device)
+    sbn = SwitchableLayerNorm(256, precision_levels=precisions).to(device)
 
     # Generate different input distributions for each precision
     input_distributions = {
@@ -116,9 +112,9 @@ def test_bn_gradient_flow():
         def __init__(self):
             super().__init__()
             self.linear1 = nn.Linear(256, 256)
-            self.sbn1 = SwitchableBatchNorm1d(256, precisions)
+            self.sbn1 = SwitchableLayerNorm(256, precisions)
             self.linear2 = nn.Linear(256, 256)
-            self.sbn2 = SwitchableBatchNorm1d(256, precisions)
+            self.sbn2 = SwitchableLayerNorm(256, precisions)
             self.output = nn.Linear(256, 1)
 
         def forward(self, x):
@@ -197,7 +193,7 @@ def test_bn_mode_switching():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     precisions = [4, 8, 16, 32]
 
-    sbn = SwitchableBatchNorm1d(256, precisions).to(device)
+    sbn = SwitchableLayerNorm(256, precisions).to(device)
     x = torch.randn(32, 256, device=device)
 
     results = {}
@@ -254,7 +250,7 @@ def test_bn_with_small_batch():
     precisions = [4, 8, 16, 32]
     batch_sizes = [1, 2, 4, 8, 16, 32]
 
-    sbn = SwitchableBatchNorm1d(256, precisions).to(device)
+    sbn = SwitchableLayerNorm(256, precisions).to(device)
 
     results = {}
 
@@ -369,7 +365,7 @@ def test_layernorm_vs_batchnorm():
 
     # Create both types of normalization
     ln = SwitchableLayerNorm(256, precisions).to(device)
-    bn = SwitchableBatchNorm1d(256, precisions).to(device)
+    bn = SwitchableLayerNorm(256, precisions).to(device)
 
     # Test data with different batch sizes
     batch_sizes = [1, 8, 32]
