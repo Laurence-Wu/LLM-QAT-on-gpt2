@@ -1,80 +1,8 @@
-"""
-Switchable Batch Normalization (S-BN) for multi-precision neural networks.
-Maintains separate BN statistics for each precision level to handle different activation distributions.
-"""
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, List, Optional, Union
-
-
-class SwitchableBatchNorm1d(nn.Module):
-    """
-    Switchable Batch Normalization for 1D inputs (e.g., MLP layers).
-    Maintains separate BN parameters for each precision level.
-    """
-
-    def __init__(
-        self,
-        num_features: int,
-        precision_levels: List[int] = [4, 8, 16, 32],
-        eps: float = 1e-5,
-        momentum: float = 0.1,
-        affine: bool = True,
-        track_running_stats: bool = True
-    ):
-        """
-        Args:
-            num_features: Number of features (C from input shape [N, C] or [N, C, L])
-            precision_levels: List of supported bit widths
-            eps: Small constant for numerical stability
-            momentum: Momentum for running stats
-            affine: Whether to learn affine parameters (gamma, beta)
-            track_running_stats: Whether to track running mean and variance
-        """
-        super().__init__()
-        self.num_features = num_features
-        self.precision_levels = sorted(precision_levels)
-        self.eps = eps
-        self.momentum = momentum
-        self.affine = affine
-        self.track_running_stats = track_running_stats
-
-        # Create BN layers for each precision
-        self.bn_layers = nn.ModuleDict()
-        for precision in self.precision_levels:
-            self.bn_layers[f'bn_{precision}bit'] = nn.BatchNorm1d(
-                num_features=num_features,
-                eps=eps,
-                momentum=momentum,
-                affine=affine,
-                track_running_stats=track_running_stats
-            )
-
-        # Default to highest precision
-        self.current_precision = max(self.precision_levels)
-
-    def set_precision(self, precision: int) -> int:
-        """Set the current precision level.
-
-        Returns:
-            int: The current precision after setting
-        """
-        if precision not in self.precision_levels:
-            raise ValueError(f"Precision {precision} not supported. Available: {self.precision_levels}")
-        self.current_precision = precision
-        return self.current_precision
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass using BN parameters for current precision."""
-        bn_key = f'bn_{self.current_precision}bit'
-        return self.bn_layers[bn_key](x)
-
-    def extra_repr(self) -> str:
-        return (f'{self.num_features}, precisions={self.precision_levels}, '
-                f'eps={self.eps}, momentum={self.momentum}, '
-                f'affine={self.affine}, track_running_stats={self.track_running_stats}')
 
 
 class SwitchableLayerNorm(nn.Module):
