@@ -55,6 +55,11 @@ from test.test_distillation_random_sampling import (
     test_random_sampling_convergence,
     run_all_distillation_tests
 )
+from test.analyze_quantization_cliff import (
+    analyze_quantization_utilization,
+    analyze_vocabulary_discrimination,
+    suggest_solutions
+)
 
 
 def calibrate_precision_with_debug(sp_model, tokenizer, device, precision, calibration_texts=None):
@@ -235,6 +240,17 @@ def test_quantization_degradation_sliding(sp_model, tokenizer, device):
             status = "✅" if degradation < 50 else "⚠️" if degradation < 150 else "❌"
         elif bits == 6:  # 6-bit instead of 4-bit
             status = "✅" if degradation < 100 else "⚠️" if degradation < 300 else "❌"
+            # Add warning for 6-bit catastrophic failure
+            if degradation > 1000:
+                status = "❌ CATASTROPHIC"
+                print(f"\n   🔴 WARNING: 6-bit quantization cliff detected!")
+                print(f"      Degradation: {degradation:.0f}% (PPL: {ppl:.2f})")
+                print(f"      This indicates fundamental quantization failure.")
+                print(f"      Recommendations:")
+                print(f"         1. Remove 6-bit from training")
+                print(f"         2. Use 8-bit as minimum precision")
+                print(f"         3. Or implement mixed-precision for critical layers")
+                continue  # Skip normal print, already printed detailed warning
         else:  # 4-bit or other
             status = "✅" if degradation < 200 else "⚠️" if degradation < 500 else "❌"
 
