@@ -97,7 +97,7 @@ def calibrate_precision_with_debug(sp_model, tokenizer, device, precision, calib
             _ = sp_model(tokens)
 
     # Finish calibration with debug for 4-bit and 8-bit
-    enable_debug = precision in [4, 8]
+    enable_debug = precision in [6, 8]
     if enable_debug:
         print(f"\n      🔍 Debug Statistics for {precision}-bit Calibration:")
 
@@ -318,7 +318,7 @@ def test_quantizer_activation_sliding(sp_model, tokenizer, device):
 
     quantization_results = {}
 
-    for bits in [4, 8]:
+    for bits in [6, 8]:
         print(f"\n🔧 Testing {bits}-bit precision:")
 
         # Calibrate with debug
@@ -385,13 +385,13 @@ def test_quantizer_activation_sliding(sp_model, tokenizer, device):
 
     # Analysis
     print("\n📊 QUANTIZATION ANALYSIS:")
-    for bits in [4, 8]:
+    for bits in [6, 8]:
         all_calibrated = all(s['calibrated'] for s in quantization_results[bits]['quantizer_states'])
         print(f"   {bits}-bit: {len(quantization_results[bits]['quantizer_states'])} quantizers, "
               f"All calibrated: {all_calibrated}")
 
     degradation_8 = ((quantization_results[8]['ppl'] - result_16['perplexity']) / result_16['perplexity']) * 100
-    degradation_4 = ((quantization_results[4]['ppl'] - result_16['perplexity']) / result_16['perplexity']) * 100
+    degradation_4 = ((quantization_results[6]['ppl'] - result_16['perplexity']) / result_16['perplexity']) * 100
 
     print(f"   8-bit degradation from 16-bit: {degradation_8:.1f}%")
     print(f"   4-bit degradation from 16-bit: {degradation_4:.1f}%")

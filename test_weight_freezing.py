@@ -38,7 +38,7 @@ def test_precision_switching():
     print("\n" + "=" * 80)
 
     # Test each precision
-    for bits in [4, 8, 16, 32]:
+    for bits in [6, 8, 16, 32]:
         print(f"\n{'='*40}")
         print(f"Testing {bits}-bit precision")
         print(f"{'='*40}")

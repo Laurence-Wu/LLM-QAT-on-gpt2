@@ -30,7 +30,7 @@ def test_bn_statistics_tracking():
     print("="*60)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    precisions = [4, 8, 16, 32]
+    precisions = [6, 8, 16, 32]
 
     # Create switchable batch norm layer
     sbn = SwitchableLayerNorm(256, precision_levels=precisions).to(device)
@@ -110,7 +110,7 @@ def test_bn_gradient_flow():
     print("="*60)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    precisions = [4, 8, 16, 32]
+    precisions = [6, 8, 16, 32]
 
     # Create a model with switchable BN
     class TestModel(nn.Module):
@@ -196,7 +196,7 @@ def test_bn_mode_switching():
     print("="*60)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    precisions = [4, 8, 16, 32]
+    precisions = [6, 8, 16, 32]
 
     sbn = SwitchableLayerNorm(256, precisions).to(device)
     x = torch.randn(32, 256, device=device)
@@ -252,7 +252,7 @@ def test_bn_with_small_batch():
     print("="*60)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    precisions = [4, 8, 16, 32]
+    precisions = [6, 8, 16, 32]
     batch_sizes = [1, 2, 4, 8, 16, 32]
 
     sbn = SwitchableLayerNorm(256, precisions).to(device)
@@ -366,7 +366,7 @@ def test_layernorm_vs_batchnorm():
     print("="*60)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    precisions = [4, 8, 16, 32]
+    precisions = [6, 8, 16, 32]
 
     # Create both types of normalization
     ln = SwitchableLayerNorm(256, precisions).to(device)
@@ -477,7 +477,7 @@ def run_batchnorm_effects_tests():
     print("   ✅ Each precision maintains separate running statistics")
 
     print("\n2. Gradient Flow:")
-    healthy_count = sum(1 for p in [4, 8, 16, 32]
+    healthy_count = sum(1 for p in [6, 8, 16, 32]
                         if p in gradient_results and gradient_results[p]['input'] > 1e-6)
     print(f"   ✅ Healthy gradient flow in {healthy_count}/4 precisions")
 

@@ -587,7 +587,7 @@ def test_batch_norm_training_dynamics():
     # Test random precision switching during training (S-BN style)
     num_batches = 30
     batch_size = 4
-    precisions = [4, 8, 16, 32]
+    precisions = [6, 8, 16, 32]
 
     training_texts = get_calibration_texts(num_texts=num_batches * batch_size)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)

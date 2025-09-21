@@ -298,7 +298,7 @@ def main():
             'model_config': model_config_dict,
             'training_config': training_config.__dict__,
             'timestamp': timestamp,
-            'bit_widths': getattr(model_config, 'bit_widths', [4, 8, 16])  # Add for easy access
+            'bit_widths': getattr(model_config, 'bit_widths', [6, 8, 16])  # Add for easy access
         }, fp32_filename)
         print(f"Saved FP32 model to {fp32_filename}")
 

@@ -38,7 +38,7 @@ def test_quantizer_methods():
 
     # Test different quantizer types
     quantizer_types = ['minmax', 'relu_clip', 'tanh', 'log']
-    bit_widths = [4, 8]
+    bit_widths = [6, 8]
 
     results = {}
 

@@ -183,7 +183,7 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
     print(f"CUDA memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
 
     # Default bit widths - will be overridden if loading from checkpoint
-    default_bit_widths = [4, 8, 16]
+    default_bit_widths = [6, 8, 16]
 
     if model_path and os.path.exists(model_path):
         print(f"Loading model from {model_path}")
@@ -247,8 +247,8 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
         if bit_widths is None:
             # Only use defaults if bit_widths not explicitly set
             if quantization_bits:
-                print(f"Model trained with quantization_bits={quantization_bits}, using switchable bit widths [4, 8, 16]")
-                bit_widths = [4, 8, 16]
+                print(f"Model trained with quantization_bits={quantization_bits}, using switchable bit widths [6, 8, 16]")
+                bit_widths = [6, 8, 16]
             else:
                 raise ValueError("No bit_widths or quantization_bits specified in model config")
 

@@ -37,7 +37,7 @@ class ModelConfig:
         self.lora_dropout = 0.1
 
         # Switchable precision settings
-        self.bit_widths = [4, 8, 16, 32]  # Include teacher bit-width in list
+        self.bit_widths = [6, 8, 16, 32]  # Include teacher bit-width in list
         self.teacher_bits = 32  # Teacher uses FP32 (no quantization)
 
 

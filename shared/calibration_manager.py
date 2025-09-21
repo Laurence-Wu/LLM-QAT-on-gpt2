@@ -46,7 +46,7 @@ class CalibrationManager:
         self.model.eval()
 
         # Calibrate each bit-width separately
-        for bits in [4, 8]:  # Skip 16-bit entirely
+        for bits in [6, 8]:  # Skip 16-bit entirely
             print(f"  📊 Calibrating {bits}-bit mode...")
             self.model.set_precision(bits)
 
@@ -113,7 +113,7 @@ class CalibrationManager:
         print("\n🔍 Validating quantizer calibration...")
 
         all_valid = True
-        for bits in [4, 8]:  # Only check 4 and 8 bit (16-bit bypasses)
+        for bits in [6, 8]:  # Only check 4 and 8 bit (16-bit bypasses)
             bits_key = f'{bits}bit'
             total = 0
             calibrated = 0
@@ -230,7 +230,7 @@ def debug_quantizer_routing(model, tokenizer, device='cuda'):
     test_text = "Test"
     tokens = tokenizer(test_text, return_tensors='pt')['input_ids'].to(device)
 
-    for bits in [4, 8]:
+    for bits in [6, 8]:
         print(f"\n  Testing {bits}-bit mode:")
         model.set_precision(bits)
         bits_key = f'{bits}bit'

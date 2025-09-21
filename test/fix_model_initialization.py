@@ -49,7 +49,7 @@ def create_properly_initialized_model(use_pretrained=True, num_layers=None):
     )
 
     # Add SP-specific attributes
-    gpt2_config.bit_widths = sp_config.bit_widths  # [4, 8, 16, 32]
+    gpt2_config.bit_widths = sp_config.bit_widths  # [6, 8, 16, 32]
     gpt2_config.lora_rank_per_bit = sp_config.lora_rank_per_bit
     gpt2_config.lora_alpha_per_bit = sp_config.lora_alpha_per_bit
     gpt2_config.activation_bits_per_bit = sp_config.activation_bits_per_bit

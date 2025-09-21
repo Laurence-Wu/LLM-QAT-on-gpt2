@@ -168,9 +168,9 @@ class DynamicQuantizationDefense:
         ensemble_configs = []
 
         bit_configurations = [
-            [4, 4, 4],
+            [6, 4, 4],
             [8, 8, 8],
-            [4, 8, 16],
+            [6, 8, 16],
             [16, 16, 16]
         ]
 

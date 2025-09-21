@@ -14,7 +14,7 @@ class SwitchableLayerNorm(nn.Module):
     def __init__(
         self,
         normalized_shape: Union[int, List[int], torch.Size],
-        precision_levels: List[int] = [4, 8, 16, 32],
+        precision_levels: List[int] = [6, 8, 16, 32],
         eps: float = 1e-5,
         elementwise_affine: bool = True
     ):
@@ -68,7 +68,7 @@ class SwitchableLayerNorm(nn.Module):
 
 def replace_bn_with_switchable(
     module: nn.Module,
-    precision_levels: List[int] = [4, 8, 16, 32],
+    precision_levels: List[int] = [6, 8, 16, 32],
     inplace: bool = False
 ) -> nn.Module:
     """

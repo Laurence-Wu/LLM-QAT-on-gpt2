@@ -25,7 +25,7 @@ except ImportError:
 class SPAttention(nn.Module):
     """Attention module with switchable precision for multiple bit-widths."""
 
-    def __init__(self, config: GPT2Config, bit_widths=[4, 8, 16]):
+    def __init__(self, config: GPT2Config, bit_widths=[6, 8, 16]):
         super().__init__()
         self.n_head = config.n_head
         self.n_embd = config.n_embd
@@ -109,7 +109,7 @@ class SPAttention(nn.Module):
 class SPMLP(nn.Module):
     """MLP module with switchable precision for multiple bit-widths."""
 
-    def __init__(self, config: GPT2Config, bit_widths=[4, 8, 16]):
+    def __init__(self, config: GPT2Config, bit_widths=[6, 8, 16]):
         super().__init__()
         self.bit_widths = bit_widths
 
@@ -166,7 +166,7 @@ class SPMLP(nn.Module):
 class SPBlock(nn.Module):
     """Transformer block with switchable precision."""
 
-    def __init__(self, config: GPT2Config, bit_widths=[4, 8, 16]):
+    def __init__(self, config: GPT2Config, bit_widths=[6, 8, 16]):
         super().__init__()
         # Use Switchable LayerNorm for multi-precision support
         self.ln_1 = SwitchableLayerNorm(
@@ -225,7 +225,7 @@ class SPModel(nn.Module):
         self.config = config
 
         # Get bit widths from config
-        self.bit_widths = getattr(config, 'bit_widths', [4, 8, 16])
+        self.bit_widths = getattr(config, 'bit_widths', [6, 8, 16])
         self.current_bit_width = max(self.bit_widths)  # Start with highest precision
 
         # Token and position embeddings

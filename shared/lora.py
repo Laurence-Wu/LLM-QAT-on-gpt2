@@ -145,7 +145,7 @@ class SPLinearWithLoRA(nn.Module):
     """Linear layer with multiple LoRA adapters for switchable precision."""
 
     def __init__(self, in_features, out_features, bias=True,
-                 bit_widths=[4, 8, 16],
+                 bit_widths=[6, 8, 16],
                  lora_rank_per_bit={4: 32, 8: 16, 16: 8},
                  lora_alpha_per_bit={4: 64, 8: 32, 16: 16},
                  lora_dropout=0.1,

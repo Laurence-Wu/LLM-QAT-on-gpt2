@@ -166,7 +166,7 @@ def save_int8_checkpoint(model, filepath, model_config=None, training_config=Non
             model_config_dict['lora_alpha_per_bit'] = {4: 16, 8: 32, 16: 64}
 
         checkpoint['model_config'] = model_config_dict
-        checkpoint['bit_widths'] = model_config_dict.get('bit_widths', [4, 8, 16])  # Add for easy access
+        checkpoint['bit_widths'] = model_config_dict.get('bit_widths', [6, 8, 16])  # Add for easy access
 
     if training_config is not None:
         checkpoint['training_config'] = training_config.__dict__

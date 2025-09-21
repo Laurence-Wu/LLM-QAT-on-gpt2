@@ -39,7 +39,7 @@ def test_single_precision_per_batch():
     model = model.to(device)
 
     # Available precisions
-    available_precisions = [4, 8, 16, 32]
+    available_precisions = [6, 8, 16, 32]
 
     # Track gradients for each precision
     gradient_norms_by_precision = {p: [] for p in available_precisions}
@@ -158,7 +158,7 @@ def test_teacher_cache_effectiveness():
     print("\n📊 Phase 2: Test student training with cached teacher")
 
     # Test students can retrieve cached teacher outputs
-    student_precisions = [4, 8, 16]
+    student_precisions = [6, 8, 16]
     cache_hit_results = {}
 
     for precision in student_precisions:
@@ -319,7 +319,7 @@ def test_random_sampling_convergence():
     model = model.to(device)
 
     # Setup training
-    available_precisions = [4, 8, 16, 32]
+    available_precisions = [6, 8, 16, 32]
     num_iterations = 100
     batch_size = 4
 

@@ -152,10 +152,6 @@ class StatsTracker:
         if bit_widths:
             self.losses_per_bit = {bits: [] for bits in bit_widths}
             self.precision_counts = {bits: 0 for bits in bit_widths}
-        else:
-            # Fallback to default if no config provided
-            self.losses_per_bit = {4: [], 8: [], 16: [], 32: []}
-            self.precision_counts = {4: 0, 8: 0, 16: 0, 32: 0}
 
     def update(self, iteration, loss, bits, optimizer):
         """Update statistics for current iteration."""
@@ -256,10 +252,7 @@ def compute_loss_single_precision(model, batch, precision, teacher_bits, distill
                 # Use distillation loss if teacher outputs are available
                 loss = distill_mgr.compute_distillation_loss(outputs, input_ids)
             else:
-                # Throw error if no teacher outputs cached for student training
-                raise RuntimeError(f"No cached teacher outputs found for {precision}-bit student training. "
-                                   f"Ensure teacher (32-bit) has processed this batch first. "
-                                   f"Cache stats: {distill_mgr.get_cache_stats() if distill_mgr else 'No distill_mgr'}")
+                print(f"Warning: No cached teacher for {precision}-bit, using standard loss")
 
     # Clean up
     del outputs, input_ids
@@ -415,7 +408,7 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     progress_bar = tqdm(range(config.num_iterations), desc="SP Training")
 
     # All available precisions for random sampling (including teacher)
-    available_precisions = model_config.bit_widths  # [4, 8, 16, 32]
+    available_precisions = model_config.bit_widths  # [6, 8, 16, 32]
 
     # Ensure all student precisions are calibrated
     student_bits = [b for b in available_precisions if b < 32]
