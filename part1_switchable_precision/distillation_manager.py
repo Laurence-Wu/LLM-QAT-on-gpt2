@@ -36,10 +36,14 @@ class DistillationManager:
         except StopIteration:
             self.device = torch.device('cuda')
 
-        # Teacher output cache
+        # Enhanced teacher output cache with per-sequence storage
         self.teacher_cache = {}
         self.cache_keys = []
         self.iteration_count = 0
+
+        # Cache statistics
+        self.cache_hits = 0
+        self.cache_misses = 0
 
         # Track when teacher was last updated
         self.last_teacher_update = -1
@@ -212,7 +216,14 @@ class DistillationManager:
     def _get_from_cache(self, input_ids):
         """Retrieve teacher outputs from cache."""
         key = self._get_batch_key(input_ids)
-        return self.teacher_cache.get(key)
+        result = self.teacher_cache.get(key)
+
+        if result is not None:
+            self.cache_hits += 1
+        else:
+            self.cache_misses += 1
+
+        return result
 
     def mark_switch_from_teacher(self):
         """Mark that we're switching away from teacher precision."""
@@ -229,3 +240,16 @@ class DistillationManager:
     def step(self):
         """Increment iteration counter."""
         self.iteration_count += 1
+
+    def get_cache_stats(self):
+        """Get cache statistics."""
+        total_requests = self.cache_hits + self.cache_misses
+        hit_rate = self.cache_hits / total_requests if total_requests > 0 else 0.0
+
+        return {
+            'cache_size': len(self.teacher_cache),
+            'cache_hits': self.cache_hits,
+            'cache_misses': self.cache_misses,
+            'hit_rate': hit_rate,
+            'total_requests': total_requests
+        }

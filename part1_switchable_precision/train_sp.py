@@ -141,13 +141,21 @@ class CalibrationManager:
 class StatsTracker:
     """Tracks and manages training statistics."""
 
-    def __init__(self):
+    def __init__(self, bit_widths=None):
         self.iteration_losses = []
         self.validation_losses = []
         self.bit_width_usage = []
         self.learning_rates = []
         self.memory_usage = []
-        self.losses_per_bit = {4: [], 8: [], 16: []}
+
+        # Initialize losses_per_bit and precision_counts based on configured bit widths
+        if bit_widths:
+            self.losses_per_bit = {bits: [] for bits in bit_widths}
+            self.precision_counts = {bits: 0 for bits in bit_widths}
+        else:
+            # Fallback to default if no config provided
+            self.losses_per_bit = {4: [], 8: [], 16: [], 32: []}
+            self.precision_counts = {4: 0, 8: 0, 16: 0, 32: 0}
 
     def update(self, iteration, loss, bits, optimizer):
         """Update statistics for current iteration."""
@@ -163,6 +171,11 @@ class StatsTracker:
         """Add validation loss."""
         self.validation_losses.append(val_loss)
 
+    def record_precision_usage(self, precision):
+        """Record that a precision was used in training."""
+        if precision in self.precision_counts:
+            self.precision_counts[precision] += 1
+
     def to_dict(self):
         """Convert to dictionary for JSON serialization."""
         return {
@@ -171,7 +184,8 @@ class StatsTracker:
             'bit_width_usage': self.bit_width_usage,
             'learning_rates': self.learning_rates,
             'memory_usage': self.memory_usage,
-            'losses_per_bit': self.losses_per_bit
+            'losses_per_bit': self.losses_per_bit,
+            'precision_counts': self.precision_counts
         }
 
     def save(self, filepath, model_config=None, training_config=None):
@@ -206,52 +220,53 @@ class StatsTracker:
 # LOSS COMPUTATION
 # ============================================================================
 
-def compute_loss_for_all_students(model, batch, teacher_bits, student_bits_list, distill_mgr, config, iteration):
-    """Compute loss for teacher and all student precisions."""
+def compute_loss_single_precision(model, batch, precision, teacher_bits, distill_mgr, config, iteration):
+    """
+    Compute loss for a SINGLE precision following the paper's methodology.
+    Each batch trains at ONE randomly selected precision only.
+    """
     device = next(model.parameters()).device
     input_ids = batch['input_ids'].to(device, non_blocking=True)
     attention_mask = batch.get('attention_mask')
     if attention_mask is not None:
         attention_mask = attention_mask.to(device, non_blocking=True)
 
-    total_loss = 0
-    num_students = 0
+    # Set the model to the selected precision
+    model.set_precision(precision)
 
-    # First, compute teacher outputs and update cache (using FP32)
-    model.set_precision(teacher_bits)
     with torch.amp.autocast('cuda'):  # Always use AMP
-        # Teacher forward pass to update cache
-        if distill_mgr and distill_mgr.should_update_teacher(teacher_bits, iteration):
-            distill_mgr.update_teacher(input_ids, attention_mask)
+        if precision == teacher_bits:
+            # TEACHER MODE (32-bit): Train with ground truth and cache outputs
+            outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask,
+                           output_hidden_states=True, return_dict=True)
+            loss = outputs['loss']
 
-    # Compute loss for teacher first (standard cross-entropy)
-    model.set_precision(teacher_bits)
-    with torch.amp.autocast('cuda'):  # Always use AMP
-        outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
-        teacher_loss = outputs['loss']
-        total_loss += teacher_loss
-        num_students += 1
+            # Cache teacher outputs for future student training
+            with torch.no_grad():
+                if distill_mgr:
+                    # Store the teacher outputs in cache
+                    distill_mgr.update_teacher(input_ids, attention_mask)
 
-    # Now compute distillation loss for each student precision
-    for student_bits in student_bits_list:
-        model.set_precision(student_bits)
-
-        with torch.amp.autocast('cuda'):  # Always use AMP
-            # Students train with distillation loss
+        else:
+            # STUDENT MODE (4/8/16-bit): Train with distillation
             outputs = model(input_ids, output_hidden_states=True, return_dict=True)
-            loss = distill_mgr.compute_distillation_loss(outputs, input_ids)
-            total_loss += loss
-            num_students += 1
 
-    # Average loss across all precisions
-    avg_loss = total_loss / num_students
+            # Try to get cached teacher outputs
+            if distill_mgr and distill_mgr._get_from_cache(input_ids) is not None:
+                # Use distillation loss if teacher outputs are available
+                loss = distill_mgr.compute_distillation_loss(outputs, input_ids)
+            else:
+                # Fallback to standard cross-entropy if no teacher outputs cached
+                outputs_with_labels = model(input_ids, labels=input_ids, attention_mask=attention_mask)
+                loss = outputs_with_labels['loss']
+                print(f"Warning: No cached teacher for {precision}-bit, using standard loss")
 
     # Clean up
     del outputs, input_ids
     if attention_mask is not None:
         del attention_mask
 
-    return avg_loss / config.gradient_accumulation_steps
+    return loss / config.gradient_accumulation_steps
 
 
 # ============================================================================
@@ -259,10 +274,15 @@ def compute_loss_for_all_students(model, batch, teacher_bits, student_bits_list,
 # ============================================================================
 
 def train_step(model, train_iter, train_loader, optimizer, scaler,
-               teacher_bits, student_bits_list, distill_mgr, config, iteration):
-    """Execute a single training step for all student precisions with distillation."""
+               available_precisions, distill_mgr, config, iteration, stats_tracker=None):
+    """
+    Execute a single training step with random precision sampling.
+    Each batch in the gradient accumulation uses a randomly selected precision.
+    The optimizer steps after all gradient accumulation steps, regardless of which precisions were used.
+    """
     optimizer.zero_grad(set_to_none=True)
     total_loss = 0
+    precisions_used = []
 
     # Ensure training mode
     model.train()
@@ -273,20 +293,38 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
         # Get batch
         batch = get_next_batch(train_iter, train_loader)
 
-        # Compute loss for teacher and all students
-        loss = compute_loss_for_all_students(
-            model, batch, teacher_bits, student_bits_list,
-            distill_mgr, config, iteration
+        # CRITICAL: Randomly sample ONE precision for this batch
+        # Over many iterations, all precisions will be trained
+        precision = random.choice(available_precisions)
+        precisions_used.append(precision)
+
+        # Track precision usage
+        if stats_tracker:
+            stats_tracker.record_precision_usage(precision)
+
+        # Compute loss for the selected precision only
+        loss = compute_loss_single_precision(
+            model, batch, precision,
+            teacher_bits=32,  # 32-bit is always the teacher
+            distill_mgr=distill_mgr,
+            config=config,
+            iteration=iteration + step
         )
+
         total_loss += loss.detach().item()
 
-        # Backward pass (always use scaler for mixed precision)
+        # Backward pass - gradients accumulate from the selected precision
         scaler.scale(loss).backward()
 
         # Clean up
         del batch, loss
 
-    # Optimizer step (always use scaler for mixed precision training)
+    # Print precision distribution for this step (for debugging)
+    if iteration % 100 == 0:
+        precision_counts = {p: precisions_used.count(p) for p in set(precisions_used)}
+        print(f"Step {iteration} precision distribution: {precision_counts}")
+
+    # Optimizer step happens after gradient accumulation, regardless of which precisions were used
     scaler.unscale_(optimizer)
     torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
     scaler.step(optimizer)
@@ -364,8 +402,8 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     scheduler = CosineAnnealingLR(optimizer, T_max=config.num_iterations)
     scaler = torch.amp.GradScaler('cuda')  # Always use AMP for mixed precision training
 
-    # Initialize statistics tracker
-    stats = StatsTracker()
+    # Initialize statistics tracker with configured bit widths
+    stats = StatsTracker(bit_widths=model_config.bit_widths)
 
     # Training info
     print(f"\n{'Starting SP training with distillation' if config.use_distillation else 'Starting SP training'}")
@@ -376,20 +414,19 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     train_iter = iter(train_loader)
     progress_bar = tqdm(range(config.num_iterations), desc="SP Training")
 
-    # Get teacher and student bit-widths from config
-    teacher_bits = model_config.teacher_bits if hasattr(model_config, 'teacher_bits') else 32
-    # Student bits are all bit-widths except the teacher
-    student_bits_list = [b for b in model_config.bit_widths if b != teacher_bits]  # [4, 8, 16]
+    # All available precisions for random sampling (including teacher)
+    available_precisions = model_config.bit_widths  # [4, 8, 16, 32]
 
     # Ensure all student precisions are calibrated
-    for bits in student_bits_list:
-        calib_mgr.ensure_calibrated(bits)  # Calibrate all students (4, 8, 16)
+    student_bits = [b for b in available_precisions if b < 32]
+    for bits in student_bits:
+        calib_mgr.ensure_calibrated(bits)
 
     for iteration in progress_bar:
-        # Execute training step for all precisions
+        # Execute training step with random precision sampling
         total_loss = train_step(
             model, train_iter, train_loader, optimizer, scaler,
-            teacher_bits, student_bits_list, distill_mgr, config, iteration
+            available_precisions, distill_mgr, config, iteration, stats
         )
 
         # Update learning rate
@@ -400,13 +437,14 @@ def train_sp(model, train_loader, val_loader, config, model_config):
             distill_mgr.step()
 
         # Track statistics (use max precision for tracking)
-        stats.update(iteration, total_loss, max(all_bits), optimizer)
+        stats.update(iteration, total_loss, 32, optimizer)  # Use 32 as default for tracking
 
-        # Update progress bar with S-BN precision distribution
+        # Update progress bar with precision distribution
         if iteration % 20 == 0:
             allocated = torch.cuda.memory_allocated() / 1024**3
             reserved = torch.cuda.memory_reserved() / 1024**3
-            precision_str = ', '.join([f"{b}:{c}" for b, c in sorted(precision_counts.items())])
+            # Get precision distribution from stats
+            precision_str = ', '.join([f"{b}:{stats.precision_counts[b]}" for b in sorted(stats.precision_counts.keys())])
             progress_bar.set_postfix({
                 'loss': f'{total_loss:.4f}',
                 'precisions': precision_str,
@@ -416,9 +454,9 @@ def train_sp(model, train_loader, val_loader, config, model_config):
 
         # Periodic evaluation
         if should_evaluate(iteration, config):
-            print(f"\n[Iter {iteration}] Evaluating all S-BN precisions...")
+            print(f"\n[Iter {iteration}] Evaluating all precisions...")
             val_losses = {}
-            for bits in all_bits:
+            for bits in available_precisions:
                 model.set_precision(bits)
                 val_loss = evaluate(model, val_loader, device)
                 val_losses[bits] = val_loss
@@ -426,6 +464,14 @@ def train_sp(model, train_loader, val_loader, config, model_config):
             stats.add_validation(avg_val_loss)
             val_str = ', '.join([f"{b}b:{v:.4f}" for b, v in sorted(val_losses.items())])
             print(f"[Iter {iteration}] Train: {total_loss:.4f}, Val: [{val_str}]")
+
+            # Display cache statistics if using distillation
+            if distill_mgr:
+                cache_stats = distill_mgr.get_cache_stats()
+                print(f"[Iter {iteration}] Cache stats - Size: {cache_stats['cache_size']}, "
+                      f"Hit rate: {cache_stats['hit_rate']:.2%}, "
+                      f"Hits: {cache_stats['cache_hits']}, Misses: {cache_stats['cache_misses']}")
+
             model.train()  # Return to training mode
 
         # Periodic memory cleanup
