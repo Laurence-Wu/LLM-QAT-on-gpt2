@@ -103,10 +103,10 @@ def test_bn_statistics_tracking():
 
 def test_bn_gradient_flow():
     """
-    Test gradient flow through switchable batch norm layers.
+    Test gradient flow through switchable LayerNorm layers.
     """
     print("\n" + "="*60)
-    print("TESTING BN GRADIENT FLOW")
+    print("TESTING LAYERNORM GRADIENT FLOW")
     print("="*60)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -162,12 +162,12 @@ def test_bn_gradient_flow():
             'output': model.output.weight.grad.norm().item(),
         }
 
-        # Check BN layer gradients
-        bn_key = f'bn_{precision}bit'
-        if model.sbn1.bn_layers[bn_key].weight is not None:
-            grad_norms['sbn1_weight'] = model.sbn1.bn_layers[bn_key].weight.grad.norm().item()
-        if model.sbn2.bn_layers[bn_key].weight is not None:
-            grad_norms['sbn2_weight'] = model.sbn2.bn_layers[bn_key].weight.grad.norm().item()
+        # Check LayerNorm gradients
+        ln_key = f'ln_{precision}bit'
+        if model.sbn1.ln_layers[ln_key].weight is not None:
+            grad_norms['sbn1_weight'] = model.sbn1.ln_layers[ln_key].weight.grad.norm().item()
+        if model.sbn2.ln_layers[ln_key].weight is not None:
+            grad_norms['sbn2_weight'] = model.sbn2.ln_layers[ln_key].weight.grad.norm().item()
 
         gradient_norms[precision] = grad_norms
 
@@ -192,7 +192,7 @@ def test_bn_mode_switching():
     Test train/eval mode switching with different precisions.
     """
     print("\n" + "="*60)
-    print("TESTING BN TRAIN/EVAL MODE SWITCHING")
+    print("TESTING LAYERNORM TRAIN/EVAL MODE SWITCHING")
     print("="*60)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -223,17 +223,17 @@ def test_bn_mode_switching():
         output_diff = torch.mean(torch.abs(out_train - out_eval)).item()
         results[precision]['output_diff'] = output_diff
 
-        # Check if running stats are being used in eval mode
-        bn_key = f'bn_{precision}bit'
-        bn_layer = sbn.bn_layers[bn_key]
+        # Check LayerNorm training mode (LayerNorm doesn't have running stats)
+        ln_key = f'ln_{precision}bit'
+        ln_layer = sbn.ln_layers[ln_key]
 
-        results[precision]['uses_running_stats'] = bn_layer.training == False
-        results[precision]['tracks_stats'] = bn_layer.track_running_stats
+        results[precision]['in_eval_mode'] = ln_layer.training == False
+        results[precision]['has_elementwise_affine'] = ln_layer.elementwise_affine
 
         print(f"\n   {precision}-bit precision:")
         print(f"     Train/Eval output difference: {output_diff:.6f}")
-        print(f"     Uses running stats in eval: {results[precision]['uses_running_stats']}")
-        print(f"     Tracks running stats: {results[precision]['tracks_stats']}")
+        print(f"     In eval mode: {results[precision]['in_eval_mode']}")
+        print(f"     Has elementwise affine: {results[precision]['has_elementwise_affine']}")
 
         if output_diff > 1e-4:
             print("     ✅ Different behavior in train/eval (expected)")
@@ -245,10 +245,10 @@ def test_bn_mode_switching():
 
 def test_bn_with_small_batch():
     """
-    Test batch norm behavior with small batch sizes.
+    Test LayerNorm behavior with small batch sizes.
     """
     print("\n" + "="*60)
-    print("TESTING BN WITH SMALL BATCHES")
+    print("TESTING LAYERNORM WITH SMALL BATCHES")
     print("="*60)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
