@@ -254,6 +254,52 @@ def suggest_solutions(analysis_results):
     return suggestions
 
 
+def calibrate_model_for_analysis(model, tokenizer, device, bits):
+    """Calibrate quantizers for a specific bit width."""
+    print(f"   Calibrating {bits}-bit quantizers...")
+    model.set_precision(bits)
+    model.train()  # Must be in training mode for calibration
+
+    # Start calibration
+    bits_key = f'{bits}bit'
+    for name, module in model.named_modules():
+        if hasattr(module, 'quantizers_weight'):
+            if bits_key in module.quantizers_weight:
+                module.quantizers_weight[bits_key].start_calibration()
+        if hasattr(module, 'quantizers_input'):
+            if bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].start_calibration()
+
+    # Collect calibration data
+    calibration_texts = [
+        "The quick brown fox jumps over the lazy dog.",
+        "Machine learning models require careful calibration.",
+        "Natural language processing has many applications.",
+        "Deep learning revolutionized artificial intelligence.",
+        "Transformers are powerful sequence models.",
+        "Quantization reduces model size and improves speed.",
+        "Language models can generate coherent text.",
+        "Neural networks learn from data."
+    ]
+
+    with torch.no_grad():
+        for text in calibration_texts:
+            tokens = tokenizer(text, return_tensors='pt', max_length=64, truncation=True)['input_ids'].to(device)
+            _ = model(tokens)
+
+    # Finish calibration
+    for name, module in model.named_modules():
+        if hasattr(module, 'quantizers_weight'):
+            if bits_key in module.quantizers_weight:
+                module.quantizers_weight[bits_key].finish_calibration()
+        if hasattr(module, 'quantizers_input'):
+            if bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].finish_calibration()
+
+    model.eval()
+    print(f"   ✅ Calibration complete for {bits}-bit")
+
+
 def main():
     print("="*80)
     print("QUANTIZATION CLIFF ANALYSIS")
@@ -270,6 +316,11 @@ def main():
 
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     tokenizer.pad_token = tokenizer.eos_token
+
+    # Calibrate all precisions first
+    print("\n🔧 Calibrating quantizers for all precisions...")
+    for bits in [16, 8, 6]:
+        calibrate_model_for_analysis(model, tokenizer, device, bits)
 
     all_results = {}
 
