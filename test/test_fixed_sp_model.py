@@ -257,9 +257,14 @@ def calibrate_with_two_pass(sp_model, tokenizer, device):
             if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
                 bits_key = f'{bits}bit'
                 if bits_key in module.quantizers_weight:
-                    module.quantizers_weight[bits_key].finish_calibration()
+                    # Enable debug for 4-bit and 8-bit to show running min/max
+                    show_debug = (bits in [4, 8]) and (module_count < 2) if 'module_count' in locals() else False
+                    module.quantizers_weight[bits_key].finish_calibration(debug=show_debug if 'show_debug' in locals() else False)
+                    if 'module_count' in locals(): module_count += 1
                 if bits_key in module.quantizers_input:
-                    module.quantizers_input[bits_key].finish_calibration()
+                    show_debug = (bits in [4, 8]) and (module_count < 4) if 'module_count' in locals() else False
+                    module.quantizers_input[bits_key].finish_calibration(debug=show_debug if 'show_debug' in locals() else False)
+                    if 'module_count' in locals(): module_count += 1
 
         print(f"  ✅ Statistics collection complete")
 
@@ -640,9 +645,14 @@ def test_lora_behavior(sp_model, tokenizer, device):
         for name, module in sp_model.named_modules():
             if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
                 if bits_key in module.quantizers_weight:
-                    module.quantizers_weight[bits_key].finish_calibration()
+                    # Enable debug for 4-bit and 8-bit to show running min/max
+                    show_debug = (bits in [4, 8]) and (module_count < 2) if 'module_count' in locals() else False
+                    module.quantizers_weight[bits_key].finish_calibration(debug=show_debug if 'show_debug' in locals() else False)
+                    if 'module_count' in locals(): module_count += 1
                 if bits_key in module.quantizers_input:
-                    module.quantizers_input[bits_key].finish_calibration()
+                    show_debug = (bits in [4, 8]) and (module_count < 4) if 'module_count' in locals() else False
+                    module.quantizers_input[bits_key].finish_calibration(debug=show_debug if 'show_debug' in locals() else False)
+                    if 'module_count' in locals(): module_count += 1
 
     print("   ✅ Calibration complete for all student precisions")
 
@@ -761,9 +771,14 @@ def test_quantizer_activation(sp_model, tokenizer, device):
             if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
                 bits_key = f'{bits}bit'
                 if bits_key in module.quantizers_weight:
-                    module.quantizers_weight[bits_key].finish_calibration()
+                    # Enable debug for 4-bit and 8-bit to show running min/max
+                    show_debug = (bits in [4, 8]) and (module_count < 2) if 'module_count' in locals() else False
+                    module.quantizers_weight[bits_key].finish_calibration(debug=show_debug if 'show_debug' in locals() else False)
+                    if 'module_count' in locals(): module_count += 1
                 if bits_key in module.quantizers_input:
-                    module.quantizers_input[bits_key].finish_calibration()
+                    show_debug = (bits in [4, 8]) and (module_count < 4) if 'module_count' in locals() else False
+                    module.quantizers_input[bits_key].finish_calibration(debug=show_debug if 'show_debug' in locals() else False)
+                    if 'module_count' in locals(): module_count += 1
 
         print(f"   ✅ Calibration complete")
 
@@ -976,9 +991,14 @@ def test_comprehensive_ppl(sp_model, tokenizer, device):
         for name, module in sp_model.named_modules():
             if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
                 if bits_key in module.quantizers_weight:
-                    module.quantizers_weight[bits_key].finish_calibration()
+                    # Enable debug for 4-bit and 8-bit to show running min/max
+                    show_debug = (bits in [4, 8]) and (module_count < 2) if 'module_count' in locals() else False
+                    module.quantizers_weight[bits_key].finish_calibration(debug=show_debug if 'show_debug' in locals() else False)
+                    if 'module_count' in locals(): module_count += 1
                 if bits_key in module.quantizers_input:
-                    module.quantizers_input[bits_key].finish_calibration()
+                    show_debug = (bits in [4, 8]) and (module_count < 4) if 'module_count' in locals() else False
+                    module.quantizers_input[bits_key].finish_calibration(debug=show_debug if 'show_debug' in locals() else False)
+                    if 'module_count' in locals(): module_count += 1
 
         print(f"      ✅ {precision}-bit calibration complete")
 
