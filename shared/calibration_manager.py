@@ -9,9 +9,9 @@ import torch.nn as nn
 from typing import List, Dict, Any
 
 try:
-    from .quantization import LearnableFakeQuantize
+    from .quant_methods import LearnableFakeQuantize
 except ImportError:
-    from quantization import LearnableFakeQuantize
+    from quant_methods import LearnableFakeQuantize
 
 
 class CalibrationManager:

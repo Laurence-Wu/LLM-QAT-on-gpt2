@@ -13,10 +13,10 @@ from torch.utils.checkpoint import checkpoint
 
 # Import quantization and LoRA modules
 try:
-    from .quantization import LearnableFakeQuantize
+    from .quant_methods import LearnableFakeQuantize
     from .lora import LinearWithLoRA
 except ImportError:
-    from quantization import LearnableFakeQuantize
+    from quant_methods import LearnableFakeQuantize
     from lora import LinearWithLoRA
 
 

@@ -11,7 +11,7 @@ import torch.nn as nn
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared.quantization import LearnableFakeQuantize
+from shared.quant_methods import LearnableFakeQuantize
 from shared.lora import SPLinearWithLoRA
 from part1_switchable_precision.config_sp import ModelConfig, TrainingConfig
 
