@@ -78,6 +78,19 @@ def test_sbn_statistics_separation(model, device):
     # Create test input
     x = torch.randn(2, 128, 768, device=device)
 
+    # Initialize each precision's statistics with different values
+    print("\nInitializing S-BN statistics for each precision:")
+    for bits in [4, 8, 16, 32]:
+        sbn_layer.set_precision(bits)
+        ln_key = f'ln_{bits}bit'
+        if ln_key in sbn_layer.ln_layers:
+            ln = sbn_layer.ln_layers[ln_key]
+            # Initialize with different values per precision
+            with torch.no_grad():
+                ln.weight.data = ln.weight.data * (1.0 + bits * 0.1)  # Different scale per precision
+                ln.bias.data = ln.bias.data + bits * 0.01  # Different bias per precision
+            print(f"   {bits}-bit: Initialized with scale factor {1.0 + bits * 0.1:.1f}")
+
     # Get outputs for different precisions
     outputs = {}
     for bits in [4, 8, 16, 32]:

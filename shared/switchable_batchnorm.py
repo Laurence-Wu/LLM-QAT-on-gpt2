@@ -55,11 +55,16 @@ class SwitchableBatchNorm1d(nn.Module):
         # Default to highest precision
         self.current_precision = max(self.precision_levels)
 
-    def set_precision(self, precision: int):
-        """Set the current precision level."""
+    def set_precision(self, precision: int) -> int:
+        """Set the current precision level.
+
+        Returns:
+            int: The current precision after setting
+        """
         if precision not in self.precision_levels:
             raise ValueError(f"Precision {precision} not supported. Available: {self.precision_levels}")
         self.current_precision = precision
+        return self.current_precision
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass using BN parameters for current precision."""
@@ -112,11 +117,16 @@ class SwitchableLayerNorm(nn.Module):
         # Default to highest precision
         self.current_precision = max(self.precision_levels)
 
-    def set_precision(self, precision: int):
-        """Set the current precision level."""
+    def set_precision(self, precision: int) -> int:
+        """Set the current precision level.
+
+        Returns:
+            int: The current precision after setting
+        """
         if precision not in self.precision_levels:
             raise ValueError(f"Precision {precision} not supported. Available: {self.precision_levels}")
         self.current_precision = precision
+        return self.current_precision
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass using LN parameters for current precision."""

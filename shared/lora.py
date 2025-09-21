@@ -191,12 +191,17 @@ class SPLinearWithLoRA(nn.Module):
         self.register_buffer('weight_quantized', torch.empty(out_features, in_features))
         self.register_buffer('input_quantized', None)
 
-    def set_precision(self, bits):
-        """Switch to specified bit-width."""
+    def set_precision(self, bits) -> int:
+        """Switch to specified bit-width.
+
+        Returns:
+            int: Current precision after setting
+        """
         # Allow 32-bit for FP32 teacher mode (no quantization)
         if bits == 32:
             self.current_bits = bits
-            return
+            self.current_precision = bits
+            return self.current_precision
 
         if bits not in self.bit_widths:
             raise ValueError(f"Bit-width {bits} not supported. Choose from {self.bit_widths}")
@@ -224,6 +229,10 @@ class SPLinearWithLoRA(nn.Module):
             lora.quantize_A.set_num_bits(bits)
         if lora.quantize_B is not None:
             lora.quantize_B.set_num_bits(bits)
+
+        # Store current precision
+        self.current_precision = bits
+        return self.current_precision
 
     def get_active_lora(self):
         """Get the currently active LoRA adapter."""
