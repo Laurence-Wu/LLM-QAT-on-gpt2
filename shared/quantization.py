@@ -7,12 +7,20 @@ import torch
 import torch.nn as nn
 
 # Import quantization functions
-from quantization_methods import (
-    MinMaxQuantizationFunction,
-    ReLUClipQuantizationFunction,
-    TanhQuantizationFunction,
-    LogQuantizationFunction
-)
+try:
+    from .quantization_methods import (
+        MinMaxQuantizationFunction,
+        ReLUClipQuantizationFunction,
+        TanhQuantizationFunction,
+        LogQuantizationFunction
+    )
+except ImportError:
+    from quantization_methods import (
+        MinMaxQuantizationFunction,
+        ReLUClipQuantizationFunction,
+        TanhQuantizationFunction,
+        LogQuantizationFunction
+    )
 
 
 class LearnableFakeQuantize(nn.Module):
