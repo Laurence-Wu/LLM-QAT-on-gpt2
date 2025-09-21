@@ -38,6 +38,7 @@ import gc
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from test.fix_model_initialization import create_properly_initialized_model
+from test.dataset_utils import create_test_dataloader, calculate_perplexity_properly, get_calibration_texts
 
 
 def ensure_mode(model, mode, stage_name=""):
@@ -73,17 +74,8 @@ def calibrate_precision(sp_model, tokenizer, device, precision, calibration_text
         return
 
     if calibration_texts is None:
-        # Default calibration texts
-        calibration_texts = [
-            "Machine learning algorithms optimize complex objective functions.",
-            "Neural networks learn hierarchical representations from data.",
-            "Natural language processing enables computer understanding.",
-            "Deep learning has revolutionized artificial intelligence.",
-            "Transformers use self-attention for sequence modeling.",
-            "Gradient descent iteratively improves model parameters.",
-            "Regularization techniques prevent model overfitting.",
-            "Batch normalization stabilizes neural network training.",
-        ]
+        # Get diverse calibration texts from WikiText
+        calibration_texts = get_calibration_texts(num_texts=16)
 
     print(f"   📊 Calibrating {precision}-bit precision...")
     sp_model.set_precision(precision)
@@ -948,25 +940,16 @@ def test_distillation_setup(sp_model, tokenizer, device):
 
 
 def test_comprehensive_ppl(sp_model, tokenizer, device):
-    """Test 6: Comprehensive PPL evaluation with larger dataset"""
+    """Test 6: Comprehensive PPL evaluation with proper dataset and label shifting"""
     print("\n" + "="*60)
-    print("TEST 6: COMPREHENSIVE PPL EVALUATION")
+    print("TEST 6: COMPREHENSIVE PPL EVALUATION WITH PROPER DATASET")
     print("="*60)
 
     # ==== CALIBRATION STAGE: Calibrate before evaluation ====
     print("\n📊 Calibrating quantizers for comprehensive evaluation...")
 
-    # Calibration texts - use diverse samples for better statistics
-    calibration_texts = [
-        "Machine learning algorithms optimize complex objective functions efficiently.",
-        "Natural language processing enables computers to understand human communication.",
-        "Deep neural networks learn hierarchical representations from raw data.",
-        "Artificial intelligence systems demonstrate increasingly sophisticated capabilities.",
-        "Computer vision models extract meaningful features from visual information.",
-        "Reinforcement learning agents learn optimal policies through trial and error.",
-        "Transformer architectures have revolutionized sequence modeling tasks.",
-        "Gradient descent iteratively improves model parameters during training.",
-    ]
+    # Get diverse calibration texts from WikiText
+    calibration_texts = get_calibration_texts(num_texts=20)
 
     for precision in [16, 8, 4]:  # Calibrate all student precisions
         print(f"   Calibrating {precision}-bit precision...")
@@ -1001,9 +984,86 @@ def test_comprehensive_ppl(sp_model, tokenizer, device):
 
     print("\n   ✅ All calibrations complete, proceeding to evaluation")
 
-    # ==== EVALUATION STAGE: Comprehensive Testing ====
+    # ==== EVALUATION STAGE: Comprehensive Testing with Proper Dataset ====
+    print("\n📚 Loading WikiText test dataset for proper perplexity evaluation...")
 
-    # Create a diverse test dataset with various text types
+    # CRITICAL: MUST be in EVAL mode for all perplexity testing
+    sp_model.eval()
+
+    print("\n🧪 EVALUATION STAGE: Testing perplexity using sliding window approach...")
+
+    comprehensive_results = {}
+
+    # Test each precision with proper perplexity calculation
+    for precision in [32, 16, 8, 4]:  # Include 32-bit teacher as baseline
+        sp_model.set_precision(precision)
+        print(f"\n{precision}-bit Precision Evaluation:")
+        print(f"  Calculating perplexity with sliding window approach...")
+
+        # Calculate perplexity using the correct sliding window methodology
+        results = calculate_perplexity_properly(
+            model=sp_model,
+            tokenizer=tokenizer,
+            device=device,
+            dataset_name='wikitext',
+            max_length=512,  # Window size
+            stride=256,       # 50% overlap
+            max_samples=10000  # Limit for faster testing (None for full dataset)
+        )
+
+        comprehensive_results[precision] = results
+
+        print(f"  ✅ {precision}-bit Results:")
+        print(f"    Perplexity: {results['perplexity']:.2f}")
+        print(f"    Average Loss: {results['loss']:.4f}")
+        print(f"    Total Tokens: {results['total_tokens']:,}")
+        print(f"    Windows Processed: {results['num_windows']}")
+
+    # Analysis of degradation from 32-bit baseline
+    print("\n" + "="*60)
+    print("📊 PERPLEXITY DEGRADATION ANALYSIS")
+    print("="*60)
+
+    baseline_ppl = comprehensive_results[32]['perplexity']
+    print(f"\n32-bit Teacher Baseline: {baseline_ppl:.2f}")
+    print("\nDegradation from baseline:")
+
+    for precision in [16, 8, 4]:
+        ppl = comprehensive_results[precision]['perplexity']
+        degradation = ((ppl - baseline_ppl) / baseline_ppl) * 100
+
+        # Determine verdict based on degradation
+        if precision == 16:
+            if degradation < 10:
+                verdict = "✅ EXCELLENT - Minimal degradation"
+            elif degradation < 30:
+                verdict = "⚠️ ACCEPTABLE - Moderate degradation"
+            else:
+                verdict = "❌ POOR - High degradation"
+        elif precision == 8:
+            if degradation < 50:
+                verdict = "✅ EXCELLENT - Good for 8-bit"
+            elif degradation < 150:
+                verdict = "⚠️ ACCEPTABLE - Expected for 8-bit"
+            else:
+                verdict = "❌ POOR - Excessive degradation"
+        else:  # 4-bit
+            if degradation < 150:
+                verdict = "✅ EXCELLENT - Exceptional for 4-bit"
+            elif degradation < 400:
+                verdict = "⚠️ ACCEPTABLE - Expected for 4-bit"
+            else:
+                verdict = "❌ POOR - Too much degradation"
+
+        print(f"  {precision:2d}-bit: +{degradation:.1f}% (PPL: {ppl:.2f}) - {verdict}")
+
+    return comprehensive_results
+
+
+# Remove old test dataset definition since we're using proper WikiText
+def test_comprehensive_ppl_old(sp_model, tokenizer, device):
+    """Old version - kept for reference but not used"""
+    # Old implementation with manual test dataset
     test_dataset = {
         'technical': [
             "Machine learning algorithms optimize objective functions through gradient descent.",
