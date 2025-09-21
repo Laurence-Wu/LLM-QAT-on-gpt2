@@ -324,8 +324,8 @@ def test_bn_precision_switching_consistency():
         model.set_precision(precision)
 
         with torch.no_grad():
-            output = model(tokens)
-            outputs.append(output['last_hidden_state'])
+            output = model(tokens, output_hidden_states=True)
+            outputs.append(output['hidden_states'][-1])
 
         print(f"   Step {i+1}: Switched to {precision}-bit")
 

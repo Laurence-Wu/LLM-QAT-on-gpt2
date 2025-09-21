@@ -42,14 +42,9 @@ Training and optimization tests:
 
 #### Model Utilities
 - **fix_model_initialization.py** - Proper model initialization
-- **test_quantizer_methods.py** - Quantization method testing
-- **test_sbn_integration.py** - Switchable BatchNorm integration
 
-#### Verification Tools
-- **verify_weight_loading.py** - Weight loading verification
-- **test_gpt2_perplexity.py** - GPT-2 baseline perplexity testing
-- **test_lora_16bit_disabled.py** - LoRA configuration testing
-- **test_auto_two_pass.py** - Two-pass optimization testing
+#### Standalone Tools
+- **test_quantizer_methods.py** - Quantization method testing and comparison
 
 ## Running Tests
 

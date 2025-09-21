@@ -152,8 +152,8 @@ def test_precision_consistency(model, tokenizer, device, test_texts: List[str] =
     with torch.no_grad():
         for text in test_texts:
             tokens = tokenizer(text, return_tensors='pt', max_length=64, truncation=True, padding=True)['input_ids'].to(device)
-            output = model(tokens)
-            reference_outputs.append(output['last_hidden_state'])
+            output = model(tokens, output_hidden_states=True)
+            reference_outputs.append(output['hidden_states'][-1])
 
     # Test other precisions
     for precision in [16, 8, 4]:
@@ -215,8 +215,8 @@ def test_precision_consistency(model, tokenizer, device, test_texts: List[str] =
         with torch.no_grad():
             for i, text in enumerate(test_texts):
                 tokens = tokenizer(text, return_tensors='pt', max_length=64, truncation=True, padding=True)['input_ids'].to(device)
-                output = model(tokens)
-                current_output = output['last_hidden_state']
+                output = model(tokens, output_hidden_states=True)
+                current_output = output['hidden_states'][-1]
 
                 # Calculate metrics
                 mse = torch.mean((current_output - reference_outputs[i])**2).item()

@@ -10,7 +10,7 @@ import torch
 # Add test directory to path
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'test'))
 
-from test.fix_model_initialization import create_properly_initialized_model
+from fix_model_initialization import create_properly_initialized_model
 from transformers import GPT2Tokenizer
 
 def test_basic():
