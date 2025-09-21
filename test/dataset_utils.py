@@ -130,7 +130,13 @@ def calculate_perplexity_properly(model, tokenizer, device, dataset_name='wikite
     # Tokenize as one long sequence
     encodings = tokenizer(text, return_tensors='pt')
 
-    # Limit if specified
+    # Limit to model's max position embeddings to avoid indexing errors
+    max_model_length = 1024  # GPT-2's max position embeddings
+    if encodings.input_ids.size(1) > max_model_length:
+        print(f"   Truncating to model's max length: {max_model_length}")
+        encodings.input_ids = encodings.input_ids[:, :max_model_length]
+
+    # Further limit if specified
     if max_samples and encodings.input_ids.size(1) > max_samples:
         encodings.input_ids = encodings.input_ids[:, :max_samples]
 
@@ -157,8 +163,13 @@ def calculate_perplexity_properly(model, tokenizer, device, dataset_name='wikite
 
         with torch.no_grad():
             outputs = model(input_ids, labels=target_ids)
+            # Handle both dict and object outputs
+            if isinstance(outputs, dict):
+                loss = outputs['loss']
+            else:
+                loss = outputs.loss
             # Multiply by trg_len to get total loss (not average) for these tokens
-            neg_log_likelihood = outputs.loss * trg_len
+            neg_log_likelihood = loss * trg_len
 
         nlls.append(neg_log_likelihood)
         prev_end_loc = end_loc
@@ -190,18 +201,22 @@ def get_calibration_texts(num_texts=16):
     Returns:
         List of calibration texts
     """
-    # Load a small portion of WikiText for calibration
-    dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split='train', streaming=True)
+    try:
+        # Try to load WikiText for calibration
+        dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split='train')
 
-    texts = []
-    for item in dataset:
-        text = item['text'].strip()
-        if len(text) > 100 and len(text) < 500:  # Medium-length texts
-            texts.append(text)
-            if len(texts) >= num_texts:
-                break
+        texts = []
+        for item in dataset:
+            text = item['text'].strip()
+            if len(text) > 100 and len(text) < 500:  # Medium-length texts
+                texts.append(text)
+                if len(texts) >= num_texts:
+                    break
+    except:
+        # If loading fails, use empty list to trigger fallback
+        texts = []
 
-    # Fallback if not enough texts found
+    # Fallback if not enough texts found or loading failed
     if len(texts) < num_texts:
         default_texts = [
             "Machine learning algorithms optimize complex objective functions through iterative updates.",

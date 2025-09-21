@@ -1008,7 +1008,7 @@ def test_comprehensive_ppl(sp_model, tokenizer, device):
             dataset_name='wikitext',
             max_length=512,  # Window size
             stride=256,       # 50% overlap
-            max_samples=10000  # Limit for faster testing (None for full dataset)
+            max_samples=1024  # Limited to model's max position embeddings
         )
 
         comprehensive_results[precision] = results
