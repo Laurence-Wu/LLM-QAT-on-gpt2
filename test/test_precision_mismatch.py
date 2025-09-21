@@ -155,8 +155,10 @@ def test_precision_consistency(model, tokenizer, device, test_texts: List[str] =
             output = model(tokens, output_hidden_states=True)
             reference_outputs.append(output['hidden_states'][-1])
 
-    # Test other precisions
-    for precision in [16, 8, 4]:
+    # Test other precisions - get configured bit widths from model
+    bit_widths = model.transformer.bit_widths if hasattr(model.transformer, 'bit_widths') else [6, 8, 16, 32]
+    student_precisions = [b for b in bit_widths if b < 32]
+    for precision in student_precisions:
         print(f"\n🔍 Testing {precision}-bit precision:")
         model.set_precision(precision)
 
@@ -271,7 +273,9 @@ def test_layer_precision_analysis(model, tokenizer, device):
 
     layer_analysis = {}
 
-    for precision in [32, 16, 8, 4]:
+    # Get configured bit widths from model
+    bit_widths = model.transformer.bit_widths if hasattr(model.transformer, 'bit_widths') else [6, 8, 16, 32]
+    for precision in bit_widths:
         print(f"\n🔬 Analyzing {precision}-bit precision:")
         model.set_precision(precision)
         model.eval()
@@ -422,14 +426,18 @@ def run_precision_mismatch_tests():
 
     # Consistency summary
     print("\n1. Precision Consistency:")
-    for precision in [16, 8, 4]:
+    # Get actual tested precisions from results
+    tested_precisions = [p for p in consistency_results.keys() if isinstance(p, int)]
+    for precision in sorted(tested_precisions):
         if precision in consistency_results:
             cos_sim = consistency_results[precision]['avg_cosine_sim']
             print(f"   {precision}-bit: Cosine similarity = {cos_sim:.4f}")
 
     # Layer issues summary
     print("\n2. Layer Issues by Precision:")
-    for precision in [32, 16, 8, 4]:
+    # Get actual tested precisions from results
+    tested_precisions_layer = [p for p in layer_results.keys() if isinstance(p, int)]
+    for precision in sorted(tested_precisions_layer):
         if precision in layer_results:
             num_issues = layer_results[precision]['num_issues']
             print(f"   {precision}-bit: {num_issues} layers with issues")
