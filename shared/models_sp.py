@@ -15,11 +15,11 @@ from torch.utils.checkpoint import checkpoint
 try:
     from .quantization import LearnableFakeQuantize
     from .lora import SPLinearWithLoRA
-    from .switchable_batchnorm import SwitchableLayerNorm, PrecisionController
+    from .switchable_batchnorm import SwitchableLayerNorm
 except ImportError:
     from quantization import LearnableFakeQuantize
     from lora import SPLinearWithLoRA
-    from switchable_batchnorm import SwitchableLayerNorm, PrecisionController
+    from switchable_batchnorm import SwitchableLayerNorm
 
 
 class SPAttention(nn.Module):
@@ -228,18 +228,18 @@ class SPModel(nn.Module):
             eps=config.layer_norm_epsilon
         )
 
-        # Initialize precision controller
-        self.precision_controller = PrecisionController(self.bit_widths)
-        self.precision_controller.register_module(self)
-
     def set_precision(self, bits):
         """Set precision for all transformer blocks and normalization layers."""
         if bits not in self.bit_widths:
             raise ValueError(f"Bit width {bits} not in configured widths {self.bit_widths}")
         self.current_bit_width = bits
 
-        # Use precision controller to set precision for entire model
-        self.precision_controller.set_precision(bits)
+        # Set precision for all blocks and layers directly (avoid recursion)
+        for block in self.h:
+            block.set_precision(bits)
+
+        # Set precision for final layer norm
+        self.ln_f.set_precision(bits)
 
         # Handle weight freezing/unfreezing based on precision
         # 32-bit teacher: Unfreeze all base weights (but not embeddings)

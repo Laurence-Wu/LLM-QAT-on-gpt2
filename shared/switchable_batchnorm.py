@@ -128,61 +128,6 @@ class SwitchableLayerNorm(nn.Module):
                 f'eps={self.eps}, elementwise_affine={self.elementwise_affine}')
 
 
-class PrecisionController:
-    """
-    Central controller for coordinating precision switching across the network.
-    Ensures all S-BN layers switch synchronously.
-    """
-
-    def __init__(self, precision_levels: List[int] = [4, 8, 16, 32]):
-        """
-        Args:
-            precision_levels: Available precision levels in bits
-        """
-        self.precision_levels = sorted(precision_levels)
-        self.current_precision = max(self.precision_levels)
-        self.registered_modules = []
-
-    def register_module(self, module: nn.Module):
-        """Register a module with switchable components."""
-        self.registered_modules.append(module)
-
-    def set_precision(self, precision: int):
-        """
-        Set precision for all registered modules.
-
-        Args:
-            precision: Target precision in bits
-        """
-        if precision not in self.precision_levels:
-            raise ValueError(f"Precision {precision} not supported. Available: {self.precision_levels}")
-
-        self.current_precision = precision
-
-        # Update all registered modules
-        for module in self.registered_modules:
-            self._set_module_precision(module, precision)
-
-    def _set_module_precision(self, module: nn.Module, precision: int):
-        """Recursively set precision for all switchable components."""
-        # Set precision for the module itself if it has the method
-        if hasattr(module, 'set_precision'):
-            module.set_precision(precision)
-
-        # Recursively set for all children
-        for child in module.children():
-            self._set_module_precision(child, precision)
-
-    def sample_random_precision(self) -> int:
-        """Sample a random precision level for training."""
-        import random
-        return random.choice(self.precision_levels)
-
-    def get_current_precision(self) -> int:
-        """Get current precision setting."""
-        return self.current_precision
-
-
 def replace_bn_with_switchable(
     module: nn.Module,
     precision_levels: List[int] = [4, 8, 16, 32],

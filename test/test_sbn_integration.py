@@ -15,7 +15,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared.switchable_batchnorm import (
     SwitchableBatchNorm1d,
     SwitchableLayerNorm,
-    PrecisionController,
     replace_bn_with_switchable
 )
 from shared.quantization import LearnableFakeQuantize
@@ -66,55 +65,6 @@ def test_switchable_bn_basic():
     print("\n✅ Basic S-BN functionality tests passed!")
 
 
-def test_precision_controller():
-    """Test PrecisionController coordination."""
-    print("\n" + "="*60)
-    print("TESTING PRECISION CONTROLLER")
-    print("="*60)
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    bit_widths = [4, 8, 16, 32]
-
-    # Create a simple model with S-BN layers
-    class TestModel(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.ln1 = SwitchableLayerNorm(256, bit_widths)
-            self.linear = nn.Linear(256, 256)
-            self.ln2 = SwitchableLayerNorm(256, bit_widths)
-
-        def forward(self, x):
-            x = self.ln1(x)
-            x = self.linear(x)
-            x = self.ln2(x)
-            return x
-
-    model = TestModel().to(device)
-    controller = PrecisionController(bit_widths)
-    controller.register_module(model)
-
-    x = torch.randn(4, 256, device=device)
-
-    print("\nTesting synchronized precision switching:")
-    for bits in bit_widths:
-        controller.set_precision(bits)
-        assert model.ln1.current_precision == bits
-        assert model.ln2.current_precision == bits
-        out = model(x)
-        print(f"   ✅ {bits}-bit: All layers synchronized")
-
-    # Test random precision sampling
-    print("\nTesting random precision sampling:")
-    for _ in range(10):
-        random_bits = controller.sample_random_precision()
-        assert random_bits in bit_widths
-        controller.set_precision(random_bits)
-        out = model(x)
-    print("   ✅ Random sampling works correctly")
-
-    print("\n✅ Precision controller tests passed!")
-
-
 def test_sbn_with_quantization():
     """Test S-BN integration with quantization."""
     print("\n" + "="*60)
@@ -150,15 +100,13 @@ def test_sbn_with_quantization():
             return x
 
     layer = QuantizedSBNLayer().to(device)
-    controller = PrecisionController(bit_widths)
-    controller.register_module(layer)
 
     # Test data
     x = torch.randn(8, 512, device=device, requires_grad=True)
 
     print("\nTesting S-BN + Quantization for each precision:")
     for bits in bit_widths:
-        controller.set_precision(bits)
+        layer.set_precision(bits)
         layer.train()
 
         # Forward pass
@@ -307,7 +255,6 @@ def main():
 
     # Run all tests
     test_switchable_bn_basic()
-    test_precision_controller()
     test_sbn_with_quantization()
     test_sbn_in_gpt2_model()
     test_replace_bn_utility()
@@ -317,7 +264,7 @@ def main():
     print("="*80)
     print("\nS-BN is ready for multi-precision training with:")
     print("  • Separate normalization statistics per precision")
-    print("  • Coordinated precision switching via PrecisionController")
+    print("  • Direct precision switching for each layer")
     print("  • Random precision sampling for training")
     print("  • Full integration with quantization")
 

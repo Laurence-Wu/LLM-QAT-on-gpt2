@@ -70,11 +70,8 @@ def calibrate_precision_with_debug(sp_model, tokenizer, device, precision, calib
 
     # Start calibration
     for name, module in sp_model.named_modules():
-        try:
-            quantizers_weight = module.quantizers_weight
-            quantizers_input = module.quantizers_input
-        except AttributeError:
-            continue
+        quantizers_weight = getattr(module, 'quantizers_weight', None)
+        quantizers_input = getattr(module, 'quantizers_input', None)
         if quantizers_weight is not None and quantizers_input is not None:
             if bits_key in quantizers_weight:
                 quantizers_weight[bits_key].start_calibration()
@@ -99,11 +96,8 @@ def calibrate_precision_with_debug(sp_model, tokenizer, device, precision, calib
 
     sample_count = 0
     for name, module in sp_model.named_modules():
-        try:
-            quantizers_weight = module.quantizers_weight
-            quantizers_input = module.quantizers_input
-        except AttributeError:
-            continue
+        quantizers_weight = getattr(module, 'quantizers_weight', None)
+        quantizers_input = getattr(module, 'quantizers_input', None)
         if quantizers_weight is not None and quantizers_input is not None:
             if bits_key in quantizers_weight:
                 # Show debug for first 2 weight quantizers
@@ -262,19 +256,13 @@ def test_lora_behavior_sliding(sp_model, tokenizer, device):
         total_loras = 0
 
         for name, module in sp_model.named_modules():
-            try:
-                lora_adapters = module.lora_adapters
-            except AttributeError:
-                continue
+            lora_adapters = getattr(module, 'lora_adapters', None)
             if lora_adapters is not None:
                 bit_key = f'{precision}bit'
                 if bit_key in lora_adapters:
                     lora = lora_adapters[bit_key]
                     total_loras += 1
-                    try:
-                        enabled = lora.enabled
-                    except AttributeError:
-                        enabled = False
+                    enabled = getattr(lora, 'enabled', False)
                     if enabled:
                         enabled_loras += 1
 
@@ -336,10 +324,7 @@ def test_quantizer_activation_sliding(sp_model, tokenizer, device):
         # Check quantizer states
         quantizer_states = []
         for name, module in sp_model.named_modules():
-            try:
-                quantizers_weight = module.quantizers_weight
-            except AttributeError:
-                continue
+            quantizers_weight = getattr(module, 'quantizers_weight', None)
             if quantizers_weight is not None:
                 bits_key = f'{bits}bit'
                 if bits_key in quantizers_weight:
