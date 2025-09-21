@@ -11,7 +11,7 @@ import torch.nn as nn
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared.quant_methods import LearnableFakeQuantize
+from shared.quantization import LearnableFakeQuantize
 
 
 def test_quantizer_methods():

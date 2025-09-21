@@ -1,38 +1,18 @@
 """
-Different quantization methods for LearnableFakeQuantize.
+LearnableFakeQuantize module with support for different quantization methods.
 Supports multiple quantization strategies: minmax, relu_clip, tanh, and log.
 """
 
 import torch
 import torch.nn as nn
 
-
-class QuantizationFunction(torch.autograd.Function):
-    """Custom quantization function with straight-through estimator."""
-    @staticmethod
-    def forward(ctx, input, scale, zero_point, num_bits, symmetric):
-        ctx.save_for_backward(input, scale.clone(), zero_point.clone())
-        ctx.num_bits = num_bits
-        ctx.symmetric = symmetric
-
-        if symmetric:
-            # Symmetric quantization
-            quantized = torch.round(input / scale)
-            output = quantized * scale
-        else:
-            # Asymmetric quantization
-            output = torch.round(input / scale + zero_point)
-            output = torch.clamp(output, 0, 2**num_bits - 1)
-            output = (output - zero_point) * scale
-
-        return output
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        # Straight-through estimator
-        input, scale, zero_point = ctx.saved_tensors
-        grad_input = grad_output.clone()
-        return grad_input, None, None, None, None
+# Import quantization functions
+from quantization_methods import (
+    MinMaxQuantizationFunction,
+    ReLUClipQuantizationFunction,
+    TanhQuantizationFunction,
+    LogQuantizationFunction
+)
 
 
 class LearnableFakeQuantize(nn.Module):
@@ -219,8 +199,8 @@ class LearnableFakeQuantize(nn.Module):
         Standard min-max quantization (Paper's default).
         Uses the formula: X_Q = α⌊X_R/α⌉ where α = max(|X_R|)/(2^(N-1) - 1)
         """
-        # Apply standard quantization
-        return QuantizationFunction.apply(
+        # Apply standard min-max quantization
+        return MinMaxQuantizationFunction.apply(
             x, self.scale, self.zero_point,
             self.num_bits, self.symmetric
         )
@@ -230,18 +210,13 @@ class LearnableFakeQuantize(nn.Module):
         ReLU-style quantization - clips to [0, max] range.
         Useful for activations after ReLU layers.
         """
-        # Clip to non-negative range
-        x_clipped = torch.clamp(x, min=0.0)
+        # Use calibrated maximum value
+        max_val = self.running_max if self.calibrated else torch.max(torch.abs(x))
 
-        # Clip to calibrated maximum
-        if self.calibrated:
-            max_val = self.running_max
-            x_clipped = torch.clamp(x_clipped, max=max_val)
-
-        # Quantize in [0, max] range
-        x_int = torch.round(x_clipped / self.scale)
-        x_int = torch.clamp(x_int, 0, 2**self.num_bits - 1)
-        x_quant = x_int * self.scale
+        # Apply ReLU clip quantization
+        x_quant = ReLUClipQuantizationFunction.apply(
+            x, self.scale, max_val, self.num_bits
+        )
 
         # Straight-through estimator
         return x + (x_quant - x).detach()
@@ -251,76 +226,43 @@ class LearnableFakeQuantize(nn.Module):
         Tanh-based quantization - maps inputs through tanh to [-1, 1] range.
         Useful for bounded inputs and helps with outliers.
         """
-        # Scale input based on calibration stats
+        # Get input scale from calibration stats
         if self.calibrated:
             input_scale = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
-            x_scaled = x / (input_scale + self.eps)
         else:
-            x_scaled = x
+            input_scale = torch.max(torch.abs(x))
 
-        # Apply tanh to bound the input to [-1, 1]
-        x_tanh = torch.tanh(x_scaled)
-
-        # Quantize in [-1, 1] range
-        if self.symmetric:
-            x_int = torch.round(x_tanh * (2**(self.num_bits-1) - 1))
-            x_int = torch.clamp(x_int, -(2**(self.num_bits-1) - 1), 2**(self.num_bits-1) - 1)
-            x_quant = x_int / (2**(self.num_bits-1) - 1)
-        else:
-            # Map to [0, 1] for asymmetric
-            x_normalized = (x_tanh + 1) / 2
-            x_int = torch.round(x_normalized * (2**self.num_bits - 1))
-            x_int = torch.clamp(x_int, 0, 2**self.num_bits - 1)
-            x_quant = x_int / (2**self.num_bits - 1)
-            x_quant = x_quant * 2 - 1  # Back to [-1, 1]
-
-        # Scale back to original range
-        if self.calibrated:
-            x_quant = x_quant * input_scale
+        # Apply tanh quantization
+        x_quant = TanhQuantizationFunction.apply(
+            x, input_scale, self.num_bits, self.symmetric
+        )
 
         # Straight-through estimator
-        return x + (x_quant - x_tanh * (input_scale if self.calibrated else 1.0)).detach()
+        return x + (x_quant - x).detach()
 
     def _quantize_log(self, x):
         """
         Logarithmic quantization - non-uniform quantization.
         Allocates more levels to smaller values.
         """
-        # Separate sign and magnitude
-        sign_x = torch.sign(x)
-        abs_x = torch.abs(x) + self.eps
-
-        # Apply logarithm to magnitude
-        log_x = torch.log2(abs_x)
-
-        # Find range for normalization
+        # Get log range from calibration stats
         if self.calibrated:
             abs_min = torch.abs(self.running_min) + self.eps
             abs_max = torch.abs(self.running_max) + self.eps
             log_min = torch.log2(abs_min)
             log_max = torch.log2(abs_max)
         else:
+            abs_x = torch.abs(x) + self.eps
+            log_x = torch.log2(abs_x)
             log_min = log_x.min()
             log_max = log_x.max()
 
-        # Normalize to [0, 1]
         log_range = log_max - log_min + self.eps
-        log_normalized = (log_x - log_min) / log_range
 
-        # Quantize uniformly in log space
-        log_int = torch.round(log_normalized * (2**self.num_bits - 1))
-        log_int = torch.clamp(log_int, 0, 2**self.num_bits - 1)
-
-        # Dequantize
-        log_quant_normalized = log_int / (2**self.num_bits - 1)
-        log_quant = log_quant_normalized * log_range + log_min
-
-        # Convert back to linear space
-        abs_quant = torch.pow(2, log_quant)
-        x_quant = sign_x * abs_quant
-
-        # Handle zeros
-        x_quant = torch.where(torch.abs(x) < self.eps, torch.zeros_like(x), x_quant)
+        # Apply logarithmic quantization
+        x_quant = LogQuantizationFunction.apply(
+            x, log_min, log_range, self.num_bits
+        )
 
         # Straight-through estimator
         return x + (x_quant - x).detach()

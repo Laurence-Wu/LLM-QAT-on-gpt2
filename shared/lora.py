@@ -5,13 +5,9 @@ import math
 
 # Try relative imports first, fall back to direct imports
 try:
-    from .quant_methods import LearnableFakeQuantize
+    from .quantization import LearnableFakeQuantize
 except ImportError:
-    try:
-        from quant_methods import LearnableFakeQuantize
-    except ImportError:
-        # Fallback to old quantization module if quant_methods doesn't exist
-        from quantization import LearnableFakeQuantize
+    from quantization import LearnableFakeQuantize
 
 class LoRALayer(nn.Module):
     """LoRA adapter with fake quantization."""
