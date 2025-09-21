@@ -525,7 +525,7 @@ def test_gradient_accumulation_effects():
                 loss = loss / accum_steps
                 loss.backward()
 
-                accumulated_loss += loss.item() * accum_steps
+                accumulated_loss += loss.item()
 
             # Update weights
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
