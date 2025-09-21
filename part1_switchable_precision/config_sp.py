@@ -23,12 +23,12 @@ class ModelConfig:
         self.use_gradient_checkpointing = True
 
         # Quantizer type: 'minmax', 'relu_clip', 'tanh', or 'log'
-        self.quantizer_type = 'log'  # Default to standard min-max quantization
+        self.quantizer_type = 'log'  # Default to logarithmic quantization
         self.quantizer_per_bit = {
-            4: 'log',    # Use minmax for 4-bit (standard)
-            8: 'log',    # Use minmax for 8-bit (standard)
-            16: 'log',   # Use minmax for 16-bit
-            32: None        # No quantization for 32-bit FP32
+            4: 'log',    # Use log for 4-bit (better for low precision)
+            8: 'log',    # Use log for 8-bit (handles outliers well)
+            16: 'log',   # Use log for 16-bit (non-uniform quantization)
+            32: None     # No quantization for 32-bit FP32
         }
 
         # LoRA settings (used when not in switchable mode)
