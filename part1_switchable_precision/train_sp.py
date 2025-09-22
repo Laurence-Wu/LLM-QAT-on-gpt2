@@ -294,14 +294,23 @@ def compute_loss_single_precision(model, batch, precision, teacher_bits, distill
 
         else:
             # STUDENT MODE (4/8/16-bit): Train with distillation
+
+            # First ensure teacher outputs are cached
+            if distill_mgr and distill_mgr._get_from_cache(input_ids) is None:
+                # Generate and cache teacher outputs first
+                with torch.no_grad():
+                    model.set_precision(teacher_bits)
+                    distill_mgr.update_teacher(input_ids, attention_mask)
+                    model.set_precision(precision)  # Switch back to student precision
+
+            # Now compute student outputs and distillation loss
             outputs = model(input_ids, output_hidden_states=True, return_dict=True)
 
-            # Try to get cached teacher outputs
-            if distill_mgr and distill_mgr._get_from_cache(input_ids) is not None:
-                # Use distillation loss if teacher outputs are available
+            if distill_mgr:
+                # Use distillation loss with cached teacher outputs
                 loss = distill_mgr.compute_distillation_loss(outputs, input_ids)
             else:
-                print(f"Warning: No cached teacher for {precision}-bit, using standard loss")
+                raise ValueError(f"Distillation manager required for student precision {precision}-bit")
 
     # Clean up
     del outputs, input_ids
