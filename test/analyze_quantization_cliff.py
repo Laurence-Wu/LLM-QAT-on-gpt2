@@ -255,22 +255,65 @@ def suggest_solutions(analysis_results):
 
 
 def calibrate_model_for_analysis(model, tokenizer, device, bits):
-    """Calibrate quantizers for a specific bit width."""
+    """Calibrate quantizers with separate weight and input calibration."""
     print(f"   Calibrating {bits}-bit quantizers...")
     model.set_precision(bits)
-    model.train()  # Must be in training mode for calibration
+    model.train()
 
-    # Start calibration
     bits_key = f'{bits}bit'
-    for name, module in model.named_modules():
-        if hasattr(module, 'quantizers_weight'):
-            if bits_key in module.quantizers_weight:
-                module.quantizers_weight[bits_key].start_calibration()
-        if hasattr(module, 'quantizers_input'):
-            if bits_key in module.quantizers_input:
-                module.quantizers_input[bits_key].start_calibration()
 
-    # Collect calibration data
+    # Skip 32-bit
+    if bits >= 32:
+        print(f"   Skipping calibration for {bits}-bit (no quantization)")
+        model.eval()
+        return
+
+    # Step 1: Calibrate weight quantizers on actual weights
+    print(f"   Step 1: Calibrating weight quantizers on weight tensors...")
+    weight_count = 0
+
+    for name, module in model.named_modules():
+        if not hasattr(module, 'quantizers_weight'):
+            continue
+
+        if bits_key not in module.quantizers_weight:
+            print(f"     Warning: {name} missing {bits_key}")
+            continue
+
+        weight_quantizer = module.quantizers_weight[bits_key]
+
+        # Get weight tensor
+        weight = None
+        if hasattr(module, 'linear') and hasattr(module.linear, 'weight'):
+            weight = module.linear.weight.data
+        elif hasattr(module, 'weight'):
+            weight = module.weight.data
+
+        if weight is None:
+            print(f"     Warning: {name} has no accessible weight")
+            continue
+
+        # Calibrate on weight
+        try:
+            weight_quantizer.start_calibration()
+            with torch.no_grad():
+                _ = weight_quantizer(weight)
+            weight_quantizer.finish_calibration(debug=True)  # Enable debug for analysis
+            weight_count += 1
+        except Exception as e:
+            print(f"     Error calibrating {name}: {e}")
+
+    print(f"   ✓ Calibrated {weight_count} weight quantizers")
+
+    # Step 2: Calibrate input quantizers on activations
+    print(f"   Step 2: Calibrating input quantizers on activations...")
+
+    # Start calibration for input quantizers
+    for name, module in model.named_modules():
+        if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
+            module.quantizers_input[bits_key].start_calibration()
+
+    # Calibration texts
     calibration_texts = [
         "The quick brown fox jumps over the lazy dog.",
         "Machine learning models require careful calibration.",
@@ -282,19 +325,20 @@ def calibrate_model_for_analysis(model, tokenizer, device, bits):
         "Neural networks learn from data."
     ]
 
+    # Run forward passes
     with torch.no_grad():
         for text in calibration_texts:
             tokens = tokenizer(text, return_tensors='pt', max_length=64, truncation=True)['input_ids'].to(device)
             _ = model(tokens)
 
-    # Finish calibration
+    # Finish calibration for input quantizers
+    input_count = 0
     for name, module in model.named_modules():
-        if hasattr(module, 'quantizers_weight'):
-            if bits_key in module.quantizers_weight:
-                module.quantizers_weight[bits_key].finish_calibration()
-        if hasattr(module, 'quantizers_input'):
-            if bits_key in module.quantizers_input:
-                module.quantizers_input[bits_key].finish_calibration()
+        if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
+            module.quantizers_input[bits_key].finish_calibration(debug=False)
+            input_count += 1
+
+    print(f"   ✓ Calibrated {input_count} input quantizers")
 
     model.eval()
     print(f"   ✅ Calibration complete for {bits}-bit")

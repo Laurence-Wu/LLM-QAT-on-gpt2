@@ -43,7 +43,7 @@ from test.test_batchnorm_effects import (
 )
 from test.test_training_dynamics import (
     test_multi_batch_training,
-    test_quantization_aware_training,
+    test_switchable_precision_training,
     test_distillation_effectiveness,
     test_gradient_accumulation_effects,
     test_batch_norm_training_dynamics
@@ -62,10 +62,66 @@ from test.analyze_quantization_cliff import (
 )
 
 
+def verify_calibration_scales(sp_model, precision):
+    """
+    Verify that calibration scales are appropriate for weights vs inputs.
+    Returns True if scales look correct, False otherwise.
+    """
+    bits_key = f'{precision}bit'
+    weight_scales = []
+    input_scales = []
+
+    for name, module in sp_model.named_modules():
+        # Check weight quantizer scales
+        if hasattr(module, 'quantizers_weight') and bits_key in module.quantizers_weight:
+            weight_quantizer = module.quantizers_weight[bits_key]
+            if hasattr(weight_quantizer, 'scale') and weight_quantizer.scale is not None:
+                scale_val = weight_quantizer.scale.mean().item() if weight_quantizer.scale.numel() > 1 else weight_quantizer.scale.item()
+                weight_scales.append(scale_val)
+
+        # Check input quantizer scales
+        if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
+            input_quantizer = module.quantizers_input[bits_key]
+            if hasattr(input_quantizer, 'scale') and input_quantizer.scale is not None:
+                scale_val = input_quantizer.scale.mean().item() if input_quantizer.scale.numel() > 1 else input_quantizer.scale.item()
+                input_scales.append(scale_val)
+
+    if not weight_scales or not input_scales:
+        print(f"   ⚠️ No scales found for {precision}-bit precision")
+        return False
+
+    avg_weight_scale = np.mean(weight_scales)
+    avg_input_scale = np.mean(input_scales)
+    scale_ratio = avg_input_scale / avg_weight_scale if avg_weight_scale > 0 else 0
+
+    print(f"\n   📊 Scale Verification for {precision}-bit:")
+    print(f"      Weight scales: min={min(weight_scales):.6f}, max={max(weight_scales):.6f}, avg={avg_weight_scale:.6f}")
+    print(f"      Input scales:  min={min(input_scales):.6f}, max={max(input_scales):.6f}, avg={avg_input_scale:.6f}")
+    print(f"      Input/Weight ratio: {scale_ratio:.2f}")
+
+    # Check if scales are in expected ranges
+    weight_ok = 0.001 <= avg_weight_scale <= 1.0  # Weights typically 0.01-0.5
+    input_ok = 0.5 <= avg_input_scale <= 20.0      # Inputs typically 1-10
+    ratio_ok = scale_ratio >= 5                     # Input should be significantly larger
+
+    if weight_ok and input_ok and ratio_ok:
+        print(f"      ✅ Scales look correct!")
+        return True
+    else:
+        print(f"      ❌ Scale issues detected:")
+        if not weight_ok:
+            print(f"         - Weight scale out of range (expected 0.001-1.0)")
+        if not input_ok:
+            print(f"         - Input scale out of range (expected 0.5-20.0)")
+        if not ratio_ok:
+            print(f"         - Ratio too small (expected >= 5)")
+        return False
+
+
 def calibrate_precision_with_debug(sp_model, tokenizer, device, precision, calibration_texts=None):
     """
     Helper function to calibrate a specific precision with debug stats.
-    Shows running min/max for 4-bit and 8-bit to verify consistency.
+    CRITICAL: Calibrates weight quantizers on weights, input quantizers on activations.
     """
     if precision >= 32:
         return  # No calibration needed for 32-bit teacher
@@ -78,52 +134,99 @@ def calibrate_precision_with_debug(sp_model, tokenizer, device, precision, calib
     sp_model.train()  # Must be in training mode
 
     bits_key = f'{precision}bit'
-    calibrated_count = 0
 
-    # Start calibration
+    # Step 1: Calibrate WEIGHT quantizers on actual weight tensors
+    print(f"      Step 1: Calibrating weight quantizers on weight tensors...")
+    weight_calibrated = 0
+    weight_scales = []
+
     for name, module in sp_model.named_modules():
         quantizers_weight = getattr(module, 'quantizers_weight', None)
+        if quantizers_weight is not None and bits_key in quantizers_weight:
+            weight_quantizer = quantizers_weight[bits_key]
+
+            # Get the weight tensor
+            weight = None
+            if hasattr(module, 'linear') and hasattr(module.linear, 'weight'):
+                weight = module.linear.weight.data
+            elif hasattr(module, 'weight'):
+                weight = module.weight.data
+
+            if weight is not None:
+                # Calibrate on actual weight values
+                weight_quantizer.start_calibration()
+                with torch.no_grad():
+                    _ = weight_quantizer(weight)
+                weight_quantizer.finish_calibration(debug=False)
+                weight_calibrated += 1
+
+                # Track scale for verification
+                if hasattr(weight_quantizer, 'scale'):
+                    scale_val = weight_quantizer.scale.mean().item() if weight_quantizer.scale.numel() > 1 else weight_quantizer.scale.item()
+                    weight_scales.append(scale_val)
+
+    if weight_scales:
+        avg_weight_scale = np.mean(weight_scales)
+        print(f"      ✓ Calibrated {weight_calibrated} weight quantizers")
+        print(f"      Weight scale range: {min(weight_scales):.6f} - {max(weight_scales):.6f} (avg: {avg_weight_scale:.6f})")
+        if avg_weight_scale > 1.0:
+            print(f"      ⚠️ WARNING: Weight scales seem too large! Expected ~0.01-0.5, got {avg_weight_scale:.6f}")
+
+    # Step 2: Calibrate INPUT quantizers via forward passes
+    print(f"      Step 2: Calibrating input quantizers on activations...")
+    input_started = 0
+
+    for name, module in sp_model.named_modules():
         quantizers_input = getattr(module, 'quantizers_input', None)
-        if quantizers_weight is not None and quantizers_input is not None:
-            if bits_key in quantizers_weight:
-                quantizers_weight[bits_key].start_calibration()
-                calibrated_count += 1
-            if bits_key in quantizers_input:
-                quantizers_input[bits_key].start_calibration()
-                calibrated_count += 1
+        if quantizers_input is not None and bits_key in quantizers_input:
+            quantizers_input[bits_key].start_calibration()
+            input_started += 1
 
-    print(f"      Started calibration for {calibrated_count} quantizers")
+    print(f"      Started calibration for {input_started} input quantizers")
 
-    # Collect statistics
+    # Collect statistics via forward passes
     with torch.no_grad():
         for i, text in enumerate(calibration_texts):
             tokens = tokenizer(text, return_tensors='pt',
                               max_length=128, truncation=True)['input_ids'].to(device)
             _ = sp_model(tokens)
 
-    # Finish calibration with debug for 4-bit and 8-bit
-    enable_debug = precision in [6, 8]
-    if enable_debug:
-        print(f"\n      🔍 Debug Statistics for {precision}-bit Calibration:")
+    # Finish input quantizer calibration
+    input_calibrated = 0
+    input_scales = []
 
-    sample_count = 0
     for name, module in sp_model.named_modules():
-        quantizers_weight = getattr(module, 'quantizers_weight', None)
         quantizers_input = getattr(module, 'quantizers_input', None)
-        if quantizers_weight is not None and quantizers_input is not None:
-            if bits_key in quantizers_weight:
-                # Show debug for first 2 weight quantizers
-                show_debug = enable_debug and sample_count < 2
-                quantizers_weight[bits_key].finish_calibration(debug=show_debug)
-                sample_count += 1
+        if quantizers_input is not None and bits_key in quantizers_input:
+            input_quantizer = quantizers_input[bits_key]
+            input_quantizer.finish_calibration(debug=False)
+            input_calibrated += 1
 
-            if bits_key in quantizers_input:
-                # Show debug for next 2 input quantizers
-                show_debug = enable_debug and (2 <= sample_count < 4)
-                quantizers_input[bits_key].finish_calibration(debug=show_debug)
-                sample_count += 1
+            # Track scale for verification
+            if hasattr(input_quantizer, 'scale'):
+                scale_val = input_quantizer.scale.mean().item() if input_quantizer.scale.numel() > 1 else input_quantizer.scale.item()
+                input_scales.append(scale_val)
 
-    print(f"      ✅ Calibrated {calibrated_count} quantizers with {len(calibration_texts)} samples\n")
+    if input_scales:
+        avg_input_scale = np.mean(input_scales)
+        print(f"      ✓ Calibrated {input_calibrated} input quantizers")
+        print(f"      Input scale range: {min(input_scales):.6f} - {max(input_scales):.6f} (avg: {avg_input_scale:.6f})")
+        if avg_input_scale < 0.5:
+            print(f"      ⚠️ WARNING: Input scales seem too small! Expected ~1-10, got {avg_input_scale:.6f}")
+
+    # Debug output for 6-bit and 8-bit
+    if precision in [6, 8]:
+        print(f"\n      🔍 Scale ratio check for {precision}-bit:")
+        if weight_scales and input_scales:
+            scale_ratio = avg_input_scale / avg_weight_scale
+            print(f"      Input/Weight scale ratio: {scale_ratio:.2f}")
+            if scale_ratio < 10:
+                print(f"      ⚠️ WARNING: Scales too similar! Input should be ~10-100x larger than weight scales")
+            else:
+                print(f"      ✅ Good scale separation between weights and inputs")
+
+    total_calibrated = weight_calibrated + input_calibrated
+    print(f"      ✅ Total calibrated: {total_calibrated} quantizers with {len(calibration_texts)} samples\n")
 
 
 def test_32bit_equivalence_sliding(sp_model, gpt2_model, tokenizer, device):
@@ -194,6 +297,8 @@ def test_quantization_degradation_sliding(sp_model, tokenizer, device):
 
     for precision in student_precisions:  # Students only
         calibrate_precision_with_debug(sp_model, tokenizer, device, precision, calibration_texts)
+        # Verify calibration is correct
+        verify_calibration_scales(sp_model, precision)
 
     print("✅ All calibrations complete\n")
 
@@ -275,6 +380,7 @@ def test_lora_behavior_sliding(sp_model, tokenizer, device):
 
     for precision in student_precisions:
         calibrate_precision_with_debug(sp_model, tokenizer, device, precision, calibration_texts)
+        verify_calibration_scales(sp_model, precision)
 
     sp_model.eval()
     lora_results = {}
@@ -354,6 +460,7 @@ def test_quantizer_activation_sliding(sp_model, tokenizer, device):
         # Calibrate with debug
         calibration_texts = get_calibration_texts(num_texts=8)
         calibrate_precision_with_debug(sp_model, tokenizer, device, bits, calibration_texts)
+        verify_calibration_scales(sp_model, bits)
 
         sp_model.eval()
         sp_model.set_precision(bits)
@@ -550,9 +657,9 @@ def run_comprehensive_test(test_suite: str = "all", quick_mode: bool = False):
         gc.collect()
         torch.cuda.empty_cache() if torch.cuda.is_available() else None
 
-        # Test QAT
-        print("\nTest: Quantization-Aware Training")
-        test_results['qat'] = test_quantization_aware_training()
+        # Test SP Training
+        print("\nTest: Switchable Precision Training")
+        test_results['sp_training'] = test_switchable_precision_training()
 
         # Clean up memory
         gc.collect()
@@ -652,7 +759,7 @@ def print_test_summary(results: Dict):
     if 'multi_batch_training' in results:
         print("\n✅ Training Dynamics:")
         print("   Multi-batch training: Completed")
-        print("   QAT: Completed")
+        print("   SP Training: Completed")
         print("   Distillation: Completed")
 
     print("\n" + "="*80)

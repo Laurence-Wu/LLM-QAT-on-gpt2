@@ -205,18 +205,18 @@ def test_multi_batch_training():
     return results
 
 
-def test_quantization_aware_training():
+def test_switchable_precision_training():
     """
-    Test QAT behavior - how quantization affects training dynamics.
+    Test SP training dynamics - how switchable precision affects training.
     """
     print("\n" + "="*60)
-    print("QUANTIZATION-AWARE TRAINING (QAT) TEST")
+    print("SWITCHABLE PRECISION TRAINING TEST")
     print("="*60)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Create model
-    print("\n🔧 Setting up QAT experiment...")
+    print("\n🔧 Setting up SP training experiment...")
     model, config = create_properly_initialized_model(use_pretrained=False, num_layers=4)
     model = model.to(device)
 
@@ -232,10 +232,10 @@ def test_quantization_aware_training():
     # Get training data
     training_texts = get_calibration_texts(num_texts=num_epochs * num_batches_per_epoch * batch_size)
 
-    qat_results = {}
+    sp_results = {}
 
     for precision in precisions:
-        print(f"\n📊 QAT with {precision}-bit precision:")
+        print(f"\n📊 SP training with {precision}-bit precision:")
 
         # Reset model for fair comparison
         model, _ = create_properly_initialized_model(use_pretrained=False, num_layers=4)
@@ -252,18 +252,33 @@ def test_quantization_aware_training():
 
             # Calibrate at start of each epoch for lower precisions
             if precision < 32 and epoch == 0:
-                print(f"   Calibrating quantizers...")
-                # Start calibration
-                for name, module in model.named_modules():
-                    try:
-                        quantizers_weight = module.quantizers_weight
-                        bits_key = f'{precision}bit'
-                        if bits_key in quantizers_weight:
-                            quantizers_weight[bits_key].start_calibration()
-                    except AttributeError:
-                        pass  # Module doesn't have quantizers_weight
+                print(f"   Calibrating quantizers (weights first, then inputs)...")
+                bits_key = f'{precision}bit'
 
-                # Calibration passes
+                # Step 1: Calibrate WEIGHT quantizers on actual weight tensors
+                for name, module in model.named_modules():
+                    if hasattr(module, 'quantizers_weight') and bits_key in module.quantizers_weight:
+                        weight_quantizer = module.quantizers_weight[bits_key]
+
+                        # Get weight tensor
+                        weight = None
+                        if hasattr(module, 'linear') and hasattr(module.linear, 'weight'):
+                            weight = module.linear.weight.data
+                        elif hasattr(module, 'weight'):
+                            weight = module.weight.data
+
+                        if weight is not None:
+                            weight_quantizer.start_calibration()
+                            with torch.no_grad():
+                                _ = weight_quantizer(weight)
+                            weight_quantizer.finish_calibration()
+
+                # Step 2: Calibrate INPUT quantizers via forward passes
+                for name, module in model.named_modules():
+                    if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
+                        module.quantizers_input[bits_key].start_calibration()
+
+                # Forward passes for input calibration
                 with torch.no_grad():
                     for i in range(2):
                         idx = i * batch_size
@@ -272,15 +287,10 @@ def test_quantization_aware_training():
                                          truncation=True, padding=True)['input_ids'].to(device)
                         _ = model(tokens)
 
-                # Finish calibration
+                # Finish input calibration
                 for name, module in model.named_modules():
-                    try:
-                        quantizers_weight = module.quantizers_weight
-                        bits_key = f'{precision}bit'
-                        if bits_key in quantizers_weight:
-                            quantizers_weight[bits_key].finish_calibration()
-                    except AttributeError:
-                        pass  # Module doesn't have quantizers_weight
+                    if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
+                        module.quantizers_input[bits_key].finish_calibration()
 
             for batch_idx in range(num_batches_per_epoch):
                 # Get batch
@@ -325,18 +335,18 @@ def test_quantization_aware_training():
 
             print(f"   Epoch {epoch+1}: Avg Loss={avg_loss:.4f}, Std={np.std(epoch_losses):.4f}")
 
-        qat_results[precision] = epoch_stats
+        sp_results[precision] = epoch_stats
 
     # Analysis
-    print("\n📊 QAT ANALYSIS:")
+    print("\n📊 SP TRAINING ANALYSIS:")
 
     for precision in precisions:
-        stats = qat_results[precision]
+        stats = sp_results[precision]
         initial = stats[0]['avg_loss']
         final = stats[-1]['avg_loss']
         improvement = (initial - final) / initial * 100
 
-        print(f"\n   {precision}-bit QAT:")
+        print(f"\n   {precision}-bit SP:")
         print(f"     Initial loss: {initial:.4f}")
         print(f"     Final loss: {final:.4f}")
         print(f"     Improvement: {improvement:.1f}%")
@@ -347,7 +357,7 @@ def test_quantization_aware_training():
         else:
             print("     ⚠️ High variance in training")
 
-    return qat_results
+    return sp_results
 
 
 def test_distillation_effectiveness():
@@ -713,11 +723,11 @@ def run_training_dynamics_tests():
     gc.collect()
     torch.cuda.empty_cache() if torch.cuda.is_available() else None
 
-    # Test 2: QAT
+    # Test 2: SP Training
     print("\n" + "="*60)
-    print("TEST 2: Quantization-Aware Training")
-    qat_results = test_quantization_aware_training()
-    all_results['qat'] = qat_results
+    print("TEST 2: Switchable Precision Training")
+    sp_results = test_switchable_precision_training()
+    all_results['sp_training'] = sp_results
 
     # Clean up
     gc.collect()
@@ -760,8 +770,8 @@ def run_training_dynamics_tests():
     print("   ✅ Successfully trained models at different precisions")
     print("   ✅ Distillation loss effectively guides student learning")
 
-    print("\n2. Quantization-Aware Training:")
-    print("   ✅ QAT converges for all precision levels")
+    print("\n2. Switchable Precision Training:")
+    print("   ✅ SP training converges for all precision levels")
     print("   ✅ Lower precisions show higher variance but still learn")
 
     print("\n3. Distillation Effectiveness:")

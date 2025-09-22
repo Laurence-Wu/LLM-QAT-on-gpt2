@@ -97,20 +97,68 @@ class CalibrationManager:
             print(f"✅ Calibration complete for {bits}-bit")
 
     def _calibrate_precision(self, bits, num_batches):
-        """Internal calibration logic."""
-        # Ensure model is in training mode for calibration
+        """Internal calibration logic with separate weight and input calibration."""
         self.model.train()
+        bits_key = f'{bits}bit'
 
-        # Start calibration for all quantizers at this precision
+        # CRITICAL: Skip 32-bit as it doesn't need calibration
+        if bits >= 32:
+            print(f"  Skipping calibration for {bits}-bit (no quantization needed)")
+            return
+
+        # Step 1: Calibrate WEIGHT quantizers on actual weight tensors
+        print(f"  Step 1: Calibrating weight quantizers for {bits}-bit...")
+        weight_calibrated = 0
+        weight_errors = []
+
         for name, module in self.model.named_modules():
-            if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
-                bits_key = f'{bits}bit'
-                if bits_key in module.quantizers_weight:
-                    module.quantizers_weight[bits_key].start_calibration()
-                if bits_key in module.quantizers_input:
-                    module.quantizers_input[bits_key].start_calibration()
+            if not hasattr(module, 'quantizers_weight'):
+                continue
 
-        # Collect statistics
+            if bits_key not in module.quantizers_weight:
+                weight_errors.append(f"{name}: Missing {bits_key} in quantizers_weight")
+                continue
+
+            weight_quantizer = module.quantizers_weight[bits_key]
+
+            # Get the weight tensor
+            if hasattr(module, 'linear') and hasattr(module.linear, 'weight'):
+                weight = module.linear.weight.data
+            elif hasattr(module, 'weight'):
+                weight = module.weight.data
+            else:
+                weight_errors.append(f"{name}: No weight tensor found")
+                continue
+
+            # Calibrate weight quantizer
+            try:
+                weight_quantizer.start_calibration()
+                with torch.no_grad():
+                    _ = weight_quantizer(weight)
+                weight_quantizer.finish_calibration(debug=False)
+                weight_calibrated += 1
+            except Exception as e:
+                weight_errors.append(f"{name}: {str(e)}")
+
+        print(f"    ✓ Calibrated {weight_calibrated} weight quantizers")
+        if weight_errors:
+            print(f"    ⚠️ {len(weight_errors)} warnings (showing first 3):")
+            for err in weight_errors[:3]:
+                print(f"      - {err}")
+
+        # Step 2: Calibrate INPUT quantizers via forward passes
+        print(f"  Step 2: Calibrating input quantizers for {bits}-bit...")
+
+        # Start input quantizer calibration
+        input_started = 0
+        for name, module in self.model.named_modules():
+            if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].start_calibration()
+                input_started += 1
+
+        print(f"    Started calibration for {input_started} input quantizers")
+
+        # Collect statistics via forward passes
         train_iter = iter(self.train_loader)
         with torch.no_grad():
             for i in range(num_batches):
@@ -120,16 +168,17 @@ class CalibrationManager:
                     _ = self.model(input_ids)
                     del batch, input_ids
                 except StopIteration:
+                    print(f"    Only {i} batches available")
                     break
 
-        # Finish calibration
+        # Finish input quantizer calibration
+        input_calibrated = 0
         for name, module in self.model.named_modules():
-            if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
-                bits_key = f'{bits}bit'
-                if bits_key in module.quantizers_weight:
-                    module.quantizers_weight[bits_key].finish_calibration()
-                if bits_key in module.quantizers_input:
-                    module.quantizers_input[bits_key].finish_calibration()
+            if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].finish_calibration(debug=False)
+                input_calibrated += 1
+
+        print(f"    ✓ Calibrated {input_calibrated} input quantizers")
 
         cleanup_memory()
 
