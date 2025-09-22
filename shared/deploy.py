@@ -158,12 +158,12 @@ def save_int8_checkpoint(model, filepath, model_config=None, training_config=Non
         if 'lora_rank_per_bit' not in model_config_dict or model_config_dict['lora_rank_per_bit'] is None:
             print("Warning: 'lora_rank_per_bit' configuration is missing or None!")
             # Use defaults from config if missing
-            model_config_dict['lora_rank_per_bit'] = [6: 8, 8: 16, 16: 32}
+            model_config_dict['lora_rank_per_bit'] = {6: 8, 8: 16, 16: 32}
 
         if 'lora_alpha_per_bit' not in model_config_dict or model_config_dict['lora_alpha_per_bit'] is None:
             print("Warning: 'lora_alpha_per_bit' configuration is missing or None!")
             # Use defaults from config if missing
-            model_config_dict['lora_alpha_per_bit'] = [6: 16, 8: 32, 16: 64}
+            model_config_dict['lora_alpha_per_bit'] = {6: 16, 8: 32, 16: 64}
 
         checkpoint['model_config'] = model_config_dict
         checkpoint['bit_widths'] = model_config_dict.get('bit_widths', [6, 8, 16])  # Add for easy access

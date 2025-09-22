@@ -145,16 +145,27 @@ class SPLinearWithLoRA(nn.Module):
     """Linear layer with multiple LoRA adapters for switchable precision."""
 
     def __init__(self, in_features, out_features, bias=True,
-                 bit_widths=[6, 8, 16],
-                 lora_rank_per_bit={6: 32, 8: 16, 16: 8},
-                 lora_alpha_per_bit={6: 64, 8: 32, 16: 16},
+                 bit_widths=None,
+                 lora_rank_per_bit=None,
+                 lora_alpha_per_bit=None,
                  lora_dropout=0.1,
                  quantizer_per_bit=None):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
+
+        # Use defaults if not provided
+        if bit_widths is None:
+            bit_widths = [6, 8, 16, 32]  # Default includes teacher
+        if lora_rank_per_bit is None:
+            lora_rank_per_bit = {6: 32, 8: 16, 16: 16, 32: 0}
+        if lora_alpha_per_bit is None:
+            lora_alpha_per_bit = {6: 64, 8: 32, 16: 32, 32: 0}
+
         self.bit_widths = bit_widths
-        self.current_bits = bit_widths[1]  # Default to 8-bit
+        # Default to middle precision (skip 32-bit teacher)
+        student_bits = [b for b in bit_widths if b < 32]
+        self.current_bits = student_bits[1] if len(student_bits) > 1 else student_bits[0]
 
         # FP32 base layer (shared across all bit-widths)
         self.linear = nn.Linear(in_features, out_features, bias=bias)

@@ -25,11 +25,15 @@ except ImportError:
 class SPAttention(nn.Module):
     """Attention module with switchable precision for multiple bit-widths."""
 
-    def __init__(self, config: GPT2Config, bit_widths=[6, 8, 16]):
+    def __init__(self, config: GPT2Config, bit_widths=None):
         super().__init__()
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.head_dim = self.n_embd // self.n_head
+
+        # Get bit_widths from config if not provided
+        if bit_widths is None:
+            bit_widths = getattr(config, 'bit_widths', [6, 8, 16, 32])
         self.bit_widths = bit_widths
 
         # Get LoRA configs from config - throw error if not provided
@@ -109,8 +113,12 @@ class SPAttention(nn.Module):
 class SPMLP(nn.Module):
     """MLP module with switchable precision for multiple bit-widths."""
 
-    def __init__(self, config: GPT2Config, bit_widths=[6, 8, 16]):
+    def __init__(self, config: GPT2Config, bit_widths=None):
         super().__init__()
+
+        # Get bit_widths from config if not provided
+        if bit_widths is None:
+            bit_widths = getattr(config, 'bit_widths', [6, 8, 16, 32])
         self.bit_widths = bit_widths
 
         # Get LoRA configs from config
@@ -166,8 +174,13 @@ class SPMLP(nn.Module):
 class SPBlock(nn.Module):
     """Transformer block with switchable precision."""
 
-    def __init__(self, config: GPT2Config, bit_widths=[6, 8, 16]):
+    def __init__(self, config: GPT2Config, bit_widths=None):
         super().__init__()
+
+        # Get bit_widths from config if not provided
+        if bit_widths is None:
+            bit_widths = getattr(config, 'bit_widths', [6, 8, 16, 32])
+
         # Use Switchable LayerNorm for multi-precision support
         self.ln_1 = SwitchableLayerNorm(
             config.n_embd,
@@ -225,7 +238,7 @@ class SPModel(nn.Module):
         self.config = config
 
         # Get bit widths from config
-        self.bit_widths = getattr(config, 'bit_widths', [6, 8, 16])
+        self.bit_widths = getattr(config, 'bit_widths', [6, 8, 16, 32])
         self.current_bit_width = max(self.bit_widths)  # Start with highest precision
 
         # Token and position embeddings
@@ -235,7 +248,7 @@ class SPModel(nn.Module):
 
         # Transformer blocks with switchable precision
         self.h = nn.ModuleList([
-            SPBlock(config, self.bit_widths)
+            SPBlock(config)  # bit_widths will be extracted from config
             for _ in range(config.n_layer)
         ])
 

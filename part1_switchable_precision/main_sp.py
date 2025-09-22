@@ -64,6 +64,7 @@ def initialize_model(model_config, device):
     gpt2_config.lora_rank_per_bit = model_config.lora_rank_per_bit
     gpt2_config.lora_alpha_per_bit = model_config.lora_alpha_per_bit
     gpt2_config.activation_bits_per_bit = model_config.activation_bits_per_bit
+    gpt2_config.quantizer_per_bit = getattr(model_config, 'quantizer_per_bit', None)
 
     # Print configuration being used
     print(f"Initializing SP Model with configurations:")
@@ -71,6 +72,8 @@ def initialize_model(model_config, device):
     print(f"  LoRA rank per bit: {model_config.lora_rank_per_bit}")
     print(f"  LoRA alpha per bit: {model_config.lora_alpha_per_bit}")
     print(f"  Activation bits per bit: {model_config.activation_bits_per_bit}")
+    if gpt2_config.quantizer_per_bit:
+        print(f"  Quantizer per bit: {gpt2_config.quantizer_per_bit}")
 
     # Use switchable model if configured
     gpt2_config.bit_widths = model_config.bit_widths
