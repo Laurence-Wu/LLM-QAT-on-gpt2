@@ -21,7 +21,7 @@ import random
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared.models import SwitchableQATGPT2
+from shared.models_sp import SPModel, SPLMHeadModel
 from transformers import GPT2Config, GPT2Tokenizer, GPT2LMHeadModel
 from datasets import load_dataset
 
@@ -31,66 +31,73 @@ from part3_evaluation.generate_tables import ResultTableGenerator
 from part3_evaluation.baseline_comparison import BaselineComparison
 
 
-def load_pretrained_weights_into_qat(qat_model, model_name='gpt2'):
-    """Load pre-trained GPT-2 weights into QAT model"""
+def load_pretrained_weights_into_qat(sp_model, model_name='gpt2'):
+    """Load pre-trained GPT-2 weights into SP model"""
     print(f"Loading pre-trained weights from {model_name}...")
 
     # Load pre-trained GPT-2
     pretrained_model = GPT2LMHeadModel.from_pretrained(model_name)
     pretrained_state = pretrained_model.state_dict()
 
+    # Access the transformer part of SPLMHeadModel
+    transformer = sp_model.transformer
+
     # Copy embeddings
-    qat_model.wte.weight.data = pretrained_state['transformer.wte.weight']
+    transformer.wte.weight.data = pretrained_state['transformer.wte.weight']
 
     # Handle position embeddings size mismatch
     pretrained_wpe = pretrained_state['transformer.wpe.weight']
-    if pretrained_wpe.shape[0] != qat_model.wpe.weight.shape[0]:
-        min_pos = min(pretrained_wpe.shape[0], qat_model.wpe.weight.shape[0])
-        qat_model.wpe.weight.data[:min_pos] = pretrained_wpe[:min_pos]
-        print(f"Adjusted position embeddings from {pretrained_wpe.shape[0]} to {qat_model.wpe.weight.shape[0]}")
+    if pretrained_wpe.shape[0] != transformer.wpe.weight.shape[0]:
+        min_pos = min(pretrained_wpe.shape[0], transformer.wpe.weight.shape[0])
+        transformer.wpe.weight.data[:min_pos] = pretrained_wpe[:min_pos]
+        print(f"Adjusted position embeddings from {pretrained_wpe.shape[0]} to {transformer.wpe.weight.shape[0]}")
     else:
-        qat_model.wpe.weight.data = pretrained_wpe
+        transformer.wpe.weight.data = pretrained_wpe
 
     # Copy transformer blocks
-    for i in range(len(qat_model.h)):
-        # Layer norms
-        qat_model.h[i].ln_1.weight.data = pretrained_state[f'transformer.h.{i}.ln_1.weight']
-        qat_model.h[i].ln_1.bias.data = pretrained_state[f'transformer.h.{i}.ln_1.bias']
-        qat_model.h[i].ln_2.weight.data = pretrained_state[f'transformer.h.{i}.ln_2.weight']
-        qat_model.h[i].ln_2.bias.data = pretrained_state[f'transformer.h.{i}.ln_2.bias']
+    for i in range(len(transformer.h)):
+        # For SwitchableLayerNorm, copy weights to each precision's LayerNorm
+        for ln_key in transformer.h[i].ln_1.ln_layers:
+            transformer.h[i].ln_1.ln_layers[ln_key].weight.data = pretrained_state[f'transformer.h.{i}.ln_1.weight']
+            transformer.h[i].ln_1.ln_layers[ln_key].bias.data = pretrained_state[f'transformer.h.{i}.ln_1.bias']
+
+        for ln_key in transformer.h[i].ln_2.ln_layers:
+            transformer.h[i].ln_2.ln_layers[ln_key].weight.data = pretrained_state[f'transformer.h.{i}.ln_2.weight']
+            transformer.h[i].ln_2.ln_layers[ln_key].bias.data = pretrained_state[f'transformer.h.{i}.ln_2.bias']
 
         # Attention weights (transpose from conv1d to linear)
-        qat_model.h[i].attn.c_attn.linear.weight.data = pretrained_state[f'transformer.h.{i}.attn.c_attn.weight'].t()
-        qat_model.h[i].attn.c_attn.linear.bias.data = pretrained_state[f'transformer.h.{i}.attn.c_attn.bias']
-        qat_model.h[i].attn.c_proj.linear.weight.data = pretrained_state[f'transformer.h.{i}.attn.c_proj.weight'].t()
-        qat_model.h[i].attn.c_proj.linear.bias.data = pretrained_state[f'transformer.h.{i}.attn.c_proj.bias']
+        transformer.h[i].attn.c_attn.linear.weight.data = pretrained_state[f'transformer.h.{i}.attn.c_attn.weight'].t()
+        transformer.h[i].attn.c_attn.linear.bias.data = pretrained_state[f'transformer.h.{i}.attn.c_attn.bias']
+        transformer.h[i].attn.c_proj.linear.weight.data = pretrained_state[f'transformer.h.{i}.attn.c_proj.weight'].t()
+        transformer.h[i].attn.c_proj.linear.bias.data = pretrained_state[f'transformer.h.{i}.attn.c_proj.bias']
 
         # MLP weights (transpose from conv1d to linear)
-        qat_model.h[i].mlp.c_fc.linear.weight.data = pretrained_state[f'transformer.h.{i}.mlp.c_fc.weight'].t()
-        qat_model.h[i].mlp.c_fc.linear.bias.data = pretrained_state[f'transformer.h.{i}.mlp.c_fc.bias']
-        qat_model.h[i].mlp.c_proj.linear.weight.data = pretrained_state[f'transformer.h.{i}.mlp.c_proj.weight'].t()
-        qat_model.h[i].mlp.c_proj.linear.bias.data = pretrained_state[f'transformer.h.{i}.mlp.c_proj.bias']
+        transformer.h[i].mlp.c_fc.linear.weight.data = pretrained_state[f'transformer.h.{i}.mlp.c_fc.weight'].t()
+        transformer.h[i].mlp.c_fc.linear.bias.data = pretrained_state[f'transformer.h.{i}.mlp.c_fc.bias']
+        transformer.h[i].mlp.c_proj.linear.weight.data = pretrained_state[f'transformer.h.{i}.mlp.c_proj.weight'].t()
+        transformer.h[i].mlp.c_proj.linear.bias.data = pretrained_state[f'transformer.h.{i}.mlp.c_proj.bias']
 
         # Handle attention bias if exists
         if f'transformer.h.{i}.attn.bias' in pretrained_state:
             pretrained_bias = pretrained_state[f'transformer.h.{i}.attn.bias']
-            model_bias_shape = qat_model.h[i].attn.bias.shape
+            model_bias_shape = transformer.h[i].attn.bias.shape
             if pretrained_bias.shape != model_bias_shape:
                 min_size = min(pretrained_bias.shape[0], model_bias_shape[0])
-                qat_model.h[i].attn.bias.data[:min_size, :min_size] = pretrained_bias[:min_size, :min_size]
+                transformer.h[i].attn.bias.data[:min_size, :min_size] = pretrained_bias[:min_size, :min_size]
             else:
-                qat_model.h[i].attn.bias.data = pretrained_bias
+                transformer.h[i].attn.bias.data = pretrained_bias
 
-    # Final layer norm
-    qat_model.ln_f.weight.data = pretrained_state['transformer.ln_f.weight']
-    qat_model.ln_f.bias.data = pretrained_state['transformer.ln_f.bias']
+    # Final layer norm - also uses SwitchableLayerNorm
+    for ln_key in transformer.ln_f.ln_layers:
+        transformer.ln_f.ln_layers[ln_key].weight.data = pretrained_state['transformer.ln_f.weight']
+        transformer.ln_f.ln_layers[ln_key].bias.data = pretrained_state['transformer.ln_f.bias']
 
     # LM head shares weight with embeddings
-    qat_model.lm_head.weight = qat_model.wte.weight
+    sp_model.lm_head.weight = transformer.wte.weight
 
     # Initialize LoRA weights to small/zero values
     with torch.no_grad():
-        for module in qat_model.modules():
+        for module in sp_model.modules():
             try:
                 lora_adapters = module.lora_adapters
                 for lora in lora_adapters.values():
@@ -106,7 +113,7 @@ def load_pretrained_weights_into_qat(qat_model, model_name='gpt2'):
                 pass  # module doesn't have lora_adapters
 
     print("Pre-trained weights loaded successfully!")
-    return qat_model
+    return sp_model
 
 
 class CalibrationManager:
@@ -141,11 +148,18 @@ class CalibrationManager:
         # Start calibration for all quantizers
         bits_key = f'{bits}bit'
         for name, module in self.model.named_modules():
-            if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
-                if bits_key in module.quantizers_weight:
-                    module.quantizers_weight[bits_key].start_calibration()
-                if bits_key in module.quantizers_input:
-                    module.quantizers_input[bits_key].start_calibration()
+            try:
+                # Try to access quantizers_weight and quantizers_input
+                quantizers_weight = module.quantizers_weight
+                quantizers_input = module.quantizers_input
+
+                if bits_key in quantizers_weight:
+                    quantizers_weight[bits_key].start_calibration()
+                if bits_key in quantizers_input:
+                    quantizers_input[bits_key].start_calibration()
+            except AttributeError:
+                # Module doesn't have quantizers, continue
+                continue
 
         # Collect statistics
         with torch.no_grad():
@@ -162,11 +176,18 @@ class CalibrationManager:
 
         # Finish calibration
         for name, module in self.model.named_modules():
-            if hasattr(module, 'quantizers_weight') and hasattr(module, 'quantizers_input'):
-                if bits_key in module.quantizers_weight:
-                    module.quantizers_weight[bits_key].finish_calibration()
-                if bits_key in module.quantizers_input:
-                    module.quantizers_input[bits_key].finish_calibration()
+            try:
+                # Try to access quantizers_weight and quantizers_input
+                quantizers_weight = module.quantizers_weight
+                quantizers_input = module.quantizers_input
+
+                if bits_key in quantizers_weight:
+                    quantizers_weight[bits_key].finish_calibration()
+                if bits_key in quantizers_input:
+                    quantizers_input[bits_key].finish_calibration()
+            except AttributeError:
+                # Module doesn't have quantizers, continue
+                continue
 
         self.model.eval()  # Return to eval mode
         torch.cuda.empty_cache()
@@ -297,8 +318,16 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
             print(f"  - num_iterations: {training_config.get('num_iterations', 'N/A')}")
 
         print(f"Creating model with bit-widths: {bit_widths}")
-        # Create model WITHOUT random initialization
-        model = SwitchableQATGPT2(config, bit_widths=bit_widths, initialize_weights=False)
+        # Add SP-specific configurations to config
+        config.bit_widths = bit_widths
+        # Get LoRA configurations from model_config
+        config.lora_rank_per_bit = model_config.get('lora_rank_per_bit', {6: 32, 8: 16, 16: 8, 32: 0})
+        config.lora_alpha_per_bit = model_config.get('lora_alpha_per_bit', {6: 64, 8: 32, 16: 16, 32: 0})
+        config.activation_bits_per_bit = model_config.get('activation_bits_per_bit', {6: 8, 8: 8, 16: 16, 32: 32})
+        config.quantizer_per_bit = model_config.get('quantizer_per_bit', None)
+
+        # Create SPLMHeadModel instead of SwitchableQATGPT2
+        model = SPLMHeadModel(config)
 
         # Load pre-trained weights first if requested
         if use_pretrained:
@@ -474,7 +503,12 @@ class EvaluationMetrics:
     @staticmethod
     def calculate_compression_ratio(model, baseline_bits: int = 32):
         """Calculate model compression ratio"""
-        current_bits = model.current_bits if hasattr(model, 'current_bits') else 16
+        try:
+            # Try to get current_bits from transformer
+            current_bits = model.transformer.current_bits
+        except AttributeError:
+            # Default to 16 if not found
+            current_bits = 16
         compression_ratio = baseline_bits / current_bits
         return compression_ratio
 
@@ -496,7 +530,8 @@ class EvaluationMetrics:
                         input_ids = batch.cuda()
 
                     # Add noise to embeddings
-                    embeddings = model.wte(input_ids)
+                    # For SPLMHeadModel, wte is in transformer
+                    embeddings = model.transformer.wte(input_ids)
                     noise = torch.randn_like(embeddings) * noise_level
                     noisy_embeddings = embeddings + noise
 
@@ -589,16 +624,16 @@ def main():
 
     # Initialize calibration manager and perform warm-up
     calib_manager = CalibrationManager(model)
-    if hasattr(model, 'bit_widths'):
+    try:
+        # Try to access bit_widths attribute
+        model_bit_widths = model.transformer.bit_widths  # For SPLMHeadModel, bit_widths is in transformer
         print("\nPerforming warm-up calibration for all bit-widths...")
-        calib_manager.warm_up_calibration(calibration_loader, model.bit_widths, num_batches=args.warm_up_samples)
-
-    # Verify model has required attributes
-    if not hasattr(model, 'bit_widths'):
-        raise AttributeError("Model does not support switchable precision. Please ensure the model was trained with SwitchableQATGPT2.")
+        calib_manager.warm_up_calibration(calibration_loader, model_bit_widths, num_batches=args.warm_up_samples)
+    except AttributeError as e:
+        raise AttributeError(f"Model does not support switchable precision: {e}\nPlease ensure the model was trained with SPLMHeadModel.")
 
     # Model supports switchable precision
-    supported_bit_widths = model.bit_widths
+    supported_bit_widths = model.transformer.bit_widths  # Access through transformer
     print(f"Model supports bit-widths: {supported_bit_widths}")
 
     # Map bit-widths to configuration names

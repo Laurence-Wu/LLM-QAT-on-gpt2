@@ -70,11 +70,17 @@ class BitConfigurations:
         weight_bits = config.get('W', 8)
 
         # Check if model supports switchable precision
-        if not hasattr(model, 'bit_widths'):
-            raise AttributeError(f"Model does not support switchable precision. Missing 'bit_widths' attribute.")
+        try:
+            # For SPLMHeadModel, bit_widths is in transformer
+            try:
+                bit_widths = model.transformer.bit_widths
+            except AttributeError:
+                # Try direct access for compatibility
+                bit_widths = model.bit_widths
+        except AttributeError:
+            raise AttributeError(f"Model does not support switchable precision. Missing 'bit_widths' attribute in model or model.transformer.")
 
         # Get supported bit-widths
-        bit_widths = model.bit_widths
         print(f"Model supports bit-widths: {bit_widths}")
         print(f"Requested bit-width: {weight_bits}")
 
@@ -84,20 +90,32 @@ class BitConfigurations:
                            f"Model must be trained with this bit-width to support it.")
 
         # Try to set global precision
-        if hasattr(model, 'set_global_precision'):
+        try:
             model.set_global_precision(weight_bits)
             print(f"Successfully set global precision to {weight_bits}-bit")
-        elif hasattr(model, 'set_precision'):
-            model.set_precision(weight_bits)
-            print(f"Successfully set precision to {weight_bits}-bit")
-        else:
-            raise AttributeError(f"Model does not have 'set_global_precision' or 'set_precision' method. "
-                               f"Cannot apply bit configuration.")
+        except AttributeError:
+            # Try set_precision method
+            try:
+                model.set_precision(weight_bits)
+                print(f"Successfully set precision to {weight_bits}-bit")
+            except AttributeError:
+                raise AttributeError(f"Model does not have 'set_global_precision' or 'set_precision' method. "
+                                   f"Cannot apply bit configuration.")
 
         # Verify the precision was set
-        if hasattr(model, 'current_bit_width'):
-            if model.current_bit_width != weight_bits:
-                raise RuntimeError(f"Failed to set bit-width. Expected {weight_bits}, got {model.current_bit_width}")
+        try:
+            # Try transformer.current_bit_width first (for SPLMHeadModel)
+            try:
+                current_bit_width = model.transformer.current_bit_width
+            except AttributeError:
+                # Try direct access
+                current_bit_width = model.current_bit_width
+
+            if current_bit_width != weight_bits:
+                raise RuntimeError(f"Failed to set bit-width. Expected {weight_bits}, got {current_bit_width}")
+        except AttributeError:
+            # Can't verify, but continue (precision was set successfully)
+            pass
 
         return model
 
