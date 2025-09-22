@@ -12,6 +12,8 @@ import torch.nn as nn
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.quantization import LearnableFakeQuantize
+from test.utils import get_configured_bit_widths
+from part1_switchable_precision.config_sp import ModelConfig
 
 
 def test_quantizer_methods():
@@ -38,7 +40,10 @@ def test_quantizer_methods():
 
     # Test different quantizer types
     quantizer_types = ['minmax', 'relu_clip', 'tanh', 'log']
-    bit_widths = [6, 8]
+    # Get configured bit widths and use first two student precisions
+    config = ModelConfig()
+    all_bit_widths = get_configured_bit_widths(config=config)
+    bit_widths = [b for b in all_bit_widths if b < 32][:2]  # Use first 2 student precisions
 
     results = {}
 

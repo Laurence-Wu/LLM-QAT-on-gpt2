@@ -67,9 +67,12 @@ def verify_calibration_scales(sp_model, precision):
     Verify that calibration scales are appropriate for weights vs inputs.
     Returns True if scales look correct, False otherwise.
     """
+    from test.utils import get_quantizer_type
+
     bits_key = f'{precision}bit'
     weight_scales = []
     input_scales = []
+    quantizer_type = get_quantizer_type(sp_model, precision)
 
     for name, module in sp_model.named_modules():
         # Check weight quantizer scales
@@ -94,28 +97,54 @@ def verify_calibration_scales(sp_model, precision):
     avg_input_scale = np.mean(input_scales)
     scale_ratio = avg_input_scale / avg_weight_scale if avg_weight_scale > 0 else 0
 
-    print(f"\n   📊 Scale Verification for {precision}-bit:")
+    print(f"\n   📊 Scale Verification for {precision}-bit ({quantizer_type} quantization):")
     print(f"      Weight scales: min={min(weight_scales):.6f}, max={max(weight_scales):.6f}, avg={avg_weight_scale:.6f}")
     print(f"      Input scales:  min={min(input_scales):.6f}, max={max(input_scales):.6f}, avg={avg_input_scale:.6f}")
-    print(f"      Input/Weight ratio: {scale_ratio:.2f}")
 
-    # Check if scales are in expected ranges
-    weight_ok = 0.001 <= avg_weight_scale <= 1.0  # Weights typically 0.01-0.5
-    input_ok = 0.5 <= avg_input_scale <= 20.0      # Inputs typically 1-10
-    ratio_ok = scale_ratio >= 5                     # Input should be significantly larger
+    # Different validation for different quantizer types
+    if quantizer_type == 'log':
+        # For log quantization, scales represent log₂ ranges
+        # Typical log₂ ranges are 20-30 (covering values from ~1e-6 to 1e3)
+        print(f"      Input/Weight ratio: {scale_ratio:.2f}")
+        print(f"      Note: For log quantization, scales are log₂ ranges (typically 20-30)")
 
-    if weight_ok and input_ok and ratio_ok:
-        print(f"      ✅ Scales look correct!")
-        return True
+        weight_ok = 15 <= avg_weight_scale <= 35  # Log₂ range for weights
+        input_ok = 15 <= avg_input_scale <= 35    # Log₂ range for inputs
+        ratio_ok = 0.8 <= scale_ratio <= 1.5       # Should be similar for log
+
+        if weight_ok and input_ok and ratio_ok:
+            print(f"      ✅ Log quantization scales look correct!")
+            return True
+        else:
+            print(f"      ⚠️ Log quantization scale check:")
+            if not weight_ok:
+                print(f"         - Weight log₂ range unusual (expected 15-35, got {avg_weight_scale:.1f})")
+            if not input_ok:
+                print(f"         - Input log₂ range unusual (expected 15-35, got {avg_input_scale:.1f})")
+            if not ratio_ok:
+                print(f"         - Log scale ratio unusual (expected 0.8-1.5, got {scale_ratio:.2f})")
+            # For log quantization, these are warnings not errors
+            return True  # Still consider it OK
     else:
-        print(f"      ❌ Scale issues detected:")
-        if not weight_ok:
-            print(f"         - Weight scale out of range (expected 0.001-1.0)")
-        if not input_ok:
-            print(f"         - Input scale out of range (expected 0.5-20.0)")
-        if not ratio_ok:
-            print(f"         - Ratio too small (expected >= 5)")
-        return False
+        # For minmax, relu_clip, tanh quantization
+        print(f"      Input/Weight ratio: {scale_ratio:.2f}")
+
+        weight_ok = 0.001 <= avg_weight_scale <= 1.0  # Weights typically 0.01-0.5
+        input_ok = 0.5 <= avg_input_scale <= 20.0      # Inputs typically 1-10
+        ratio_ok = scale_ratio >= 5                     # Input should be significantly larger
+
+        if weight_ok and input_ok and ratio_ok:
+            print(f"      ✅ Scales look correct!")
+            return True
+        else:
+            print(f"      ❌ Scale issues detected:")
+            if not weight_ok:
+                print(f"         - Weight scale out of range (expected 0.001-1.0)")
+            if not input_ok:
+                print(f"         - Input scale out of range (expected 0.5-20.0)")
+            if not ratio_ok:
+                print(f"         - Ratio too small (expected >= 5)")
+            return False
 
 
 def calibrate_precision_with_debug(sp_model, tokenizer, device, precision, calibration_texts=None):

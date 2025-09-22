@@ -17,6 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.switchable_batchnorm import SwitchableLayerNorm
 from test.fix_model_initialization import create_properly_initialized_model
+from test.utils import get_configured_bit_widths
 from transformers import GPT2Tokenizer
 
 
@@ -30,18 +31,27 @@ def test_bn_statistics_tracking():
     print("="*60)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    precisions = [6, 8, 16, 32]
+    # Get configured bit widths
+    from part1_switchable_precision.config_sp import ModelConfig
+    precisions = get_configured_bit_widths(config=ModelConfig())
 
     # Create switchable batch norm layer
     sbn = SwitchableLayerNorm(256, precision_levels=precisions).to(device)
 
     # Generate different input distributions for each precision
-    input_distributions = {
-        32: torch.randn(64, 256, device=device) * 1.0,  # Normal
-        16: torch.randn(64, 256, device=device) * 2.0 + 0.5,  # Shifted and scaled
-        8: torch.randn(64, 256, device=device) * 0.5 - 1.0,  # Compressed and shifted
-        4: torch.randn(64, 256, device=device) * 3.0,  # Wide distribution
-    }
+    input_distributions = {}
+    for i, p in enumerate(precisions):
+        if p == 32:
+            input_distributions[p] = torch.randn(64, 256, device=device) * 1.0  # Normal
+        elif p == 16:
+            input_distributions[p] = torch.randn(64, 256, device=device) * 2.0 + 0.5  # Shifted and scaled
+        elif p == 8:
+            input_distributions[p] = torch.randn(64, 256, device=device) * 0.5 - 1.0  # Compressed and shifted
+        elif p == 6:
+            input_distributions[p] = torch.randn(64, 256, device=device) * 3.0  # Wide distribution
+        else:
+            # For any other precision, use a slightly different distribution
+            input_distributions[p] = torch.randn(64, 256, device=device) * (1.5 + i * 0.2)
 
     # Train each precision with its specific distribution
     print("\n📊 Training separate statistics for each precision:")
@@ -110,7 +120,9 @@ def test_bn_gradient_flow():
     print("="*60)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    precisions = [6, 8, 16, 32]
+    # Get configured bit widths
+    from part1_switchable_precision.config_sp import ModelConfig
+    precisions = get_configured_bit_widths(config=ModelConfig())
 
     # Create a model with switchable BN
     class TestModel(nn.Module):
@@ -196,7 +208,9 @@ def test_bn_mode_switching():
     print("="*60)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    precisions = [6, 8, 16, 32]
+    # Get configured bit widths
+    from part1_switchable_precision.config_sp import ModelConfig
+    precisions = get_configured_bit_widths(config=ModelConfig())
 
     sbn = SwitchableLayerNorm(256, precisions).to(device)
     x = torch.randn(32, 256, device=device)
@@ -252,7 +266,9 @@ def test_bn_with_small_batch():
     print("="*60)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    precisions = [6, 8, 16, 32]
+    # Get configured bit widths
+    from part1_switchable_precision.config_sp import ModelConfig
+    precisions = get_configured_bit_widths(config=ModelConfig())
     batch_sizes = [1, 2, 4, 8, 16, 32]
 
     sbn = SwitchableLayerNorm(256, precisions).to(device)
@@ -366,7 +382,9 @@ def test_layernorm_vs_batchnorm():
     print("="*60)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    precisions = [6, 8, 16, 32]
+    # Get configured bit widths
+    from part1_switchable_precision.config_sp import ModelConfig
+    precisions = get_configured_bit_widths(config=ModelConfig())
 
     # Create both types of normalization
     ln = SwitchableLayerNorm(256, precisions).to(device)

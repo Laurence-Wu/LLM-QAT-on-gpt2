@@ -19,6 +19,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from test.fix_model_initialization import create_properly_initialized_model
 from test.dataset_utils import get_calibration_texts
+from test.utils import get_configured_bit_widths, get_student_precisions
 from part1_switchable_precision.distillation_manager import DistillationManager
 from part1_switchable_precision.config_sp import TrainingConfig
 
@@ -38,8 +39,8 @@ def test_single_precision_per_batch():
     model, config = create_properly_initialized_model(use_pretrained=True, num_layers=4)
     model = model.to(device)
 
-    # Available precisions
-    available_precisions = [6, 8, 16, 32]
+    # Get configured precisions from model
+    available_precisions = get_configured_bit_widths(model)
 
     # Track gradients for each precision
     gradient_norms_by_precision = {p: [] for p in available_precisions}
@@ -158,7 +159,7 @@ def test_teacher_cache_effectiveness():
     print("\n📊 Phase 2: Test student training with cached teacher")
 
     # Test students can retrieve cached teacher outputs
-    student_precisions = [6, 8, 16]
+    student_precisions = get_student_precisions(get_configured_bit_widths(model))
     cache_hit_results = {}
 
     for precision in student_precisions:
@@ -252,7 +253,9 @@ def test_distillation_loss_computation():
     print("\n📊 Step 2: Compute distillation loss for each student")
 
     student_losses = {}
-    student_precisions = [16, 8, 4]
+    # Get student precisions from model
+    bit_widths = get_configured_bit_widths(model)
+    student_precisions = get_student_precisions(bit_widths)
 
     for precision in student_precisions:
         model.set_precision(precision)
@@ -318,8 +321,8 @@ def test_random_sampling_convergence():
     model, model_config = create_properly_initialized_model(use_pretrained=False, num_layers=2)
     model = model.to(device)
 
-    # Setup training
-    available_precisions = [6, 8, 16, 32]
+    # Setup training - get configured precisions from model
+    available_precisions = get_configured_bit_widths(student_model)
     num_iterations = 100
     batch_size = 4
 

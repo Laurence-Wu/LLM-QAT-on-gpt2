@@ -19,6 +19,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from test.fix_model_initialization import create_properly_initialized_model
 from test.dataset_utils import get_calibration_texts
+from test.utils import get_configured_bit_widths, get_student_precisions
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
 import gc
 
@@ -227,7 +228,8 @@ def test_switchable_precision_training():
     num_epochs = 3
     num_batches_per_epoch = 10
     batch_size = 4
-    precisions = [32, 16, 8, 4]
+    # Get configured precisions from model
+    precisions = get_configured_bit_widths(model)
 
     # Get training data
     training_texts = get_calibration_texts(num_texts=num_epochs * num_batches_per_epoch * batch_size)
@@ -384,7 +386,11 @@ def test_distillation_effectiveness():
 
     # Test different distillation temperatures
     temperatures = [1.0, 3.0, 5.0, 10.0]
-    precisions = [16, 8]
+    # Test with student precisions
+    all_precisions = get_configured_bit_widths(model)
+    precisions = [p for p in all_precisions if p in [16, 8]]  # Test 16 and 8 if available
+    if not precisions:
+        precisions = get_student_precisions(all_precisions)[:2]  # Use first 2 student precisions
 
     distillation_results = {}
 
@@ -597,7 +603,8 @@ def test_batch_norm_training_dynamics():
     # Test random precision switching during training (S-BN style)
     num_batches = 30
     batch_size = 4
-    precisions = [6, 8, 16, 32]
+    # Get configured precisions from model
+    precisions = get_configured_bit_widths(model)
 
     training_texts = get_calibration_texts(num_texts=num_batches * batch_size)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
