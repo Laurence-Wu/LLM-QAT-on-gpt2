@@ -87,11 +87,15 @@ def test_model_initialization():
     c_attn = first_block.attn.c_attn
     print(f"   c_attn bit_widths: {c_attn.bit_widths}")
     print(f"   c_attn LoRA adapters: {list(c_attn.lora_adapters.keys())}")
-    assert 32 in c_attn.lora_adapters, "Should have 32-bit adapter"
+    assert '32bit' in c_attn.lora_adapters, "Should have 32-bit adapter"
 
     # Check that 32-bit has no LoRA (rank=0)
-    if hasattr(c_attn.lora_adapters[32], 'lora_A'):
-        print(f"   32-bit LoRA A shape: {c_attn.lora_adapters[32].lora_A.weight.shape if c_attn.lora_adapters[32].lora_A else 'None'}")
+    adapter_32 = c_attn.lora_adapters['32bit']
+    if hasattr(adapter_32, 'lora_A'):
+        if adapter_32.lora_A is not None:
+            print(f"   32-bit LoRA A shape: {adapter_32.lora_A.weight.shape}")
+        else:
+            print(f"   32-bit LoRA A: None (rank=0, as expected for teacher)")
     print("   ✅ LoRA layers configured correctly")
 
     print("\n7. Testing precision switching:")
