@@ -248,21 +248,21 @@ def save_sp_checkpoints(model, base_filename, model_config, training_config=None
             saved_checkpoints[32] = fp32_filename
             print(f"✓ Saved 32-bit FP32 teacher to: {fp32_filename}")
 
-        else:
-            # Save INT8 student models
-            print(f"\nSaving {bits}-bit INT8 student model...")
-            int8_filename = f"{base_filename}_{bits}bit_int8_{timestamp}.pth"
+        # else:
+        #     # Save INT8 student models
+        #     print(f"\nSaving {bits}-bit INT8 student model...")
+        #     int8_filename = f"{base_filename}_{bits}bit_int8_{timestamp}.pth"
 
-            save_int8_checkpoint(
-                model,
-                int8_filename,
-                model_config,
-                training_config,
-                target_bits=bits
-            )
+        #     save_int8_checkpoint(
+        #         model,
+        #         int8_filename,
+        #         model_config,
+        #         training_config,
+        #         target_bits=bits
+        #     )
 
-            saved_checkpoints[bits] = int8_filename
-            print(f"✓ Saved {bits}-bit INT8 student to: {int8_filename}")
+        #     saved_checkpoints[bits] = int8_filename
+        #     print(f"✓ Saved {bits}-bit INT8 student to: {int8_filename}")
 
     print(f"\n{'='*60}")
     print(f"All checkpoints saved successfully!")
