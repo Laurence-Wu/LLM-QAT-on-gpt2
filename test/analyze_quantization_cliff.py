@@ -45,17 +45,26 @@ def analyze_quantization_utilization(model, bits, device):
                 else:
                     continue
 
-                # Simulate quantization
+                # Actually quantize weights through the quantizer to measure utilization
                 num_levels = 2**bits
                 if hasattr(quantizer, 'scale') and quantizer.scale is not None:
-                    # Use actual quantizer scale
-                    scale = quantizer.scale.mean().item() if quantizer.scale.numel() > 1 else quantizer.scale.item()
+                    # Pass weights through the actual quantizer
+                    # This handles all quantizer types correctly (minmax, relu_clip, tanh, log)
+                    with torch.no_grad():
+                        # Ensure quantizer is not in calibration mode
+                        was_collecting = quantizer.collecting_stats if hasattr(quantizer, 'collecting_stats') else False
+                        if was_collecting:
+                            quantizer.collecting_stats = False
 
-                    # Quantize weights
-                    weight_scaled = weight / scale
-                    weight_int = torch.round(weight_scaled).clamp(-(2**(bits-1)), 2**(bits-1)-1)
+                        # Quantize the weights
+                        weight_quantized = quantizer(weight)
 
-                    unique_values = len(torch.unique(weight_int))
+                        # Restore calibration mode if it was on
+                        if was_collecting:
+                            quantizer.collecting_stats = True
+
+                    # Count unique quantized values
+                    unique_values = len(torch.unique(weight_quantized))
                     utilization = unique_values / num_levels
                     utilization_stats.append(utilization)
 
