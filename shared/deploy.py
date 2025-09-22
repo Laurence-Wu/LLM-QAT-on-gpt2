@@ -88,7 +88,7 @@ def convert_to_int8(model):
     return int8_state_dict
 
 
-def save_int8_checkpoint(model, filepath, model_config=None, training_config=None):
+def save_int8_checkpoint(model, filepath, model_config=None, training_config=None, target_bits=None):
     """
     Save model in INT8 format with metadata.
 
@@ -97,10 +97,16 @@ def save_int8_checkpoint(model, filepath, model_config=None, training_config=Non
         filepath: Path to save INT8 checkpoint
         model_config: Optional model configuration
         training_config: Optional training configuration
+        target_bits: Specific bit width to save (for SP models)
 
     Returns:
         Saved checkpoint dictionary
     """
+    # Set model to specific precision if specified (for SP models)
+    if target_bits is not None and hasattr(model, 'set_precision'):
+        model.set_precision(target_bits)
+        print(f"Set model to {target_bits}-bit precision for INT8 conversion")
+
     # Convert to INT8
     int8_state_dict = convert_to_int8(model)
 
@@ -134,7 +140,8 @@ def save_int8_checkpoint(model, filepath, model_config=None, training_config=Non
             'int8_size_mb': int8_size_mb,
             'metadata_size_mb': metadata_size_mb,
             'total_size_mb': total_size_mb,
-            'compression_ratio': compression_ratio
+            'compression_ratio': compression_ratio,
+            'target_bits': target_bits  # Store which precision this checkpoint represents
         }
     }
 
@@ -154,19 +161,26 @@ def save_int8_checkpoint(model, filepath, model_config=None, training_config=Non
             if hasattr(model_config, config_key):
                 model_config_dict[config_key] = getattr(model_config, config_key)
 
+        # Get configured bit widths from model config
+        configured_bit_widths = getattr(model_config, 'bit_widths', None)
+
         # Verify lora_rank_per_bit and lora_alpha_per_bit are present
         if 'lora_rank_per_bit' not in model_config_dict or model_config_dict['lora_rank_per_bit'] is None:
             print("Warning: 'lora_rank_per_bit' configuration is missing or None!")
-            # Use defaults from config if missing
-            model_config_dict['lora_rank_per_bit'] = {6: 8, 8: 16, 16: 32}
+            # Use defaults based on configured bit widths
+            if configured_bit_widths:
+                model_config_dict['lora_rank_per_bit'] = {bits: (32 if bits <= 6 else 16 if bits <= 8 else 8 if bits <= 16 else 0)
+                                                          for bits in configured_bit_widths}
 
         if 'lora_alpha_per_bit' not in model_config_dict or model_config_dict['lora_alpha_per_bit'] is None:
             print("Warning: 'lora_alpha_per_bit' configuration is missing or None!")
-            # Use defaults from config if missing
-            model_config_dict['lora_alpha_per_bit'] = {6: 16, 8: 32, 16: 64}
+            # Use defaults based on configured bit widths
+            if configured_bit_widths:
+                model_config_dict['lora_alpha_per_bit'] = {bits: (64 if bits <= 6 else 32 if bits <= 8 else 16 if bits <= 16 else 0)
+                                                           for bits in configured_bit_widths}
 
         checkpoint['model_config'] = model_config_dict
-        checkpoint['bit_widths'] = model_config_dict.get('bit_widths', [6, 8, 16])  # Add for easy access
+        checkpoint['bit_widths'] = configured_bit_widths  # Use actual configured bit widths
 
     if training_config is not None:
         checkpoint['training_config'] = training_config.__dict__
@@ -187,6 +201,74 @@ def save_int8_checkpoint(model, filepath, model_config=None, training_config=Non
     print(f"{'='*60}\n")
 
     return checkpoint
+
+
+def save_sp_checkpoints(model, base_filename, model_config, training_config=None):
+    """
+    Save Switchable Precision model checkpoints for all configured bit widths.
+
+    Args:
+        model: SP model with multiple bit-width support
+        base_filename: Base filename (without extension) for checkpoints
+        model_config: Model configuration with bit_widths
+        training_config: Optional training configuration
+
+    Returns:
+        Dictionary of saved checkpoint paths
+    """
+    import os
+    import time
+
+    # Get configured bit widths from model config
+    bit_widths = getattr(model_config, 'bit_widths', [6, 8, 16, 32])
+    saved_checkpoints = {}
+    timestamp = time.strftime('%Y%m%d_%H%M%S')
+
+    print(f"\n{'='*60}")
+    print(f"Saving SP Model Checkpoints")
+    print(f"{'='*60}")
+    print(f"Configured bit widths: {bit_widths}")
+
+    for bits in bit_widths:
+        if bits == 32:
+            # Save FP32 teacher model
+            print(f"\nSaving 32-bit FP32 teacher model...")
+            model.set_precision(32)
+            fp32_filename = f"{base_filename}_32bit_fp32_{timestamp}.pth"
+
+            # Save full FP32 checkpoint
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'model_config': model_config.__dict__,
+                'training_config': training_config.__dict__ if training_config else None,
+                'bit_width': 32,
+                'timestamp': timestamp
+            }, fp32_filename)
+
+            saved_checkpoints[32] = fp32_filename
+            print(f"✓ Saved 32-bit FP32 teacher to: {fp32_filename}")
+
+        else:
+            # Save INT8 student models
+            print(f"\nSaving {bits}-bit INT8 student model...")
+            int8_filename = f"{base_filename}_{bits}bit_int8_{timestamp}.pth"
+
+            save_int8_checkpoint(
+                model,
+                int8_filename,
+                model_config,
+                training_config,
+                target_bits=bits
+            )
+
+            saved_checkpoints[bits] = int8_filename
+            print(f"✓ Saved {bits}-bit INT8 student to: {int8_filename}")
+
+    print(f"\n{'='*60}")
+    print(f"All checkpoints saved successfully!")
+    print(f"{'='*60}\n")
+
+    return saved_checkpoints
 
 
 def load_int8_checkpoint(model, filepath):

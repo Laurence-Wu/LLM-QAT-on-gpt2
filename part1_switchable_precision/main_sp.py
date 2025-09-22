@@ -22,7 +22,7 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 # Use the new separated model file for Switchable Precision
 from shared.models_sp import SPModel, SPLMHeadModel
 from shared.dataset import create_dataloaders
-from shared.deploy import save_int8_checkpoint
+from shared.deploy import save_int8_checkpoint, save_sp_checkpoints
 
 # Use try/except to handle both direct execution and import cases
 try:
@@ -266,48 +266,22 @@ def main():
     
     print("Training complete")
 
-    # Save both FP32 and INT8 models
+    # Save checkpoints for all configured bit widths
     try:
-        import time
-        timestamp = time.strftime('%Y%m%d_%H%M%S')
+        # Use the new save_sp_checkpoints function to save models for each bit width
+        # This will save:
+        # - INT8 checkpoints for student models (6, 8, 16-bit)
+        # - FP32 checkpoint for teacher model (32-bit)
+        saved_checkpoints = save_sp_checkpoints(
+            trained_model,
+            base_filename="sp_gpt2",
+            model_config=model_config,
+            training_config=training_config
+        )
 
-        # Save FP32 model (standard checkpoint with ALL configurations)
-        fp32_filename = f"qat_gpt2_{model_config.quantization_bits}bit_fp32_{timestamp}.pth"
-
-        # Create comprehensive model configuration dictionary
-        model_config_dict = model_config.__dict__.copy()
-
-        # Ensure critical SP configurations are included
-        critical_configs = [
-            'lora_rank_per_bit', 'lora_alpha_per_bit',
-            'activation_bits_per_bit',
-            'bit_widths', 'teacher_bits'
-        ]
-
-        for config_key in critical_configs:
-            if hasattr(model_config, config_key):
-                model_config_dict[config_key] = getattr(model_config, config_key)
-            else:
-                print(f"Warning: Configuration '{config_key}' not found in model_config")
-
-        # Verify lora_rank_per_bit and lora_alpha_per_bit are present and not None
-        if 'lora_rank_per_bit' not in model_config_dict or model_config_dict['lora_rank_per_bit'] is None:
-            raise ValueError("Critical configuration 'lora_rank_per_bit' is missing or None!")
-        if 'lora_alpha_per_bit' not in model_config_dict or model_config_dict['lora_alpha_per_bit'] is None:
-            raise ValueError("Critical configuration 'lora_alpha_per_bit' is missing or None!")
-
-        torch.save({
-            'model_state_dict': trained_model.state_dict(),
-            'model_config': model_config_dict,
-            'training_config': training_config.__dict__,
-            'timestamp': timestamp,
-            'bit_widths': getattr(model_config, 'bit_widths', [6, 8, 16])  # Add for easy access
-        }, fp32_filename)
-        print(f"Saved FP32 model to {fp32_filename}")
-
-        # Save INT8 model (quantized for deployment)
-        int8_filename = f"sp_gpt2_int8_{timestamp}.pth"
-        save_int8_checkpoint(trained_model, int8_filename, model_config, training_config)
+        print("\nCheckpoint Summary:")
+        for bits, filepath in saved_checkpoints.items():
+            print(f"  {bits}-bit: {filepath}")
 
     except Exception as e:
         # Don't silently catch - re-raise the error
