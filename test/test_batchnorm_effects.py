@@ -337,7 +337,28 @@ def test_bn_precision_switching_consistency():
 
     # Test rapid precision switching
     print("\n📊 Testing rapid precision switching:")
-    switch_sequence = [32, 16, 8, 4, 8, 16, 32, 4, 32]
+
+    # Get configured bit widths from model
+    bit_widths = get_configured_bit_widths(model)
+
+    # Create a switch sequence using actual configured bit widths
+    # Use the pattern: max, mid, lower, min, lower, mid, max, min, max
+    if len(bit_widths) >= 3:
+        switch_sequence = [
+            bit_widths[-1],  # max (e.g., 32)
+            bit_widths[-2],  # mid (e.g., 16)
+            bit_widths[1] if len(bit_widths) > 2 else bit_widths[0],   # lower (e.g., 8)
+            bit_widths[0],   # min (e.g., 6)
+            bit_widths[1] if len(bit_widths) > 2 else bit_widths[0],   # lower (e.g., 8)
+            bit_widths[-2],  # mid (e.g., 16)
+            bit_widths[-1],  # max (e.g., 32)
+            bit_widths[0],   # min (e.g., 6)
+            bit_widths[-1]   # max (e.g., 32)
+        ]
+    else:
+        # Fallback for fewer bit widths
+        switch_sequence = bit_widths * 3
+
     outputs = []
 
     model.eval()
@@ -353,22 +374,30 @@ def test_bn_precision_switching_consistency():
     # Check consistency when returning to same precision
     print("\n🔍 Checking consistency when returning to same precision:")
 
-    # Compare first and second 32-bit outputs (indices 0 and 6)
-    diff_32 = torch.mean(torch.abs(outputs[0] - outputs[6])).item()
-    print(f"   32-bit consistency: diff = {diff_32:.6f}")
+    # Find indices of repeated precisions
+    max_precision = bit_widths[-1]
+    min_precision = bit_widths[0]
 
-    # Compare 4-bit outputs (indices 3 and 7)
-    diff_4 = torch.mean(torch.abs(outputs[3] - outputs[7])).item()
-    print(f"   4-bit consistency: diff = {diff_4:.6f}")
+    # Find where max precision appears (should be at indices 0, 6, 8)
+    max_indices = [i for i, p in enumerate(switch_sequence) if p == max_precision]
+    if len(max_indices) >= 2:
+        diff_max = torch.mean(torch.abs(outputs[max_indices[0]] - outputs[max_indices[1]])).item()
+        print(f"   {max_precision}-bit consistency: diff = {diff_max:.6f}")
 
-    if diff_32 < 0.01 and diff_4 < 0.1:
-        print("   ✅ Consistent outputs when returning to same precision")
-    else:
-        print("   ⚠️ Inconsistent outputs - may indicate state leakage")
+    # Find where min precision appears (should be at indices 3, 7)
+    min_indices = [i for i, p in enumerate(switch_sequence) if p == min_precision]
+    if len(min_indices) >= 2:
+        diff_min = torch.mean(torch.abs(outputs[min_indices[0]] - outputs[min_indices[1]])).item()
+        print(f"   {min_precision}-bit consistency: diff = {diff_min:.6f}")
+
+        if 'diff_max' in locals() and diff_max < 0.01 and diff_min < 0.1:
+            print("   ✅ Consistent outputs when returning to same precision")
+        else:
+            print("   ⚠️ Inconsistent outputs - may indicate state leakage")
 
     return {
-        'consistency_32bit': diff_32,
-        'consistency_4bit': diff_4,
+        'consistency_max': diff_max if 'diff_max' in locals() else None,
+        'consistency_min': diff_min if 'diff_min' in locals() else None,
         'switch_sequence': switch_sequence
     }
 
