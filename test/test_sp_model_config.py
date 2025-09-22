@@ -93,7 +93,7 @@ def test_model_initialization():
     adapter_32 = c_attn.lora_adapters['32bit']
     if hasattr(adapter_32, 'lora_A'):
         if adapter_32.lora_A is not None:
-            print(f"   32-bit LoRA A shape: {adapter_32.lora_A.weight.shape}")
+            print(f"   32-bit LoRA A shape: {adapter_32.lora_A.shape}")
         else:
             print(f"   32-bit LoRA A: None (rank=0, as expected for teacher)")
     print("   ✅ LoRA layers configured correctly")
