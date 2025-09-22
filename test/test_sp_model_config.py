@@ -115,8 +115,8 @@ def test_model_initialization():
     for bits in [32, 16, 8, 6]:  # Test from high to low precision
         model.set_precision(bits)
         with torch.no_grad():
-            output = model(input_ids)
-            hidden_states = output.last_hidden_state
+            hidden_states = model(input_ids)
+            # SPModel returns hidden states directly as a tensor
             print(f"   {bits}-bit forward pass: ✅ Output shape: {hidden_states.shape}")
 
     print("\n✅ ALL SP MODEL CONFIGURATION TESTS PASSED!")
@@ -169,7 +169,11 @@ def test_lmhead_model():
         model.set_precision(bits)
         with torch.no_grad():
             outputs = model(input_ids)
-            logits = outputs.logits
+            # SPLMHeadModel returns logits directly when no labels provided
+            if isinstance(outputs, dict):
+                logits = outputs['logits']
+            else:
+                logits = outputs
             print(f"   {bits}-bit LM head: ✅ Logits shape: {logits.shape}")
             assert logits.shape == (batch_size, seq_len, model_config.vocab_size)
 
