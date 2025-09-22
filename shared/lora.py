@@ -146,8 +146,8 @@ class SPLinearWithLoRA(nn.Module):
 
     def __init__(self, in_features, out_features, bias=True,
                  bit_widths=[6, 8, 16],
-                 lora_rank_per_bit={6: 12, 8: 16, 16: 16},
-                 lora_alpha_per_bit={6: 12, 8: 32, 16: 32},
+                 lora_rank_per_bit={6: 32, 8: 16, 16: 8},
+                 lora_alpha_per_bit={6: 64, 8: 32, 16: 16},
                  lora_dropout=0.1,
                  quantizer_per_bit=None):
         super().__init__()
@@ -244,7 +244,7 @@ class SPLinearWithLoRA(nn.Module):
         Forward pass with bit-width-specific behavior:
         - 32-bit: Pure FP32 teacher (no quantization, no LoRA)
         - 16-bit: Student with quantization and LoRA
-        - 8/4-bit: Student with stronger quantization and LoRA
+        - 8/-bit: Student with stronger quantization and LoRA
         """
         # CRITICAL: Only 32-bit teacher uses pure FP32 weights without any modifications
         if self.current_bits >= 32:
