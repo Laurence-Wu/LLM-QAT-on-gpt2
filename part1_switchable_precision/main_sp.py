@@ -161,19 +161,30 @@ def load_pretrained_weights(model):
         model.transformer.ln_f.biases[str(precision)].requires_grad = False
 
 
-    # LoRA adapters
+    # LoRA adapters - targeted approach
     lora_count = 0
+
+    target_modules = [
+        'c_attn',
+        'c_proj',
+        'c_fc',
+    ]
+
     for name, module in model.named_modules():
-        try:
-            if module.lora_adapters:  # Will throw AttributeError if not present
-                for bit_key, lora_layer in module.lora_adapters.items():
-                    if isinstance(lora_layer.lora_A, nn.Parameter):
-                        lora_layer.lora_A.requires_grad = True
-                        lora_count += 1
-                    if isinstance(lora_layer.lora_B, nn.Parameter):
-                        lora_layer.lora_B.requires_grad = True
-        except AttributeError:
-            print(f"Module {name} does not have LoRA adapters")
+        if not any(target in name for target in target_modules):
+            continue
+        if not hasattr(module, 'lora_adapters'):
+            continue
+        # Process each bitwidth variant
+        for bit_key in module.lora_adapters.keys():
+            lora_layer = module.lora_adapters[bit_key]
+            # Set trainable
+            if hasattr(lora_layer, 'lora_A'):
+                lora_layer.lora_A.requires_grad = True
+                lora_layer.lora_B.requires_grad = True
+                lora_count += 1
+
+    print(f"Enabled {lora_count} LoRA adapter pairs for training")
 
     # Delete pretrained model to free memory immediately
     del pretrained
