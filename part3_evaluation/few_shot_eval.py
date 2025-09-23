@@ -44,27 +44,40 @@ class FewShotEvaluator:
         results_by_category = {cat: [] for cat in categories.keys()}
 
         self.model.eval()
+        errors = 0
         with torch.no_grad():
             for i, example in enumerate(tqdm(dataset, desc="Evaluating MMLU", leave=False)):
                 if i >= 1000:
                     break
-                subject = example.get('subject', 'other')
+                try:
+                    subject = example.get('subject', 'other')
 
-                category = 'Other'
-                for cat, subjects in categories.items():
-                    if any(s in subject.lower() for s in subjects):
-                        category = cat
+                    category = 'Other'
+                    for cat, subjects in categories.items():
+                        if any(s in subject.lower() for s in subjects):
+                            category = cat
+                            break
+
+                    prompt = self._create_mmlu_prompt(example, num_shots)
+                    answer = example['answer']
+
+                    predicted = self._generate_answer(prompt, max_length=5)
+
+                    predicted_answer = self._extract_answer_choice(predicted)
+                    correct = predicted_answer == str(answer)
+
+                    results_by_category[category].append(float(correct))
+                except Exception as e:
+                    errors += 1
+                    if errors <= 3:
+                        print(f"\nError in MMLU example {i}: {str(e)}")
+                        if errors == 1:
+                            import traceback
+                            traceback.print_exc()
+                    if errors > 10:
+                        print(f"\nToo many errors in MMLU ({errors} total), stopping")
                         break
-
-                prompt = self._create_mmlu_prompt(example, num_shots)
-                answer = example['answer']
-
-                predicted = self._generate_answer(prompt, max_length=5)
-
-                predicted_answer = self._extract_answer_choice(predicted)
-                correct = predicted_answer == str(answer)
-
-                results_by_category[category].append(float(correct))
+                    continue
 
         scores = {}
         for category, results in results_by_category.items():
@@ -91,20 +104,33 @@ class FewShotEvaluator:
 
         correct = 0
         total = 0
+        errors = 0
 
         self.model.eval()
         with torch.no_grad():
             for example in tqdm(dataset, desc="Evaluating TriviaQA", leave=False):
-                question = example['question']
-                answers = example['answer']['aliases']
+                try:
+                    question = example['question']
+                    answers = example['answer']['aliases']
 
-                prompt = self._create_triviaqa_prompt(question, num_shots)
+                    prompt = self._create_triviaqa_prompt(question, num_shots)
 
-                predicted = self._generate_answer(prompt, max_length=20)
+                    predicted = self._generate_answer(prompt, max_length=20)
 
-                if any(ans.lower() in predicted.lower() for ans in answers):
-                    correct += 1
-                total += 1
+                    if any(ans.lower() in predicted.lower() for ans in answers):
+                        correct += 1
+                    total += 1
+                except Exception as e:
+                    errors += 1
+                    if errors <= 3:
+                        print(f"\nError in TriviaQA example {total}: {str(e)}")
+                        if errors == 1:
+                            import traceback
+                            traceback.print_exc()
+                    if errors > 10:
+                        print(f"\nToo many errors in TriviaQA ({errors} total), stopping")
+                        break
+                    continue
 
                 if total >= 1000:
                     break
@@ -217,17 +243,18 @@ class FewShotEvaluator:
                 inputs['attention_mask'] = inputs['attention_mask'][:, :max_positions - max_length]
 
         with torch.no_grad():
-            # Ensure we don't exceed model's max positions
-            remaining_length = max_positions - inputs['input_ids'].size(1)
+            # SPLMHeadModel's generate expects max_length (total), not max_new_tokens
+            current_length = inputs['input_ids'].size(1)
+            remaining_length = max_positions - current_length
             actual_max_new = min(max_length, remaining_length)
+            total_length = current_length + actual_max_new
 
-            # SPLMHeadModel's generate doesn't take attention_mask, only input_ids
             outputs = self.model.generate(
-                inputs['input_ids'],
-                max_new_tokens=actual_max_new,
+                inputs['input_ids'],  # Only pass input_ids
+                max_length=total_length,
                 temperature=0.1,
                 do_sample=False,
-                pad_token_id=self.tokenizer.eos_token_id
+                eos_token_id=self.tokenizer.eos_token_id
             )
 
         generated = self.tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)

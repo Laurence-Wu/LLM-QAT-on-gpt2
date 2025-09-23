@@ -89,8 +89,13 @@ class ZeroShotEvaluator:
                     break
                 except Exception as e:
                     errors += 1
+                    if errors <= 3:  # Show first 3 errors for debugging
+                        print(f"\nError in {task_name} example {total}: {str(e)}")
+                        import traceback
+                        if errors == 1:  # Show full traceback for first error
+                            traceback.print_exc()
                     if errors > 10:
-                        print(f"\nToo many errors in {task_name}, stopping evaluation")
+                        print(f"\nToo many errors in {task_name} ({errors} total), stopping evaluation")
                         break
                     continue
 
@@ -234,13 +239,16 @@ class ZeroShotEvaluator:
                 inputs['attention_mask'] = inputs['attention_mask'][:, :max_positions]
 
         with torch.no_grad():
-            # SPLMHeadModel's generate doesn't take attention_mask, only input_ids
+            # SPLMHeadModel's generate expects max_length (total), not max_new_tokens
+            current_length = inputs['input_ids'].size(1)
+            total_length = min(current_length + max_length, max_positions)
+
             outputs = self.model.generate(
                 inputs['input_ids'],
-                max_new_tokens=min(max_length, max_positions - inputs['input_ids'].size(1)),
+                max_length=total_length,
                 temperature=0.1,
                 do_sample=False,
-                pad_token_id=self.tokenizer.eos_token_id
+                eos_token_id=self.tokenizer.eos_token_id
             )
 
         generated = self.tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
