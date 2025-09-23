@@ -23,7 +23,7 @@ class FewShotEvaluator:
         - Average
         """
         try:
-            dataset = load_dataset('cais/mmlu', 'all', split='test[:2000]')
+            dataset = load_dataset('cais/mmlu', 'all', split='test[:1000]')
         except Exception as e:
             print(f"Warning: Could not load MMLU dataset: {e}")
             return {
@@ -47,7 +47,7 @@ class FewShotEvaluator:
         errors = 0
         with torch.no_grad():
             for i, example in enumerate(tqdm(dataset, desc="Evaluating MMLU", leave=False)):
-                if i >= 1000:
+                if i >= 500:  # Reduced for faster evaluation
                     break
                 try:
                     subject = example.get('subject', 'other')
@@ -97,7 +97,7 @@ class FewShotEvaluator:
         Return exact match score
         """
         try:
-            dataset = load_dataset('trivia_qa', 'rc.nocontext', split='validation[:2000]')
+            dataset = load_dataset('trivia_qa', 'rc.nocontext', split='validation[:1000]')
         except Exception as e:
             print(f"Warning: Could not load TriviaQA dataset: {e}")
             return 0.0
@@ -132,7 +132,7 @@ class FewShotEvaluator:
                         break
                     continue
 
-                if total >= 1000:
+                if total >= 500:  # Reduced for faster evaluation
                     break
 
         accuracy = (correct / max(total, 1)) * 100

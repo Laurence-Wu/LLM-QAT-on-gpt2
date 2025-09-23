@@ -26,12 +26,12 @@ class ZeroShotEvaluator:
         tasks = {}
 
         try:
-            tasks['BoolQ'] = load_dataset('boolq', split='validation[:2000]')
+            tasks['BoolQ'] = load_dataset('boolq', split='validation[:1000]')
         except Exception as e:
             print(f"Warning: Could not load BoolQ dataset: {e}")
 
         try:
-            tasks['HellaSwag'] = load_dataset('hellaswag', split='validation[:2000]')
+            tasks['HellaSwag'] = load_dataset('hellaswag', split='validation[:1000]')
         except Exception as e:
             print(f"Warning: Could not load HellaSwag dataset: {e}")
             # Create mock HellaSwag data for testing
@@ -41,26 +41,27 @@ class ZeroShotEvaluator:
             ]
 
         try:
-            tasks['WinoGrande'] = load_dataset('winogrande', 'winogrande_m', split='validation[:2000]')
+            tasks['WinoGrande'] = load_dataset('winogrande', 'winogrande_m', split='validation[:1000]')
         except:
             print("Warning: Could not load WinoGrande dataset")
 
         try:
-            arc = load_dataset('ai2_arc', 'ARC-Easy')
-            tasks['ARC-e'] = arc['validation'][:2000]
-        except:
-            print("Warning: Could not load ARC-Easy dataset")
+            tasks['ARC-e'] = load_dataset('ai2_arc', 'ARC-Easy', split='validation[:1000]')
+        except Exception as e:
+            print(f"Warning: Could not load ARC-Easy dataset: {e}")
+            tasks['ARC-e'] = None
 
         try:
-            arc = load_dataset('ai2_arc', 'ARC-Challenge')
-            tasks['ARC-c'] = arc['validation'][:2000]
-        except:
-            print("Warning: Could not load ARC-Challenge dataset")
+            tasks['ARC-c'] = load_dataset('ai2_arc', 'ARC-Challenge', split='validation[:1000]')
+        except Exception as e:
+            print(f"Warning: Could not load ARC-Challenge dataset: {e}")
+            tasks['ARC-c'] = None
 
         try:
-            tasks['OBQA'] = load_dataset('openbookqa', 'main', split='validation[:2000]')
-        except:
-            print("Warning: Could not load OBQA dataset")
+            tasks['OBQA'] = load_dataset('openbookqa', 'main', split='validation[:1000]')
+        except Exception as e:
+            print(f"Warning: Could not load OBQA dataset: {e}")
+            tasks['OBQA'] = None
 
         return tasks
 
@@ -99,7 +100,7 @@ class ZeroShotEvaluator:
                         break
                     continue
 
-                if total >= 1000:
+                if total >= 500:  # Reduced for faster evaluation
                     break
 
         accuracy = (correct / max(total, 1)) * 100
@@ -265,7 +266,8 @@ class ZeroShotEvaluator:
 
         results = {}
         # Only use task names that actually loaded
-        available_tasks = [name for name in self.tasks.keys() if self.tasks[name] is not None]
+        available_tasks = [name for name in self.tasks.keys()
+                          if self.tasks[name] is not None]
 
         print(f"Available tasks: {', '.join(available_tasks)}")
 
