@@ -4,6 +4,11 @@ class BitConfigurations:
     """Standard W-A-KV configurations from LLM-QAT paper"""
 
     STANDARD_CONFIGS = {
+        "FP32": {
+            "W": 32, "A": 32, "KV": 32,
+            "name": "32-32-32",
+            "description": "Full FP32 precision (teacher)"
+        },
         "FP16": {
             "W": 16, "A": 16, "KV": 16,
             "name": "16-16-16",
@@ -13,6 +18,11 @@ class BitConfigurations:
             "W": 8, "A": 8, "KV": 8,
             "name": "8-8-8",
             "description": "8-bit integer quantization"
+        },
+        "INT6": {
+            "W": 6, "A": 6, "KV": 6,
+            "name": "6-6-6",
+            "description": "6-bit integer quantization"
         },
         "INT4": {
             "W": 4, "A": 4, "KV": 4,

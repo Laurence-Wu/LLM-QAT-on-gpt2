@@ -719,11 +719,12 @@ def main():
         wiki_dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test')
         wiki_texts = [sample['text'] for sample in wiki_dataset if len(sample['text'].strip()) > 0][:max_eval_samples]
 
-        # Tokenize data
+        # Tokenize data - extract input_ids only
         wiki_data = []
         for text in wiki_texts:
             tokens = tokenizer(text, return_tensors='pt', max_length=128, truncation=True, padding='max_length')
-            wiki_data.append(tokens)
+            # Extract and squeeze input_ids to remove batch dimension
+            wiki_data.append(tokens['input_ids'].squeeze(0))
 
         wiki_loader = torch.utils.data.DataLoader(wiki_data, batch_size=4, shuffle=False)
 
