@@ -1,34 +1,24 @@
 """
 LearnableFakeQuantize module with support for different quantization methods.
-Supports multiple quantization strategies: minmax, relu_clip, tanh, and log.
+Supports quantization strategies: minmax and log.
 """
 
 import torch
 import torch.nn as nn
 
-# Import quantization functions
-try:
-    from .quantization_methods import (
-        apply_minmax_quantization,
-        apply_relu_clip_quantization,
-        apply_tanh_quantization,
-        apply_log_quantization
-    )
-except ImportError:
-    from quantization_methods import (
-        apply_minmax_quantization,
-        apply_relu_clip_quantization,
-        apply_tanh_quantization,
-        apply_log_quantization
-    )
+from quantization_methods import (
+    apply_minmax_quantization,
+    apply_log_quantization
+)
+
 
 
 class LearnableFakeQuantize(nn.Module):
-    def __init__(self, num_bits, symmetric=True,
+    def __init__(self, num_bits,
                  channel_dim=0, quantizer_type='minmax', eps=1e-5):
         super().__init__()
         self.num_bits = max(1, min(num_bits, 32))
-        self.symmetric = symmetric
+        self.symmetric = True  # Always use symmetric quantization
         self.channel_dim = channel_dim
         self.quantizer_type = quantizer_type
         self.eps = eps
@@ -61,12 +51,9 @@ class LearnableFakeQuantize(nn.Module):
 
     def _update_quant_range(self):
         """Update quantization range based on current num_bits."""
-        self.quant_min = 0
-        self.quant_max = 2 ** self.num_bits - 1
-
-        if self.symmetric:
-            self.quant_min = -(2 ** (self.num_bits - 1))
-            self.quant_max = 2 ** (self.num_bits - 1) - 1
+        # Always symmetric quantization
+        self.quant_min = -(2 ** (self.num_bits - 1))
+        self.quant_max = 2 ** (self.num_bits - 1) - 1
 
     def start_calibration(self):
         """Start calibration mode."""
@@ -84,13 +71,7 @@ class LearnableFakeQuantize(nn.Module):
             self.running_max.resize_as_(self.temp_max).copy_(self.temp_max)
             # Compute scale and zero_point based on quantizer type
             with torch.no_grad():
-                if self.quantizer_type == 'relu_clip':
-                    # For ReLU style, force min to 0
-                    self.running_min.zero_()
-                    range_val = torch.clamp(self.running_max, min=self.eps)
-                    self.scale.resize_as_(range_val).copy_(range_val / (2**self.num_bits - 1))
-                    self.zero_point.resize_as_(range_val).zero_()
-                elif self.quantizer_type == 'log':
+                if self.quantizer_type == 'log':
                     # For log quantization, running_min and running_max already contain log₂ values
                     # Just compute the range directly
                     log_min = self.running_min
@@ -100,22 +81,12 @@ class LearnableFakeQuantize(nn.Module):
                     # Store log_min in zero_point and log_range in scale for efficiency
                     self.zero_point.resize_as_(self.running_max).copy_(log_min)
                     self.scale.resize_as_(self.running_max).copy_(log_range)
-                elif self.quantizer_type == 'tanh':
-                    # For tanh quantization, scale represents the input range
-                    abs_max = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
-                    abs_max = torch.clamp(abs_max, min=self.eps)
-                    self.scale.resize_as_(abs_max).copy_(abs_max)
-                    self.zero_point.resize_as_(abs_max).zero_()
-                elif self.symmetric:
+                else:
+                    # Always symmetric for minmax
                     abs_max = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
                     abs_max = torch.clamp(abs_max, min=self.eps)
                     self.scale.resize_as_(abs_max).copy_(abs_max / (2**(self.num_bits-1) - 1))
                     self.zero_point.resize_as_(abs_max).zero_()
-                else:
-                    range_val = torch.clamp(self.running_max - self.running_min, min=self.eps)
-                    self.scale.resize_as_(range_val).copy_(range_val / (2**self.num_bits - 1))
-                    self.zero_point.resize_as_(range_val)
-                    self.zero_point.copy_(torch.round(self.quant_min - self.running_min / self.scale))
 
                 if debug:
                     print(f"         Computed scale: mean={self.scale.mean().item():.6f}")
@@ -209,7 +180,7 @@ class LearnableFakeQuantize(nn.Module):
         """Apply standard min-max quantization."""
         return apply_minmax_quantization(
             x, self.scale, self.zero_point,
-            self.num_bits, self.symmetric
+            self.num_bits, True  # Always symmetric
         )
 
     def _quantize_log(self, x):

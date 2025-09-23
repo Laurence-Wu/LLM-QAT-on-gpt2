@@ -36,9 +36,9 @@ class LoRALayer(nn.Module):
             nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
             nn.init.zeros_(self.lora_B)
             # A: [rank, in_features] -> quantize along in_features (dim=1)
-            self.quantize_A = LearnableFakeQuantize(num_bits=bits, symmetric=True, quantizer_type=quantizer_type, channel_dim=1, eps=eps)
+            self.quantize_A = LearnableFakeQuantize(num_bits=bits, quantizer_type=quantizer_type, channel_dim=1, eps=eps)
             # B: [out_features, rank] -> quantize along out_features (dim=0)
-            self.quantize_B = LearnableFakeQuantize(num_bits=bits, symmetric=True, quantizer_type=quantizer_type, channel_dim=0, eps=eps)
+            self.quantize_B = LearnableFakeQuantize(num_bits=bits, quantizer_type=quantizer_type, channel_dim=0, eps=eps)
             
             self.register_buffer('lora_A_quantized', torch.empty(in_features, rank))
             self.register_buffer('lora_B_quantized', torch.empty(rank, out_features))
@@ -79,13 +79,13 @@ class SPLinearWithLoRA(nn.Module):
 
         # Weight quantizers: [out_features, in_features] -> channel_dim=0 (per output channel)
         self.quantizers_weight = nn.ModuleDict({
-            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True,
+            f'{bits}bit': LearnableFakeQuantize(num_bits=bits,
                                                 quantizer_type=quantizer_per_bit[bits], channel_dim=0, eps=eps)
             for bits in student_bits
         })
         # Input quantizers: [batch, in_features] -> channel_dim=1 (per feature)
         self.quantizers_input = nn.ModuleDict({
-            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True,
+            f'{bits}bit': LearnableFakeQuantize(num_bits=bits,
                                                 quantizer_type=quantizer_per_bit[bits], channel_dim=1, eps=eps)
             for bits in student_bits
         })
