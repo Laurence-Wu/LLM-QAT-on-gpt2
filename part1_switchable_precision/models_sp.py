@@ -25,29 +25,19 @@ except ImportError:
 class SPAttention(nn.Module):
     """Attention module with switchable precision for multiple bit-widths."""
 
-    def __init__(self, config: GPT2Config, bit_widths=None):
+    def __init__(self, config: GPT2Config, bit_widths):
         super().__init__()
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.head_dim = self.n_embd // self.n_head
 
-        # Get bit_widths from config if not provided
-        if bit_widths is None:
-            bit_widths = getattr(config, 'bit_widths', [6, 8, 16, 32])
         self.bit_widths = bit_widths
 
         # Get LoRA configs from config - throw error if not provided
-        try:
-            lora_rank_per_bit = config.lora_rank_per_bit
-            lora_alpha_per_bit = config.lora_alpha_per_bit
-        except AttributeError as e:
-            raise AttributeError(
-                f"Config missing required switchable precision attributes: {e}\n"
-                "Required: lora_rank_per_bit, lora_alpha_per_bit\n"
-                "Example: config.lora_rank_per_bit = [6: 8, 8: 16, 16: 32}"
-            )
-        lora_dropout = getattr(config, 'lora_dropout', 0.1)
-        quantizer_per_bit = getattr(config, 'quantizer_per_bit', None)
+        lora_rank_per_bit = config.lora_rank_per_bit
+        lora_alpha_per_bit = config.lora_alpha_per_bit
+        lora_dropout = config.lora_dropout
+        quantizer_per_bit = config.quantizer_per_bit
 
         # Switchable layers with per-bit-width LoRA modules
         self.c_attn = SPLinearWithLoRA(
@@ -67,25 +57,17 @@ class SPAttention(nn.Module):
             quantizer_per_bit=quantizer_per_bit
         )
 
-        # No KV cache quantization needed
-
+        ## use this bias mask as the attention mask.
         self.register_buffer("bias", torch.tril(torch.ones(config.n_positions, config.n_positions)))
 
     def set_precision(self, bits) -> int:
-        """Set precision for all layers to specified bit-width.
-
-        Returns:
-            int: Current precision after setting
-        """
-        if bits not in self.bit_widths:
-            raise ValueError(f"Bit width {bits} not in configured widths {self.bit_widths}")
-        # Store current precision for KV quantization bypass
         self.current_bit_width = bits
         self.c_attn.set_precision(bits)
         self.c_proj.set_precision(bits)
         return self.current_bit_width
 
     def forward(self, hidden_states, attention_mask=None):
+        #standard attention implementation
         B, T, C = hidden_states.shape
 
         qkv = self.c_attn(hidden_states)
@@ -96,13 +78,11 @@ class SPAttention(nn.Module):
         v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
 
         # Quantize KV cache (bypass for 16-bit to match GPT-2 exactly)
-        # No KV quantization (removed for simplicity)
 
         attn_weights = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)
         bias_mask = self.bias[:T, :T].to(attn_weights.device)
         attn_weights = attn_weights.masked_fill(bias_mask == 0, float('-inf'))
         attn_weights = F.softmax(attn_weights, dim=-1)
-
         attn_output = attn_weights @ v
         attn_output = attn_output.transpose(1, 2).contiguous().view(B, T, C)
         attn_output = self.c_proj(attn_output)
@@ -174,14 +154,8 @@ class SPMLP(nn.Module):
 class SPBlock(nn.Module):
     """Transformer block with switchable precision."""
 
-    def __init__(self, config: GPT2Config, bit_widths=None):
+    def __init__(self, config: GPT2Config, bit_widths):
         super().__init__()
-
-        # Get bit_widths from config if not provided
-        if bit_widths is None:
-            bit_widths = getattr(config, 'bit_widths', [6, 8, 16, 32])
-
-        # Use Switchable LayerNorm for multi-precision support
         self.ln_1 = SwitchableLayerNorm(
             config.n_embd,
             precision_levels=bit_widths,
@@ -196,19 +170,11 @@ class SPBlock(nn.Module):
         self.mlp = SPMLP(config, bit_widths)
 
     def set_precision(self, bits) -> int:
-        """Set precision for all layers including LayerNorm.
-
-        Returns:
-            int: Current precision after setting
-        """
-        # Set precision for all components and verify they match
-        ln1_prec = self.ln_1.set_precision(bits)
-        attn_prec = self.attn.set_precision(bits)
-        ln2_prec = self.ln_2.set_precision(bits)
-        mlp_prec = self.mlp.set_precision(bits)
-
-        # All should be the same, return the first one
-        return ln1_prec
+        self.ln_1.set_precision(bits)
+        self.attn.set_precision(bits)
+        self.ln_2.set_precision(bits)
+        self.mlp.set_precision(bits)
+        return bits
 
     def forward(self, hidden_states, attention_mask=None, use_checkpoint=False):
         if use_checkpoint:
@@ -238,8 +204,8 @@ class SPModel(nn.Module):
         self.config = config
 
         # Get bit widths from config
-        self.bit_widths = getattr(config, 'bit_widths', [6, 8, 16, 32])
-        self.current_bit_width = max(self.bit_widths)  # Start with highest precision
+        self.bit_widths = config.bit_widths
+        self.current_bit_width = max(self.bit_widths)  # Start with highest precision since we are distilling it
 
         # Token and position embeddings
         self.wte = nn.Embedding(config.vocab_size, config.n_embd)
@@ -248,99 +214,30 @@ class SPModel(nn.Module):
 
         # Transformer blocks with switchable precision
         self.h = nn.ModuleList([
-            SPBlock(config)  # bit_widths will be extracted from config
+            SPBlock(config, bit_widths=self.bit_widths)
             for _ in range(config.n_layer)
         ])
 
         # Use Switchable LayerNorm for final layer
         self.ln_f = SwitchableLayerNorm(
             config.n_embd,
-            precision_levels=self.bit_widths,
+            precision_levels=self.bit_wisths,
             eps=config.layer_norm_epsilon
         )
 
     def set_precision(self, bits) -> int:
-        """Set precision for all transformer blocks and normalization layers.
-
-        Returns:
-            int: Current precision after setting
-        """
         if bits not in self.bit_widths:
             raise ValueError(f"Bit width {bits} not in configured widths {self.bit_widths}")
         self.current_bit_width = bits
-
         # Handle weight freezing/unfreezing based on precision
         # 32-bit teacher: Unfreeze all base weights (but not embeddings)
         # Other precisions: Keep base weights frozen, only train LoRA
-        if bits == 32:
-            # Unfreeze transformer block weights for teacher training
-            for block in self.h:
-                # Layer normalizations (SwitchableLayerNorm has ln_layers dict)
-                if isinstance(block.ln_1, SwitchableLayerNorm):
-                    for ln_key in block.ln_1.ln_layers:
-                        block.ln_1.ln_layers[ln_key].weight.requires_grad = True
-                        block.ln_1.ln_layers[ln_key].bias.requires_grad = True
-                if isinstance(block.ln_2, SwitchableLayerNorm):
-                    for ln_key in block.ln_2.ln_layers:
-                        block.ln_2.ln_layers[ln_key].weight.requires_grad = True
-                        block.ln_2.ln_layers[ln_key].bias.requires_grad = True
-
-                # Attention weights
-                block.attn.c_attn.linear.weight.requires_grad = True
-                block.attn.c_attn.linear.bias.requires_grad = True
-                block.attn.c_proj.linear.weight.requires_grad = True
-                block.attn.c_proj.linear.bias.requires_grad = True
-
-                # MLP weights
-                block.mlp.c_fc.linear.weight.requires_grad = True
-                block.mlp.c_fc.linear.bias.requires_grad = True
-                block.mlp.c_proj.linear.weight.requires_grad = True
-                block.mlp.c_proj.linear.bias.requires_grad = True
-
-            # Final layer norm (SwitchableLayerNorm)
-            if isinstance(self.ln_f, SwitchableLayerNorm):
-                for ln_key in self.ln_f.ln_layers:
-                    self.ln_f.ln_layers[ln_key].weight.requires_grad = True
-                    self.ln_f.ln_layers[ln_key].bias.requires_grad = True
-        else:
-            # Freeze all base weights for student modes (only LoRA trains)
-            for block in self.h:
-                # Layer normalizations (SwitchableLayerNorm has ln_layers dict)
-                if isinstance(block.ln_1, SwitchableLayerNorm):
-                    for ln_key in block.ln_1.ln_layers:
-                        block.ln_1.ln_layers[ln_key].weight.requires_grad = False
-                        block.ln_1.ln_layers[ln_key].bias.requires_grad = False
-                if isinstance(block.ln_2, SwitchableLayerNorm):
-                    for ln_key in block.ln_2.ln_layers:
-                        block.ln_2.ln_layers[ln_key].weight.requires_grad = False
-                        block.ln_2.ln_layers[ln_key].bias.requires_grad = False
-
-                # Attention weights
-                block.attn.c_attn.linear.weight.requires_grad = False
-                block.attn.c_attn.linear.bias.requires_grad = False
-                block.attn.c_proj.linear.weight.requires_grad = False
-                block.attn.c_proj.linear.bias.requires_grad = False
-
-                # MLP weights
-                block.mlp.c_fc.linear.weight.requires_grad = False
-                block.mlp.c_fc.linear.bias.requires_grad = False
-                block.mlp.c_proj.linear.weight.requires_grad = False
-                block.mlp.c_proj.linear.bias.requires_grad = False
-
-            # Final layer norm (SwitchableLayerNorm)
-            if isinstance(self.ln_f, SwitchableLayerNorm):
-                for ln_key in self.ln_f.ln_layers:
-                    self.ln_f.ln_layers[ln_key].weight.requires_grad = False
-                    self.ln_f.ln_layers[ln_key].bias.requires_grad = False
-
-                # Set precision for all blocks and layers directly (avoid recursion)
         
         for block in self.h:
             block.set_precision(bits)
 
         # Set precision for final layer norm
         self.ln_f.set_precision(bits)
-
 
         return self.current_bit_width
 
@@ -534,28 +431,7 @@ class SPLMHeadModel(nn.Module):
         # Tie weights between token embeddings and lm_head
         self.lm_head.weight = self.transformer.wte.weight
 
-        # Initialize weights properly
-        self.apply(self._init_weights)
-
-    def _init_weights(self, module):
-        """Initialize weights following GPT-2 paper."""
-        if isinstance(module, nn.Linear):
-            # Use normal distribution with std=0.02 like GPT-2
-            nn.init.normal_(module.weight, mean=0.0, std=0.02)
-            if module.bias is not None:
-                nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            nn.init.normal_(module.weight, mean=0.0, std=0.02)
-        elif isinstance(module, nn.LayerNorm):
-            nn.init.zeros_(module.bias)
-            nn.init.ones_(module.weight)
-
     def set_precision(self, bits) -> int:
-        """Set precision for the model.
-
-        Returns:
-            int: Current precision after setting
-        """
         precision = self.transformer.set_precision(bits)
 
         # Verify consistency
@@ -566,6 +442,39 @@ class SPLMHeadModel(nn.Module):
                 print(f"   - {mismatch}")
 
         return precision
+
+    def unfreeze_weights(self, bits):
+        if bits == 32:
+            # Unfreeze transformer block weights for teacher training
+            for block in self.h:
+                # Layer normalizations (SwitchableLayerNorm has weights and biases dicts)
+                if isinstance(block.ln_1, SwitchableLayerNorm):
+                    for precision in block.ln_1.precision_levels:
+                        block.ln_1.weights[str(precision)].requires_grad = True
+                        block.ln_1.biases[str(precision)].requires_grad = True
+                if isinstance(block.ln_2, SwitchableLayerNorm):
+                    for precision in block.ln_2.precision_levels:
+                        block.ln_2.weights[str(precision)].requires_grad = True
+                        block.ln_2.biases[str(precision)].requires_grad = True
+
+                # Attention weights
+                block.attn.c_attn.linear.weight.requires_grad = True
+                block.attn.c_attn.linear.bias.requires_grad = True
+                block.attn.c_proj.linear.weight.requires_grad = True
+                block.attn.c_proj.linear.bias.requires_grad = True
+
+                # MLP weights
+                block.mlp.c_fc.linear.weight.requires_grad = True
+                block.mlp.c_fc.linear.bias.requires_grad = True
+                block.mlp.c_proj.linear.weight.requires_grad = True
+                block.mlp.c_proj.linear.bias.requires_grad = True
+
+            # Final layer norm (SwitchableLayerNorm)
+            if isinstance(self.ln_f, SwitchableLayerNorm):
+                for precision in self.ln_f.precision_levels:
+                    self.ln_f.weights[str(precision)].requires_grad = True
+                    self.ln_f.biases[str(precision)].requires_grad = True
+    
 
     def verify_precision_consistency(self) -> Tuple[bool, Dict]:
         """Verify all components are at the same precision.
@@ -579,10 +488,6 @@ class SPLMHeadModel(nn.Module):
         # IMPORTANT: lm_head.weight is tied to transformer.wte.weight
         # We should NOT unfreeze it since embeddings must remain frozen
         # The 32-bit teacher will train the transformer block weights but keep embeddings/lm_head frozen
-
-        # Keep lm_head frozen for ALL precisions (including 32-bit)
-        # This is correct because lm_head is tied to embeddings which should never be trained
-        self.lm_head.weight.requires_grad = False
 
     def get_current_precision(self):
         """Get current precision setting."""

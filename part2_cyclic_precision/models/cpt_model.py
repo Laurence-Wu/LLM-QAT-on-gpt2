@@ -52,7 +52,7 @@ class CPTAttention(nn.Module):
 
         # KV cache quantizer
         kv_bits = getattr(config, 'kv_cache_bits', bits)
-        self.kv_quantizer = LearnableFakeQuantize(num_bits=kv_bits, symmetric=False)
+        self.kv_quantizer = LearnableFakeQuantize(num_bits=kv_bits, symmetric=False, eps=1e-5)
 
         self.register_buffer("bias", torch.tril(torch.ones(config.n_positions, config.n_positions)))
 

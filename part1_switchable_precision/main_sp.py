@@ -48,14 +48,19 @@ def initialize_model(model_config, device):
         n_head=model_config.n_head,
         activation_function='gelu_new',
         layer_norm_epsilon=model_config.layer_norm_epsilon,
-        embd_pdrop=model_config.embd_pdrop,
+        embd_pdrop=model_config.embd_pdrop
     )
 
     # Add switchable precision specific configs
+    gpt2_config.quantization_bits = model_config.quantization_bits
+    gpt2_config.lora_rank = model_config.lora_rank
+    gpt2_config.lora_alpha = model_config.lora_alpha
+    gpt2_config.lora_dropout = model_config.lora_dropout
     gpt2_config.lora_rank_per_bit = model_config.lora_rank_per_bit
     gpt2_config.lora_alpha_per_bit = model_config.lora_alpha_per_bit
     gpt2_config.activation_bits_per_bit = model_config.activation_bits_per_bit
-    gpt2_config.quantizer_per_bit = getattr(model_config, 'quantizer_per_bit', None)
+    gpt2_config.quantizer_per_bit = model_config.quantizer_per_bit
+    gpt2_config.bit_widths = model_config.bit_widths
 
     # Print configuration being used
     print(f"Initializing SP Model with configurations:")
@@ -63,11 +68,10 @@ def initialize_model(model_config, device):
     print(f"  LoRA rank per bit: {model_config.lora_rank_per_bit}")
     print(f"  LoRA alpha per bit: {model_config.lora_alpha_per_bit}")
     print(f"  Activation bits per bit: {model_config.activation_bits_per_bit}")
-    if gpt2_config.quantizer_per_bit:
-        print(f"  Quantizer per bit: {gpt2_config.quantizer_per_bit}")
+    print(f"  Quantizer per bit: {gpt2_config.quantizer_per_bit}")
 
     # Use switchable model if configured
-    gpt2_config.bit_widths = model_config.bit_widths
+    
     model = SPLMHeadModel(gpt2_config)
 
 
@@ -87,7 +91,7 @@ def initialize_model(model_config, device):
     # Set to 32-bit precision to unfreeze teacher weights after loading
     # This is critical - load_pretrained_weights freezes everything,
     # but 32-bit teacher needs unfrozen weights for training
-    model.set_precision(32)
+    model.unfreeze_weights_for_bit(32)
     print("Set initial precision to 32-bit (teacher mode) - weights unfrozen for teacher training")
 
     print(f"SP Model: {model_config.n_layer} layers, bit-widths: {model_config.bit_widths}")
@@ -115,25 +119,24 @@ def load_pretrained_weights(model):
     if model.transformer.wpe.weight.shape[0] != pretrained.transformer.wpe.weight.shape[0]:
         print(f"Adjusted position embeddings from {pretrained.transformer.wpe.weight.shape[0]} to {model.transformer.wpe.weight.shape[0]}")
 
-    # Copy LM head weights - frozen by default (will be unfrozen for 32-bit teacher)
-    model.lm_head.weight.data = pretrained.lm_head.weight.data.clone()
+    # LM already point to the transformer embeddings without the bias
     model.lm_head.weight.requires_grad = False  # Frozen by default
 
     # Copy transformer blocks - frozen by default (will be unfrozen for 32-bit teacher)
     for i in range(min(len(model.transformer.h), len(pretrained.transformer.h))):
-        # Layer normalizations - load into ALL precision-specific layers
-        # For SwitchableLayerNorm, copy weights to each precision's LayerNorm
-        for ln_key in model.transformer.h[i].ln_1.ln_layers:
-            model.transformer.h[i].ln_1.ln_layers[ln_key].weight.data = pretrained.transformer.h[i].ln_1.weight.data.clone()
-            model.transformer.h[i].ln_1.ln_layers[ln_key].bias.data = pretrained.transformer.h[i].ln_1.bias.data.clone()
-            model.transformer.h[i].ln_1.ln_layers[ln_key].weight.requires_grad = False
-            model.transformer.h[i].ln_1.ln_layers[ln_key].bias.requires_grad = False
+        # Layer normalizations - load into ALL precision-specific weight and bias parameters
+        # For SwitchableLayerNorm, copy weights to each precision's private parameters
+        for precision in model.transformer.h[i].ln_1.precision_levels:
+            model.transformer.h[i].ln_1.weights[str(precision)].data = pretrained.transformer.h[i].ln_1.weight.data.clone()
+            model.transformer.h[i].ln_1.biases[str(precision)].data = pretrained.transformer.h[i].ln_1.bias.data.clone()
+            model.transformer.h[i].ln_1.weights[str(precision)].requires_grad = False
+            model.transformer.h[i].ln_1.biases[str(precision)].requires_grad = False
 
-        for ln_key in model.transformer.h[i].ln_2.ln_layers:
-            model.transformer.h[i].ln_2.ln_layers[ln_key].weight.data = pretrained.transformer.h[i].ln_2.weight.data.clone()
-            model.transformer.h[i].ln_2.ln_layers[ln_key].bias.data = pretrained.transformer.h[i].ln_2.bias.data.clone()
-            model.transformer.h[i].ln_2.ln_layers[ln_key].weight.requires_grad = False
-            model.transformer.h[i].ln_2.ln_layers[ln_key].bias.requires_grad = False
+        for precision in model.transformer.h[i].ln_2.precision_levels:
+            model.transformer.h[i].ln_2.weights[str(precision)].data = pretrained.transformer.h[i].ln_2.weight.data.clone()
+            model.transformer.h[i].ln_2.biases[str(precision)].data = pretrained.transformer.h[i].ln_2.bias.data.clone()
+            model.transformer.h[i].ln_2.weights[str(precision)].requires_grad = False
+            model.transformer.h[i].ln_2.biases[str(precision)].requires_grad = False
 
         # Attention QKV weights - transpose and freeze by default
         model.transformer.h[i].attn.c_attn.linear.weight.data = pretrained.transformer.h[i].attn.c_attn.weight.data.t().contiguous()
@@ -160,12 +163,12 @@ def load_pretrained_weights(model):
         model.transformer.h[i].mlp.c_proj.linear.bias.requires_grad = False
 
     # Final layer normalization - frozen by default
-    # Copy to all precision-specific LayerNorms
-    for ln_key in model.transformer.ln_f.ln_layers:
-        model.transformer.ln_f.ln_layers[ln_key].weight.data = pretrained.transformer.ln_f.weight.data.clone()
-        model.transformer.ln_f.ln_layers[ln_key].bias.data = pretrained.transformer.ln_f.bias.data.clone()
-        model.transformer.ln_f.ln_layers[ln_key].weight.requires_grad = False
-        model.transformer.ln_f.ln_layers[ln_key].bias.requires_grad = False
+    # Copy to all precision-specific weight and bias parameters
+    for precision in model.transformer.ln_f.precision_levels:
+        model.transformer.ln_f.weights[str(precision)].data = pretrained.transformer.ln_f.weight.data.clone()
+        model.transformer.ln_f.biases[str(precision)].data = pretrained.transformer.ln_f.bias.data.clone()
+        model.transformer.ln_f.weights[str(precision)].requires_grad = False
+        model.transformer.ln_f.biases[str(precision)].requires_grad = False
 
 
     # Just ensure LoRA parameters are trainable (they're already initialized in LoRALayer)

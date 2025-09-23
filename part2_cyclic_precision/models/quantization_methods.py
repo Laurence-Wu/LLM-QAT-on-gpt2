@@ -74,7 +74,7 @@ class TanhQuantizationFunction(torch.autograd.Function):
         ctx.symmetric = symmetric
 
         # Scale input based on calibration
-        eps = 1e-7
+        eps = ctx.eps if hasattr(ctx, 'eps') else 1e-5
         input_scaled = input / (input_scale + eps)
 
         # Apply tanh to bound to [-1, 1]
@@ -102,7 +102,7 @@ class TanhQuantizationFunction(torch.autograd.Function):
     def backward(ctx, grad_output):
         # Straight-through estimator with tanh derivative consideration
         input, input_scale = ctx.saved_tensors
-        eps = 1e-7
+        eps = ctx.eps if hasattr(ctx, 'eps') else 1e-5
         input_scaled = input / (input_scale + eps)
         input_tanh = torch.tanh(input_scaled)
 
@@ -132,7 +132,7 @@ class LogQuantizationFunction(torch.autograd.Function):
             log_range: Pre-calibrated range for log₂ space
             num_bits: Number of bits for quantization
         """
-        eps = 1e-7
+        eps = ctx.eps if hasattr(ctx, 'eps') else 1e-5
 
         # Save for backward pass
         ctx.save_for_backward(input)
@@ -199,3 +199,38 @@ class LogQuantizationFunction(torch.autograd.Function):
         grad_input = torch.clamp(grad_input, -10, 10)
 
         return grad_input, None, None, None
+
+
+def apply_minmax_quantization(x, scale, zero_point, num_bits, symmetric):
+    """
+    Apply standard min-max quantization.
+    Uses the formula: X_Q = α⌊X_R/α⌉ where α = max(|X_R|)/(2^(N-1) - 1)
+
+    Args:
+        x: Input tensor
+        scale: Quantization scale
+        zero_point: Quantization zero point
+        num_bits: Number of quantization bits
+        symmetric: Whether to use symmetric quantization
+
+    Returns:
+        Quantized tensor
+    """
+    return MinMaxQuantizationFunction.apply(x, scale, zero_point, num_bits, symmetric)
+
+
+def apply_log_quantization(x, log_min, log_range, num_bits):
+    """
+    Apply logarithmic quantization following LogQuant formula.
+    LogQuant(x) = 0 if x = 0, else 2^x_hat · sign(x)
+
+    Args:
+        x: Input tensor
+        log_min: Minimum log value from calibration
+        log_range: Log range from calibration
+        num_bits: Number of quantization bits
+
+    Returns:
+        Quantized tensor
+    """
+    return LogQuantizationFunction.apply(x, log_min, log_range, num_bits)

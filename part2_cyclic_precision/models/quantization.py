@@ -9,23 +9,19 @@ import torch.nn as nn
 # Import quantization functions
 try:
     from .quantization_methods import (
-        MinMaxQuantizationFunction,
-        ReLUClipQuantizationFunction,
-        TanhQuantizationFunction,
-        LogQuantizationFunction
+        apply_minmax_quantization,
+        apply_log_quantization
     )
 except ImportError:
     from quantization_methods import (
-        MinMaxQuantizationFunction,
-        ReLUClipQuantizationFunction,
-        TanhQuantizationFunction,
-        LogQuantizationFunction
+        apply_minmax_quantization,
+        apply_log_quantization
     )
 
 
 class LearnableFakeQuantize(nn.Module):
-    def __init__(self, num_bits=8, symmetric=False, per_channel=False,
-                 channel_dim=0, quantizer_type='minmax'):
+    def __init__(self, num_bits=8, symmetric=False, per_channel=True,
+                 channel_dim=0, quantizer_type='minmax', eps=1e-5):
         """
         Initialize the quantization layer with configurable quantizer type.
 
@@ -42,7 +38,7 @@ class LearnableFakeQuantize(nn.Module):
         self.per_channel = per_channel
         self.channel_dim = channel_dim
         self.quantizer_type = quantizer_type
-        self.eps = 1e-7
+        self.eps = eps
 
         # Update quantization range
         self._update_quant_range()
@@ -162,13 +158,12 @@ class LearnableFakeQuantize(nn.Module):
             if self.quantizer_type == 'log':
                 # For log quantization, collect log₂ statistics directly
                 # Handle zeros and get absolute values
-                eps = 1e-7
                 abs_x = torch.abs(x)
-                non_zero_mask = abs_x > eps
+                non_zero_mask = abs_x > self.eps
 
                 if non_zero_mask.any():
                     # Get log₂ of non-zero absolute values
-                    abs_x_clamped = torch.clamp(abs_x, min=eps)
+                    abs_x_clamped = torch.clamp(abs_x, min=self.eps)
                     log_x = torch.log2(abs_x_clamped)
 
                     if self.per_channel:
@@ -237,156 +232,29 @@ class LearnableFakeQuantize(nn.Module):
             self._collect_statistics_batch(x)
             return x
 
-        # If not calibrated, perform one-shot calibration
+        # Require manual calibration - no fallback
         if not self.calibrated:
-            self._perform_one_shot_calibration(x)
+            raise RuntimeError(f"Quantizer not calibrated. Please run calibration first for {self.quantizer_type} quantizer.")
 
         # Apply the appropriate quantization strategy
         if self.quantizer_type == 'minmax':
             return self._quantize_minmax(x)
-        elif self.quantizer_type == 'relu_clip':
-            return self._quantize_relu_clip(x)
-        elif self.quantizer_type == 'tanh':
-            return self._quantize_tanh(x)
         elif self.quantizer_type == 'log':
             return self._quantize_log(x)
         else:
-            raise ValueError(f"Unknown quantizer type: {self.quantizer_type}")
+            raise ValueError(f"Unknown quantizer type: {self.quantizer_type}. Supported types: 'minmax', 'log'")
 
     def _quantize_minmax(self, x):
-        """
-        Standard min-max quantization (Paper's default).
-        Uses the formula: X_Q = α⌊X_R/α⌉ where α = max(|X_R|)/(2^(N-1) - 1)
-        """
-        # Apply standard min-max quantization
-        x_quant = MinMaxQuantizationFunction.apply(
+        """Apply standard min-max quantization."""
+        return apply_minmax_quantization(
             x, self.scale, self.zero_point,
             self.num_bits, self.symmetric
         )
-        # Straight-through estimator is handled in the Function
-        return x_quant
-
-    def _quantize_relu_clip(self, x):
-        """
-        ReLU-style quantization - clips to [0, max] range.
-        Useful for activations after ReLU layers.
-        """
-        # Use calibrated maximum value
-        max_val = self.running_max if self.calibrated else torch.max(torch.abs(x))
-
-        # Apply ReLU clip quantization
-        x_quant = ReLUClipQuantizationFunction.apply(
-            x, self.scale, max_val, self.num_bits
-        )
-        # Straight-through estimator is handled in the Function
-        return x_quant
-
-    def _quantize_tanh(self, x):
-        """
-        Tanh-based quantization - maps inputs through tanh to [-1, 1] range.
-        Useful for bounded inputs and helps with outliers.
-        """
-        # Get input scale from calibration stats
-        if self.calibrated:
-            input_scale = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
-        else:
-            input_scale = torch.max(torch.abs(x))
-
-        # Apply tanh quantization
-        x_quant = TanhQuantizationFunction.apply(
-            x, input_scale, self.num_bits, self.symmetric
-        )
-        # Straight-through estimator is handled in the Function
-        return x_quant
 
     def _quantize_log(self, x):
-        """
-        Logarithmic quantization following LogQuant formula.
-        LogQuant(x) = 0 if x = 0, else 2^x_hat · sign(x)
-
-        Uses precomputed log_min and log_range from calibration.
-        """
-        # Use precomputed log_min and log_range from calibration
-        # They are stored in zero_point and scale respectively
-        log_min = self.zero_point
-        log_range = self.scale
-
-        # Apply logarithmic quantization
-        x_quant = LogQuantizationFunction.apply(
-            x, log_min, log_range, self.num_bits
+        """Apply logarithmic quantization using precomputed log stats."""
+        # log_min and log_range are stored in zero_point and scale respectively
+        return apply_log_quantization(
+            x, self.zero_point, self.scale, self.num_bits
         )
-        # Straight-through estimator is handled in the Function
-        return x_quant
 
-    def _perform_one_shot_calibration(self, x):
-        """
-        One-shot calibration when not manually calibrated.
-        """
-        with torch.no_grad():
-            if self.quantizer_type == 'log':
-                # For log quantization, collect log₂ statistics directly
-                eps = 1e-7
-                abs_x = torch.abs(x)
-                non_zero_mask = abs_x > eps
-
-                if non_zero_mask.any():
-                    abs_x_clamped = torch.clamp(abs_x, min=eps)
-                    log_x = torch.log2(abs_x_clamped)
-
-                    if self.per_channel:
-                        dims = list(range(log_x.dim()))
-                        dims.remove(self.channel_dim)
-                        min_val = log_x.amin(dim=dims, keepdim=True)
-                        max_val = log_x.amax(dim=dims, keepdim=True)
-                    else:
-                        min_val = log_x.min()
-                        max_val = log_x.max()
-                else:
-                    # All values are zero - use default log₂ range
-                    min_val = torch.log2(torch.tensor(eps))
-                    max_val = torch.log2(torch.tensor(1.0))
-
-                self.running_min.resize_as_(min_val).copy_(min_val)
-                self.running_max.resize_as_(max_val).copy_(max_val)
-            else:
-                # For other quantization methods, collect linear statistics
-                if self.per_channel:
-                    dims = list(range(x.dim()))
-                    dims.remove(self.channel_dim)
-                    min_val = x.amin(dim=dims, keepdim=True)
-                    max_val = x.amax(dim=dims, keepdim=True)
-                else:
-                    min_val = x.min()
-                    max_val = x.max()
-
-                self.running_min.resize_as_(min_val).copy_(min_val)
-                self.running_max.resize_as_(max_val).copy_(max_val)
-
-            # Compute scale based on quantizer type
-            if self.quantizer_type == 'relu_clip':
-                self.running_min.zero_()
-                range_val = torch.clamp(self.running_max, min=self.eps)
-                self.scale.resize_as_(range_val).copy_(range_val / (2**self.num_bits - 1))
-                self.zero_point.resize_as_(range_val).zero_()
-            elif self.quantizer_type == 'log':
-                # For log quantization, running_min and running_max already contain log₂ values
-                # Just compute the range directly - same as in finish_calibration
-                log_min = self.running_min
-                log_max = self.running_max
-                log_range = log_max - log_min
-
-                # Store log_min in zero_point and log_range in scale for use in _quantize_log
-                self.zero_point.resize_as_(self.running_max).copy_(log_min)
-                self.scale.resize_as_(self.running_max).copy_(log_range)
-            elif self.symmetric:
-                abs_max = torch.max(torch.abs(min_val), torch.abs(max_val))
-                abs_max = torch.clamp(abs_max, min=self.eps)
-                self.scale.resize_as_(abs_max).copy_(abs_max / (2**(self.num_bits-1) - 1))
-                self.zero_point.resize_as_(abs_max).zero_()
-            else:
-                range_val = torch.clamp(max_val - min_val, min=self.eps)
-                self.scale.resize_as_(range_val).copy_(range_val / (2**self.num_bits - 1))
-                self.zero_point.resize_as_(range_val)
-                self.zero_point.copy_(torch.round(self.quant_min - min_val / self.scale))
-
-            self.calibrated = True

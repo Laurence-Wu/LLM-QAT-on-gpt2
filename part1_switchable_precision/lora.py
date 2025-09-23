@@ -11,7 +11,7 @@ except ImportError:
 
 class LoRALayer(nn.Module):
     """LoRA adapter with fake quantization."""
-    def __init__(self, in_features, out_features, rank=8, alpha=16, bits=8, quantizer_type='minmax'):
+    def __init__(self, in_features, out_features, rank, alpha, bits, quantizer_type, eps=1e-5):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -19,170 +19,75 @@ class LoRALayer(nn.Module):
         self.alpha = alpha
         self.bits = bits
 
-        # CRITICAL: For 32-bit teacher, disable LoRA entirely (no quantization compensation needed)
-        # 16-bit and below are students that need LoRA for quantization compensation
         if bits >= 32 or rank <= 0:
             self.enabled = False
             self.scaling = 0
-            # Create dummy parameters to avoid parameter counting issues
             self.register_buffer('lora_A', torch.zeros(1, 1))
             self.register_buffer('lora_B', torch.zeros(1, 1))
-            # No quantizers for 16-bit (saves memory and avoids calibration issues)
             self.quantize_A = None
             self.quantize_B = None
+
         else:
             self.enabled = True
             self.scaling = alpha / rank
 
-            # Initialize LoRA matrices - CRITICAL: Must start with zero contribution
             self.lora_A = nn.Parameter(torch.zeros(in_features, rank))
             self.lora_B = nn.Parameter(torch.zeros(rank, out_features))
-
-            # CRITICAL: Initialize A with small values, B with zeros for zero initial contribution
             nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
-            nn.init.zeros_(self.lora_B)  # This ensures zero contribution initially
-
-            # Quantizers for LoRA weights (only for low-bit modes)
-            self.quantize_A = LearnableFakeQuantize(num_bits=bits, symmetric=True, quantizer_type=quantizer_type)
-            self.quantize_B = LearnableFakeQuantize(num_bits=bits, symmetric=True, quantizer_type=quantizer_type)
-
-        # Only allocate buffers if LoRA is enabled to save memory
-        if self.enabled:
+            nn.init.zeros_(self.lora_B)
+            # A: [rank, in_features] -> quantize along in_features (dim=1)
+            self.quantize_A = LearnableFakeQuantize(num_bits=bits, symmetric=True, quantizer_type=quantizer_type, channel_dim=1, eps=eps)
+            # B: [out_features, rank] -> quantize along out_features (dim=0)
+            self.quantize_B = LearnableFakeQuantize(num_bits=bits, symmetric=True, quantizer_type=quantizer_type, channel_dim=0, eps=eps)
+            
             self.register_buffer('lora_A_quantized', torch.empty(in_features, rank))
             self.register_buffer('lora_B_quantized', torch.empty(rank, out_features))
-        else:
-            self.register_buffer('lora_A_quantized', torch.empty(1, 1))
-            self.register_buffer('lora_B_quantized', torch.empty(1, 1))
 
     def forward(self, x):
         if not self.enabled or self.scaling == 0:
             # Return zeros for disabled LoRA (32-bit teacher mode)
             batch_shape = x.shape[:-1]  # All dims except last
             return torch.zeros(*batch_shape, self.out_features, device=x.device, dtype=x.dtype)
-
-        # Quantize LoRA weights (only for enabled low-bit modes)
         lora_A_q = self.quantize_A(self.lora_A)
         lora_B_q = self.quantize_B(self.lora_B)
-
-        # Compute LoRA output: x @ A @ B * scaling
         output = torch.matmul(x, lora_A_q)
         output = torch.matmul(output, lora_B_q)
         output = output * self.scaling
         return output
 
 
-class LinearWithLoRA(nn.Module):
-    """Linear layer with LoRA adapter and quantization."""
-    def __init__(self, in_features, out_features, bias=True, bits=8,
-                 lora_rank=8, lora_alpha=16, lora_dropout=0.1, quantizer_type='minmax'):
-        super().__init__()
-        self.bits = bits
-        self.in_features = in_features
-        self.out_features = out_features
-
-        # FP32 base layer
-        self.linear = nn.Linear(in_features, out_features, bias=bias)
-
-        # Fake quantizers
-        self.quantize_weight = LearnableFakeQuantize(num_bits=bits, symmetric=True, quantizer_type=quantizer_type)
-        self.quantize_input = LearnableFakeQuantize(num_bits=bits, symmetric=True, quantizer_type=quantizer_type)
-
-        # LoRA adapter with config parameters
-        self.lora = LoRALayer(in_features, out_features,
-                                 rank=lora_rank, alpha=lora_alpha, bits=bits, quantizer_type=quantizer_type)
-
-        # Pre-allocate buffers for quantized tensors
-        self.register_buffer('weight_quantized', torch.empty(out_features, in_features))
-        self.register_buffer('input_quantized', None)  # Will be allocated on first use
-
-    def forward(self, x):
-        # Quantize input and weights - these need gradients
-        x_q = self.quantize_input(x)
-        w_q = self.quantize_weight(self.linear.weight)
-
-        # Base output + LoRA
-        base = F.linear(x_q, w_q, self.linear.bias)
-        lora = self.lora(x)
-
-        # Add outputs
-        return base + lora
-
-    def set_precision(self, weight_bits, activation_bits):
-        """Set the precision (bit-width) for quantization."""
-        # Update weight quantizer
-        self.quantize_weight.set_num_bits(weight_bits)
-        try:
-            if self.quantize_weight.symmetric:
-                self.quantize_weight.quant_min = -(2 ** (weight_bits - 1))
-                self.quantize_weight.quant_max = 2 ** (weight_bits - 1) - 1
-            else:
-                self.quantize_weight.quant_min = 0
-                self.quantize_weight.quant_max = 2 ** weight_bits - 1
-        except AttributeError:
-            pass  # quant_min/max attributes don't exist
-
-        # Update activation quantizer
-        self.quantize_input.set_num_bits(activation_bits)
-        try:
-            if self.quantize_input.symmetric:
-                self.quantize_input.quant_min = -(2 ** (activation_bits - 1))
-                self.quantize_input.quant_max = 2 ** (activation_bits - 1) - 1
-            else:
-                self.quantize_input.quant_min = 0
-                self.quantize_input.quant_max = 2 ** activation_bits - 1
-        except AttributeError:
-            pass  # quant_min/max attributes don't exist
-
-        # Update LoRA quantizers if they exist
-        try:
-            self.lora.quantize_A.set_num_bits(weight_bits)
-            self.lora.quantize_B.set_num_bits(weight_bits)
-        except AttributeError:
-            pass  # LoRA quantizers not present
-
-
 class SPLinearWithLoRA(nn.Module):
     """Linear layer with multiple LoRA adapters for switchable precision."""
 
-    def __init__(self, in_features, out_features, bias=True,
-                 bit_widths=None,
-                 lora_rank_per_bit=None,
-                 lora_alpha_per_bit=None,
-                 lora_dropout=0.1,
-                 quantizer_per_bit=None):
+    def __init__(self, in_features, out_features,
+                 bit_widths,
+                 lora_rank_per_bit,
+                 lora_alpha_per_bit,
+                 quantizer_per_bit,
+                 eps=1e-5):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-
-        # Use defaults if not provided
-        if bit_widths is None:
-            bit_widths = [6, 8, 16, 32]  # Default includes teacher
-        if lora_rank_per_bit is None:
-            lora_rank_per_bit = {6: 32, 8: 16, 16: 16, 32: 0}
-        if lora_alpha_per_bit is None:
-            lora_alpha_per_bit = {6: 64, 8: 32, 16: 32, 32: 0}
-
         self.bit_widths = bit_widths
+        self.lora_rank_per_bit = lora_rank_per_bit
         # Default to middle precision (skip 32-bit teacher)
         student_bits = [b for b in bit_widths if b < 32]
-        self.current_bits = student_bits[1] if len(student_bits) > 1 else student_bits[0]
+        self.current_bits = sorted(bit_widths, reverse=True)[1] # biggest student bit-width to start with
 
-        # FP32 base layer (shared across all bit-widths)
-        self.linear = nn.Linear(in_features, out_features, bias=bias)
+        # FP32 teacher layer
+        self.linear = nn.Linear(in_features, out_features, bias=True)
 
-        # Create separate quantizers for each bit-width
-        if quantizer_per_bit is None:
-            quantizer_per_bit = {bits: 'minmax' for bits in bit_widths}
-
+        # Weight quantizers: [out_features, in_features] -> channel_dim=0 (per output channel)
         self.quantizers_weight = nn.ModuleDict({
             f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True,
-                                                quantizer_type=quantizer_per_bit.get(bits, 'minmax'))
-            for bits in bit_widths
+                                                quantizer_type=quantizer_per_bit[bits], channel_dim=0, eps=eps)
+            for bits in student_bits
         })
+        # Input quantizers: [batch, in_features] -> channel_dim=1 (per feature)
         self.quantizers_input = nn.ModuleDict({
             f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True,
-                                                quantizer_type=quantizer_per_bit.get(bits, 'minmax'))
-            for bits in bit_widths
+                                                quantizer_type=quantizer_per_bit[bits], channel_dim=1, eps=eps)
+            for bits in student_bits
         })
 
         # Create separate LoRA adapters for each bit-width
@@ -190,12 +95,13 @@ class SPLinearWithLoRA(nn.Module):
         self.lora_adapters = nn.ModuleDict({
             f'{bits}bit': LoRALayer(
                 in_features, out_features,
-                rank=lora_rank_per_bit.get(bits, 16),  # Use config value directly
-                alpha=lora_alpha_per_bit.get(bits, 32),
+                rank=lora_rank_per_bit[bits],
+                alpha=lora_alpha_per_bit[bits],
                 bits=bits,
-                quantizer_type=quantizer_per_bit.get(bits, 'minmax')
+                quantizer_type=quantizer_per_bit[bits],
+                eps=eps
             )
-            for bits in bit_widths
+            for bits in student_bits
         })
 
         # Pre-allocate buffers for quantized tensors
@@ -203,33 +109,8 @@ class SPLinearWithLoRA(nn.Module):
         self.register_buffer('input_quantized', None)
 
     def set_precision(self, bits) -> int:
-        """Switch to specified bit-width.
-
-        Returns:
-            int: Current precision after setting
-        """
-        # Allow 32-bit for FP32 teacher mode (no quantization)
-        if bits == 32:
-            self.current_bits = bits
-            self.current_precision = bits
-            return self.current_precision
-
-        if bits not in self.bit_widths:
-            raise ValueError(f"Bit-width {bits} not supported. Choose from {self.bit_widths}")
         self.current_bits = bits
-
-        # CRITICAL: Update the num_bits for the active quantizers
-        # This ensures they actually quantize at the right precision
         bits_key = f'{bits}bit'
-
-        # Ensure quantizers exist for this precision
-        if bits_key not in self.quantizers_weight:
-            raise ValueError(f"Weight quantizer for {bits}-bit not found. Available: {list(self.quantizers_weight.keys())}")
-        if bits_key not in self.quantizers_input:
-            raise ValueError(f"Input quantizer for {bits}-bit not found. Available: {list(self.quantizers_input.keys())}")
-        if bits_key not in self.lora_adapters:
-            raise ValueError(f"LoRA adapter for {bits}-bit not found. Available: {list(self.lora_adapters.keys())}")
-
         # Update quantizers
         self.quantizers_weight[bits_key].set_num_bits(bits)
         self.quantizers_input[bits_key].set_num_bits(bits)
@@ -241,9 +122,7 @@ class SPLinearWithLoRA(nn.Module):
         if lora.quantize_B is not None:
             lora.quantize_B.set_num_bits(bits)
 
-        # Store current precision
-        self.current_precision = bits
-        return self.current_precision
+        return self.current_bits
 
     def get_active_lora(self):
         """Get the currently active LoRA adapter."""
@@ -257,18 +136,11 @@ class SPLinearWithLoRA(nn.Module):
         - 16-bit: Student with quantization and LoRA
         - 8/-bit: Student with stronger quantization and LoRA
         """
-        # CRITICAL: Only 32-bit teacher uses pure FP32 weights without any modifications
+        # Forward for the 32 bits is handled here. Use student bit width for students.
         if self.current_bits >= 32:
             output = F.linear(x, self.linear.weight, self.linear.bias)
-            # Debug check for 32-bit gradient flow
-            if not output.requires_grad and x.requires_grad:
-                print(f"WARNING: 32-bit forward lost gradient!")
-                print(f"  x.requires_grad: {x.requires_grad}")
-                print(f"  weight.requires_grad: {self.linear.weight.requires_grad}")
-                print(f"  output.requires_grad: {output.requires_grad}")
             return output
 
-        # Lower precision: Apply quantization and LoRA
         bits_key = f'{self.current_bits}bit'
 
         # DEBUG: Verify quantizers exist
@@ -285,56 +157,11 @@ class SPLinearWithLoRA(nn.Module):
         weight_quantizer = self.quantizers_weight[bits_key]
         input_quantizer = self.quantizers_input[bits_key]
         active_lora = self.lora_adapters[bits_key]
-
-        # # DEBUG: Check quantizer state before calling (print once per precision change)
-        # try:
-        #     if self._last_logged_bits != self.current_bits:
-        #         raise AttributeError  # Force print on precision change
-        # except AttributeError:
-        #     self._last_logged_bits = self.current_bits
-        #     print(f"\nDEBUG SPLinearWithLoRA.forward():")
-        #     print(f"  current_bits: {self.current_bits}")
-        #     print(f"  bits_key: {bits_key}")
-        #     print(f"  weight_quantizer.num_bits: {weight_quantizer.num_bits}")
-        #     print(f"  weight_quantizer.training: {weight_quantizer.training}")
-        #     print(f"  weight_quantizer.calibrated (before): {weight_quantizer.calibrated}")
-        #     print(f"  weight_quantizer.collecting_stats: {weight_quantizer.collecting_stats}")
-        #     print(f"  input_quantizer.num_bits: {input_quantizer.num_bits}")
-        #     print(f"  input_quantizer.calibrated (before): {input_quantizer.calibrated}")
-        #     print(f"  input_quantizer.collecting_stats: {input_quantizer.collecting_stats}")
-
-        # Quantize inputs and weights
         x_quantized = input_quantizer(x)
         weight_quantized = weight_quantizer(self.linear.weight)
 
-        # # DEBUG: Check if calibration happened and values are valid
-        # try:
-        #     if self._calib_logged_bits != self.current_bits:
-        #         raise AttributeError  # Force print on precision change
-        # except AttributeError:
-        #     self._calib_logged_bits = self.current_bits
-        #     print(f"  weight_quantizer.calibrated (after): {weight_quantizer.calibrated}")
-        #     print(f"  input_quantizer.calibrated (after): {input_quantizer.calibrated}")
-        #     # These should always have scale attribute
-        #     print(f"  weight_quantizer.scale shape: {weight_quantizer.scale.shape}")
-        #     print(f"  weight_quantizer.scale mean: {weight_quantizer.scale.mean().item():.6f}")
-        #     print(f"  input_quantizer.scale shape: {input_quantizer.scale.shape}")
-        #     print(f"  input_quantizer.scale mean: {input_quantizer.scale.mean().item():.6f}")
-
-        #     # Check for NaN/Inf
-        #     if torch.isnan(x_quantized).any():
-        #         print(f"  WARNING: NaN detected in x_quantized!")
-        #     if torch.isinf(x_quantized).any():
-        #         print(f"  WARNING: Inf detected in x_quantized!")
-        #     if torch.isnan(weight_quantized).any():
-        #         print(f"  WARNING: NaN detected in weight_quantized!")
-        #     if torch.isinf(weight_quantized).any():
-        #         print(f"  WARNING: Inf detected in weight_quantized!")
-
         # Base computation with quantized values
         base_output = F.linear(x_quantized, weight_quantized, self.linear.bias)
-
-        # Add LoRA compensation for quantization errors
         lora_output = active_lora(x)
 
         return base_output + lora_output

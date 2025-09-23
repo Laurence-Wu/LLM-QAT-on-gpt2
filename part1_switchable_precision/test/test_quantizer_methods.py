@@ -59,7 +59,8 @@ def test_quantizer_methods():
             quantizer = LearnableFakeQuantize(
                 num_bits=bits,
                 symmetric=True,
-                quantizer_type=quant_type
+                quantizer_type=quant_type,
+                eps=1e-5
             ).to(device)
 
             # Test each input pattern
@@ -220,8 +221,8 @@ def test_calibration_consistency():
         print(f"\n🔧 Testing {quant_type.upper()} calibration consistency:")
 
         # Create two identical quantizers
-        q1 = LearnableFakeQuantize(num_bits=8, quantizer_type=quant_type).to(device)
-        q2 = LearnableFakeQuantize(num_bits=8, quantizer_type=quant_type).to(device)
+        q1 = LearnableFakeQuantize(num_bits=8, quantizer_type=quant_type, eps=1e-5).to(device)
+        q2 = LearnableFakeQuantize(num_bits=8, quantizer_type=quant_type, eps=1e-5).to(device)
 
         # Calibrate both with same data
         q1.start_calibration()
