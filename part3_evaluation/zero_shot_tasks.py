@@ -234,8 +234,9 @@ class ZeroShotEvaluator:
                 inputs['attention_mask'] = inputs['attention_mask'][:, :max_positions]
 
         with torch.no_grad():
+            # SPLMHeadModel's generate doesn't take attention_mask, only input_ids
             outputs = self.model.generate(
-                **inputs,
+                inputs['input_ids'],
                 max_new_tokens=min(max_length, max_positions - inputs['input_ids'].size(1)),
                 temperature=0.1,
                 do_sample=False,

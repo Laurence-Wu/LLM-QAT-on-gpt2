@@ -526,11 +526,11 @@ def main():
     except AttributeError as e:
         raise AttributeError(f"Model does not support switchable precision: {e}\nPlease ensure the model was trained with SPLMHeadModel.")
 
-    # Model supports switchable precision
-    supported_bit_widths = model.transformer.bit_widths  # Access through transformer
-    print(f"Model supports bit-widths: {supported_bit_widths}")
+    # Get current model's bit configuration
+    current_bits = model.transformer.current_bits if hasattr(model.transformer, 'current_bits') else 32
+    print(f"Current model precision: {current_bits}-bit")
 
-    # Map bit-widths to configuration names
+    # Map current bit-width to configuration name
     bit_to_config = {
         6: 'INT6',
         8: 'INT8',
@@ -538,9 +538,8 @@ def main():
         32: 'FP32'
     }
 
-    # Auto-detect configurations based on model's supported bit widths
-    configs_to_eval = [bit_to_config.get(b, f'INT{b}') for b in supported_bit_widths if b in bit_to_config]
-    print(f"Configurations to evaluate: {configs_to_eval}")
+    config_name = bit_to_config.get(current_bits, f'INT{current_bits}')
+    print(f"Configuration to evaluate: {config_name}")
 
     # Hardcoded evaluation settings
     max_eval_samples = 100
@@ -550,27 +549,31 @@ def main():
     print("Running SP Model Evaluation")
     print("="*70)
     print(f"Model: GPT-2 ({evaluator.model_params:.1f}M parameters)")
-    print(f"Configurations: {configs_to_eval}")
+    print(f"Current precision: {current_bits}-bit ({config_name})")
     print(f"Output directory: {output_dir}")
     print(f"Max evaluation samples: {max_eval_samples}")
     print("="*70)
 
     results = {}
 
-    # Run comprehensive evaluation for each supported bit width
-    for config_name in configs_to_eval:
-        print(f"\n{'='*60}")
-        print(f"Evaluating configuration: {config_name}")
-        print('='*60)
+    # Run comprehensive evaluation for the current model configuration
+    print(f"\n{'='*60}")
+    print(f"Evaluating current model configuration: {config_name}")
+    print('='*60)
 
-        if config_name not in BitConfigurations.STANDARD_CONFIGS:
-            print(f"Warning: Configuration {config_name} not found in standard configs")
-            continue
-
+    if config_name not in BitConfigurations.STANDARD_CONFIGS:
+        # Create config based on current bits if not in standard configs
+        config = {
+            'W': current_bits,
+            'A': current_bits,
+            'KV': current_bits,
+            'name': f'{current_bits}-{current_bits}-{current_bits}',
+            'description': f'{current_bits}-bit quantization'
+        }
+    else:
         config = BitConfigurations.STANDARD_CONFIGS[config_name]
 
-        # Apply bit configuration to model
-        BitConfigurations.apply_config_to_model(model, config)
+    # No need to apply config - model is already at current precision
 
         results[config_name] = {
             'config_name': config['name'],
@@ -653,7 +656,8 @@ def main():
 
     print("\nSummary of Results:")
     print("="*70)
-    for config_name, result in results.items():
+    if config_name in results:
+        result = results[config_name]
         print(f"\n{config_name} ({result['bits']}):")
         print(f"  Model size: {result['model_size_gb']} GB")
         print(f"  Compression: {result['compression_ratio']:.1f}x")

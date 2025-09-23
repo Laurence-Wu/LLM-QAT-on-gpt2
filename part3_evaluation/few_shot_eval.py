@@ -221,8 +221,9 @@ class FewShotEvaluator:
             remaining_length = max_positions - inputs['input_ids'].size(1)
             actual_max_new = min(max_length, remaining_length)
 
+            # SPLMHeadModel's generate doesn't take attention_mask, only input_ids
             outputs = self.model.generate(
-                **inputs,
+                inputs['input_ids'],
                 max_new_tokens=actual_max_new,
                 temperature=0.1,
                 do_sample=False,
