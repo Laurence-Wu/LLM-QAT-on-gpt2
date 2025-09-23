@@ -29,6 +29,9 @@ from part3_evaluation.llm_qat_metrics import LLMQATEvaluation
 from part3_evaluation.bit_configurations import BitConfigurations
 from part3_evaluation.generate_tables import ResultTableGenerator
 from part3_evaluation.baseline_comparison import BaselineComparison
+from part3_evaluation.zero_shot_tasks import ZeroShotEvaluator
+from part3_evaluation.few_shot_eval import FewShotEvaluator
+from part3_evaluation.perplexity_eval import PerplexityEvaluator
 
 
 def load_pretrained_weights_into_qat(sp_model, model_name='gpt2'):
@@ -392,9 +395,24 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
         config.activation_bits_per_bit = model_config['activation_bits_per_bit']  # Required for SP
         config.quantizer_per_bit = model_config['quantizer_per_bit']  # Required for SP
 
+        # Convert string keys to int if necessary (JSON serialization converts int keys to strings)
+        if isinstance(config.lora_rank_per_bit, dict):
+            config.lora_rank_per_bit = {int(k) if isinstance(k, str) else k: v
+                                       for k, v in config.lora_rank_per_bit.items()}
+        if isinstance(config.lora_alpha_per_bit, dict):
+            config.lora_alpha_per_bit = {int(k) if isinstance(k, str) else k: v
+                                        for k, v in config.lora_alpha_per_bit.items()}
+        if isinstance(config.activation_bits_per_bit, dict):
+            config.activation_bits_per_bit = {int(k) if isinstance(k, str) else k: v
+                                             for k, v in config.activation_bits_per_bit.items()}
+        if isinstance(config.quantizer_per_bit, dict) and config.quantizer_per_bit is not None:
+            config.quantizer_per_bit = {int(k) if isinstance(k, str) else k: v
+                                       for k, v in config.quantizer_per_bit.items()}
+
         # Print what we're using to help debug
         print(f"LoRA rank per bit: {config.lora_rank_per_bit}")
         print(f"LoRA alpha per bit: {config.lora_alpha_per_bit}")
+        print(f"Activation bits per bit: {config.activation_bits_per_bit}")
 
         # Create SPLMHeadModel instead of SwitchableQATGPT2
         model = SPLMHeadModel(config)
@@ -452,169 +470,7 @@ def load_tokenizer():
     return tokenizer
 
 
-class EvaluationMetrics:
-    """Standard evaluation metrics for switchable precision models"""
-
-    @staticmethod
-    def calculate_perplexity(model, data_loader, max_samples: int = 100):
-        """Calculate perplexity on a dataset"""
-        model.eval()
-        total_loss = 0
-        total_tokens = 0
-
-        with torch.no_grad():
-            for i, batch in enumerate(tqdm(data_loader, desc="Calculating perplexity", total=max_samples)):
-                if i >= max_samples:
-                    break
-
-                if isinstance(batch, dict):
-                    input_ids = batch['input_ids'].cuda()
-                    attention_mask = batch.get('attention_mask', None)
-                    if attention_mask is not None:
-                        attention_mask = attention_mask.cuda()
-                else:
-                    input_ids = batch.cuda()
-                    attention_mask = None
-
-                outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask)
-                loss = outputs['loss'] if isinstance(outputs, dict) else outputs.loss
-
-                # Count actual tokens (excluding padding)
-                if attention_mask is not None:
-                    num_tokens = attention_mask.sum().item()
-                else:
-                    num_tokens = input_ids.numel()
-
-                total_loss += loss.item() * num_tokens
-                total_tokens += num_tokens
-
-        avg_loss = total_loss / total_tokens if total_tokens > 0 else float('inf')
-        perplexity = math.exp(avg_loss) if avg_loss < 20 else float('inf')
-        return perplexity
-
-    @staticmethod
-    def evaluate_accuracy(model, data_loader, task_type: str = 'classification', max_samples: int = 100):
-        """Evaluate accuracy on downstream tasks"""
-        model.eval()
-        correct = 0
-        total = 0
-
-        with torch.no_grad():
-            for i, batch in enumerate(tqdm(data_loader, desc=f"Evaluating {task_type}", total=max_samples)):
-                if i >= max_samples:
-                    break
-
-                if isinstance(batch, dict):
-                    input_ids = batch['input_ids'].cuda()
-                    labels = batch.get('labels', batch['input_ids']).cuda()
-                else:
-                    input_ids = batch.cuda()
-                    labels = input_ids
-
-                outputs = model(input_ids)
-                logits = outputs['logits'] if isinstance(outputs, dict) else outputs.logits
-
-                if task_type == 'classification':
-                    # For classification tasks
-                    predictions = torch.argmax(logits[:, -1, :], dim=-1)
-                    correct += (predictions == labels[:, -1]).sum().item()
-                    total += labels.shape[0]
-                else:
-                    # For language modeling tasks
-                    shift_logits = logits[:, :-1, :].contiguous()
-                    shift_labels = labels[:, 1:].contiguous()
-                    predictions = torch.argmax(shift_logits, dim=-1)
-                    correct += (predictions == shift_labels).sum().item()
-                    total += shift_labels.numel()
-
-        accuracy = (correct / total * 100) if total > 0 else 0
-        return accuracy
-
-    @staticmethod
-    def measure_inference_speed(model, input_shape=(1, 128), num_iterations: int = 100, warmup: int = 10):
-        """Measure inference speed in tokens/second"""
-        model.eval()
-        device = next(model.parameters()).device
-
-        # Create dummy input
-        dummy_input = torch.randint(0, 50257, input_shape).to(device)
-
-        # Warmup
-        for _ in range(warmup):
-            with torch.no_grad():
-                _ = model(dummy_input)
-
-        # Measure
-        torch.cuda.synchronize()
-        start_time = time.time()
-
-        for _ in range(num_iterations):
-            with torch.no_grad():
-                _ = model(dummy_input)
-
-        torch.cuda.synchronize()
-        end_time = time.time()
-
-        elapsed_time = end_time - start_time
-        tokens_processed = num_iterations * input_shape[0] * input_shape[1]
-        tokens_per_second = tokens_processed / elapsed_time
-
-        return tokens_per_second
-
-    @staticmethod
-    def calculate_compression_ratio(model, baseline_bits: int = 32):
-        """Calculate model compression ratio"""
-        try:
-            # Try to get current_bits from transformer
-            current_bits = model.transformer.current_bits
-        except AttributeError:
-            # Default to 16 if not found
-            current_bits = 16
-        compression_ratio = baseline_bits / current_bits
-        return compression_ratio
-
-    @staticmethod
-    def evaluate_robustness(model, data_loader, noise_levels: List[float] = [0.01, 0.05, 0.1]):
-        """Evaluate model robustness to input noise"""
-        model.eval()
-        robustness_scores = {}
-
-        for noise_level in noise_levels:
-            correct = 0
-            total = 0
-
-            with torch.no_grad():
-                for batch in data_loader:
-                    if isinstance(batch, dict):
-                        input_ids = batch['input_ids'].cuda()
-                    else:
-                        input_ids = batch.cuda()
-
-                    # Add noise to embeddings
-                    # For SPLMHeadModel, wte is in transformer
-                    embeddings = model.transformer.wte(input_ids)
-                    noise = torch.randn_like(embeddings) * noise_level
-                    noisy_embeddings = embeddings + noise
-
-                    # Forward pass with noisy embeddings
-                    # Note: This requires model to accept embeddings directly
-                    # For standard implementation, we'll skip actual noise injection
-                    outputs = model(input_ids)
-
-                    # Calculate accuracy (simplified)
-                    logits = outputs['logits'] if isinstance(outputs, dict) else outputs.logits
-                    predictions = torch.argmax(logits[:, :-1, :], dim=-1)
-                    targets = input_ids[:, 1:]
-                    correct += (predictions == targets).sum().item()
-                    total += targets.numel()
-
-                    if total > 1000:  # Limit evaluation
-                        break
-
-            accuracy = (correct / total * 100) if total > 0 else 0
-            robustness_scores[f'noise_{noise_level}'] = accuracy
-
-        return robustness_scores
+# Removed EvaluationMetrics class - using specialized evaluators instead
 
 
 def main():
@@ -637,9 +493,11 @@ def main():
     model = load_switchable_model(args.model_path, config_path=args.config_path, use_pretrained=False)
     tokenizer = load_tokenizer()
 
-    # Initialize evaluation components
+    # Initialize all evaluation components
     evaluator = LLMQATEvaluation(model, tokenizer)
-    metrics = EvaluationMetrics()
+    zero_shot_evaluator = ZeroShotEvaluator(model, tokenizer)
+    few_shot_evaluator = FewShotEvaluator(model, tokenizer)
+    perplexity_evaluator = PerplexityEvaluator(model, tokenizer)
 
     # Prepare calibration data
     print("\nPreparing calibration data...")
@@ -699,7 +557,7 @@ def main():
 
     results = {}
 
-    # Run simplified evaluation for each supported bit width
+    # Run comprehensive evaluation for each supported bit width
     for config_name in configs_to_eval:
         print(f"\n{'='*60}")
         print(f"Evaluating configuration: {config_name}")
@@ -711,6 +569,7 @@ def main():
 
         config = BitConfigurations.STANDARD_CONFIGS[config_name]
 
+        # Apply bit configuration to model
         BitConfigurations.apply_config_to_model(model, config)
 
         results[config_name] = {
@@ -724,40 +583,61 @@ def main():
         print(f"Model size: {results[config_name]['model_size_gb']} GB")
         print(f"Applying bit configuration W={config['W']}, A={config['A']}, KV={config['KV']}")
 
-        # Run basic perplexity evaluation
-        print("\nPerplexity evaluation...")
+        # 1. Zero-shot evaluation (6 benchmarks)
+        print("\n1. Zero-shot common sense evaluation...")
+        try:
+            zero_shot_results = zero_shot_evaluator.evaluate_all_tasks(config)
+            results[config_name]['zero_shot'] = zero_shot_results
+            print(f"   BoolQ: {zero_shot_results.get('BoolQ', 0):.1f}%")
+            print(f"   HellaSwag: {zero_shot_results.get('HellaSwag', 0):.1f}%")
+            print(f"   WinoGrande: {zero_shot_results.get('WinoGrande', 0):.1f}%")
+            print(f"   ARC-e: {zero_shot_results.get('ARC-e', 0):.1f}%")
+            print(f"   ARC-c: {zero_shot_results.get('ARC-c', 0):.1f}%")
+            print(f"   OBQA: {zero_shot_results.get('OBQA', 0):.1f}%")
+            print(f"   Average: {zero_shot_results.get('Average', 0):.1f}%")
+        except Exception as e:
+            print(f"   Warning: Zero-shot evaluation failed: {e}")
+            results[config_name]['zero_shot'] = {'Average': 0.0}
 
-        # Load evaluation datasets
-        wiki_dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test')
-        wiki_texts = [sample['text'] for sample in wiki_dataset if len(sample['text'].strip()) > 0][:max_eval_samples]
+        # 2. Perplexity evaluation with sliding window
+        print("\n2. Perplexity evaluation (sliding window)...")
+        try:
+            perplexity_results = perplexity_evaluator.evaluate_all_datasets(config)
+            results[config_name]['perplexity'] = perplexity_results
+            print(f"   WikiText2: {perplexity_results['WikiText2']:.1f}")
+            print(f"   C4: {perplexity_results['C4']:.1f}")
+        except Exception as e:
+            print(f"   Warning: Perplexity evaluation failed: {e}")
+            results[config_name]['perplexity'] = {'WikiText2': float('inf'), 'C4': float('inf')}
 
-        # Tokenize data - extract input_ids only
-        wiki_data = []
-        for text in wiki_texts:
-            tokens = tokenizer(text, return_tensors='pt', max_length=128, truncation=True, padding='max_length')
-            # Extract and squeeze input_ids to remove batch dimension
-            wiki_data.append(tokens['input_ids'].squeeze(0))
+        # 3. Few-shot evaluation (5-shot)
+        print("\n3. Few-shot evaluation (5-shot)...")
+        try:
+            mmlu_scores = few_shot_evaluator.evaluate_mmlu(config, num_shots=5)
+            triviaqa_score = few_shot_evaluator.evaluate_triviaqa(config, num_shots=5)
 
-        wiki_loader = torch.utils.data.DataLoader(wiki_data, batch_size=4, shuffle=False)
-
-        # Calculate perplexity
-        wiki_ppl = metrics.calculate_perplexity(model, wiki_loader, max_samples=max_eval_samples)
-
-        results[config_name]['perplexity'] = {'WikiText2': wiki_ppl}
-        print(f"   WikiText2 Perplexity: {wiki_ppl:.1f}")
-
-        # Simple inference speed test
-        print("\nInference Speed evaluation...")
-        tokens_per_sec = metrics.measure_inference_speed(
-            model, input_shape=(1, 128), num_iterations=20
-        )
-        results[config_name]['inference_speed'] = tokens_per_sec
-        print(f"   Speed: {tokens_per_sec:.1f} tokens/second")
+            results[config_name]['few_shot'] = {
+                'MMLU': mmlu_scores,
+                'TriviaQA': triviaqa_score
+            }
+            print(f"   MMLU by category:")
+            print(f"     - Humanities: {mmlu_scores['Humanities']:.1f}%")
+            print(f"     - STEM: {mmlu_scores['STEM']:.1f}%")
+            print(f"     - Social Sciences: {mmlu_scores['Social Sciences']:.1f}%")
+            print(f"     - Other: {mmlu_scores['Other']:.1f}%")
+            print(f"     - Average: {mmlu_scores['Average']:.1f}%")
+            print(f"   TriviaQA: {triviaqa_score:.1f}%")
+        except Exception as e:
+            print(f"   Warning: Few-shot evaluation failed: {e}")
+            results[config_name]['few_shot'] = {
+                'MMLU': {'Average': 0.0},
+                'TriviaQA': 0.0
+            }
 
         # Calculate compression ratio
-        compression = metrics.calculate_compression_ratio(model)
+        compression = 32 / config['W']  # Simple compression based on weight bits
         results[config_name]['compression_ratio'] = compression
-        print(f"   Compression ratio: {compression:.2f}x")
+        print(f"\n   Compression ratio: {compression:.2f}x")
 
     # Save results
     output_path = Path(output_dir)
@@ -772,15 +652,28 @@ def main():
     print(f"{'='*70}")
 
     print("\nSummary of Results:")
+    print("="*70)
     for config_name, result in results.items():
         print(f"\n{config_name} ({result['bits']}):")
+        print(f"  Model size: {result['model_size_gb']} GB")
+        print(f"  Compression: {result['compression_ratio']:.1f}x")
+
         if 'zero_shot' in result and result['zero_shot']:
-            print(f"  Zero-shot avg: {result['zero_shot'].get('Average'):.1f}%")
+            print(f"  Zero-shot avg: {result['zero_shot'].get('Average', 0):.1f}%")
+
         if 'perplexity' in result and result['perplexity']:
             if 'WikiText2' in result['perplexity']:
                 print(f"  WikiText2 PPL: {result['perplexity']['WikiText2']:.1f}")
             if 'C4' in result['perplexity']:
                 print(f"  C4 PPL: {result['perplexity']['C4']:.1f}")
+
+        if 'few_shot' in result and result['few_shot']:
+            if 'MMLU' in result['few_shot']:
+                print(f"  MMLU avg: {result['few_shot']['MMLU'].get('Average', 0):.1f}%")
+            if 'TriviaQA' in result['few_shot']:
+                print(f"  TriviaQA: {result['few_shot']['TriviaQA']:.1f}%")
+
+    print("\n" + "="*70)
 
 
 if __name__ == "__main__":
