@@ -80,15 +80,15 @@ class BitConfigurations:
         weight_bits = config.get('W', 8)
 
         # Check if model supports switchable precision
+        # For SPLMHeadModel, bit_widths is in transformer
         try:
-            # For SPLMHeadModel, bit_widths is in transformer
-            try:
-                bit_widths = model.transformer.bit_widths
-            except AttributeError:
-                # Try direct access for compatibility
-                bit_widths = model.bit_widths
+            bit_widths = model.transformer.bit_widths
         except AttributeError:
-            raise AttributeError(f"Model does not support switchable precision. Missing 'bit_widths' attribute in model or model.transformer.")
+            # Try direct access for compatibility
+            try:
+                bit_widths = model.bit_widths
+            except AttributeError:
+                raise AttributeError(f"Model does not support switchable precision. Missing 'bit_widths' attribute in model or model.transformer.")
 
         # Get supported bit-widths
         print(f"Model supports bit-widths: {bit_widths}")
@@ -113,19 +113,20 @@ class BitConfigurations:
                                    f"Cannot apply bit configuration.")
 
         # Verify the precision was set
+        # Try transformer.current_bit_width first (for SPLMHeadModel)
         try:
-            # Try transformer.current_bit_width first (for SPLMHeadModel)
-            try:
-                current_bit_width = model.transformer.current_bit_width
-            except AttributeError:
-                # Try direct access
-                current_bit_width = model.current_bit_width
-
-            if current_bit_width != weight_bits:
-                raise RuntimeError(f"Failed to set bit-width. Expected {weight_bits}, got {current_bit_width}")
+            current_bit_width = model.transformer.current_bit_width
         except AttributeError:
-            # Can't verify, but continue (precision was set successfully)
-            pass
+            # Try direct access
+            try:
+                current_bit_width = model.current_bit_width
+            except AttributeError:
+                # Can't verify, but continue (precision was set successfully)
+                print(f"Warning: Cannot verify bit-width was set to {weight_bits}")
+                return model
+
+        if current_bit_width != weight_bits:
+            raise RuntimeError(f"Failed to set bit-width. Expected {weight_bits}, got {current_bit_width}")
 
         return model
 
@@ -154,10 +155,10 @@ class BitConfigurations:
         return BitConfigurations.STANDARD_CONFIGS.copy()
 
     @staticmethod
-    def calculate_compression_ratio(config: Dict, baseline_config: Dict = None) -> float:
-        """Calculate compression ratio compared to baseline (default FP16)"""
+    def calculate_compression_ratio(config: Dict, baseline_config: Dict) -> float:
+        """Calculate compression ratio compared to baseline - baseline_config REQUIRED"""
         if baseline_config is None:
-            baseline_config = BitConfigurations.STANDARD_CONFIGS['FP16']
+            raise ValueError("baseline_config is required - no defaults allowed")
 
         baseline_bits = baseline_config['W'] + baseline_config['A'] + baseline_config['KV']
         config_bits = config['W'] + config['A'] + config['KV']

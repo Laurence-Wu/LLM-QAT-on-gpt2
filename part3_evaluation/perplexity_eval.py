@@ -6,10 +6,12 @@ from typing import Dict, Optional
 from tqdm import tqdm
 
 class PerplexityEvaluator:
-    def __init__(self, model, tokenizer, device='cuda'):
+    def __init__(self, model, tokenizer, device, config):
+        """Initialize with required config - NO DEFAULTS"""
         self.model = model
         self.tokenizer = tokenizer
         self.device = device
+        self.config = config  # Store full config
         self.model = self.model.to(self.device)
 
         # Set pad token if not set
@@ -17,38 +19,52 @@ class PerplexityEvaluator:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
     def calculate_perplexity(self, dataset_name: str, bit_config: Dict,
-                            stride: int = 128, max_length: int = 256) -> float:
+                            stride: int = None, max_length: int = None) -> float:
         """
         Calculate perplexity on WikiText2 or C4
         Using proper sliding window approach optimized for small GPT-2
         """
+        if stride is None:
+            stride = self.config['stride']
+        if max_length is None:
+            max_length = self.config['max_length']
+
         self.model.eval()
 
-        # Load dataset
+        # Load dataset from config
+        datasets_config = self.config.get('datasets', {})
+
         if dataset_name == 'wikitext2':
             try:
-                dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test')
+                wiki_cfg = datasets_config.get('WikiText2', {})
+                dataset = load_dataset(
+                    wiki_cfg.get('dataset_name', 'wikitext'),
+                    wiki_cfg.get('config', 'wikitext-2-raw-v1'),
+                    split=wiki_cfg.get('split', 'test')
+                )
                 texts = [item['text'] for item in dataset if item['text'].strip()]
             except Exception as e:
                 print(f"Warning: Could not load {dataset_name} dataset: {e}")
                 return float('inf')
         elif dataset_name == 'c4':
             try:
+                c4_cfg = datasets_config.get('C4', {})
                 # Load a smaller subset of C4 for evaluation
-                dataset = load_dataset('allenai/c4', 'en', split='validation', streaming=True)
+                dataset = load_dataset(
+                    c4_cfg.get('dataset_name', 'allenai/c4'),
+                    c4_cfg.get('config', 'en'),
+                    split=c4_cfg.get('split', 'validation[:1000]'),
+                    streaming=c4_cfg.get('streaming', True)
+                )
                 texts = []
+                max_docs = self.config.get('max_samples', 100)
                 for i, item in enumerate(dataset):
-                    if i >= 100:  # Use first 100 documents
+                    if i >= max_docs:
                         break
                     texts.append(item['text'])
             except Exception as e:
                 print(f"Warning: Could not load C4 dataset: {e}")
-                # Fallback to WikiText2 if C4 fails
-                try:
-                    dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split='validation')
-                    texts = [item['text'] for item in dataset if item['text'].strip()][:50]
-                except:
-                    return float('inf')
+                return float('inf')
         else:
             print(f"Unknown dataset: {dataset_name}")
             return float('inf')
@@ -57,7 +73,11 @@ class PerplexityEvaluator:
             return float('inf')
 
         # Get model's actual context length (256 for our model)
-        model_max_length = self.model.config.n_positions if hasattr(self.model.config, 'n_positions') else 256
+        try:
+            model_max_length = self.model.config.n_positions
+        except AttributeError:
+            model_max_length = 256
+            print(f"Warning: Could not get n_positions, using {model_max_length}")
         max_length = min(max_length, model_max_length)
 
         print(f"Model max position: {model_max_length}, using max_length: {max_length}")
@@ -69,7 +89,8 @@ class PerplexityEvaluator:
         iterations = 0
 
         # Process texts one by one to avoid tokenization length issues
-        for text_idx, text in enumerate(tqdm(texts[:100], desc=f"Processing {dataset_name} documents")):
+        max_texts = self.config.get('max_samples', 100)
+        for text_idx, text in enumerate(tqdm(texts[:max_texts], desc=f"Processing {dataset_name} documents")):
             if not text.strip():
                 continue
 
@@ -109,7 +130,11 @@ class PerplexityEvaluator:
                     input_ids = input_ids[:, :model_max_length]
 
                 # Check for invalid token IDs (exceeding vocabulary size)
-                vocab_size = self.model.config.vocab_size if hasattr(self.model.config, 'vocab_size') else 50257
+                try:
+                    vocab_size = self.model.config.vocab_size
+                except AttributeError:
+                    vocab_size = 50257
+                    print(f"Warning: Could not get vocab_size, using {vocab_size}")
                 if input_ids.max() >= vocab_size:
                     print(f"ERROR: Token ID {input_ids.max().item()} exceeds vocab size {vocab_size}")
                     # Clamp token IDs to valid range
@@ -124,14 +149,15 @@ class PerplexityEvaluator:
                         outputs = self.model(input_ids)
 
                         # Get logits
-                        if hasattr(outputs, 'logits'):
+                        try:
                             logits = outputs.logits
-                        elif isinstance(outputs, dict) and 'logits' in outputs:
-                            logits = outputs['logits']
-                        elif isinstance(outputs, tuple):
-                            logits = outputs[0]
-                        else:
-                            logits = outputs
+                        except AttributeError:
+                            if isinstance(outputs, dict) and 'logits' in outputs:
+                                logits = outputs['logits']
+                            elif isinstance(outputs, tuple):
+                                logits = outputs[0]
+                            else:
+                                logits = outputs
 
                         # Shift for next token prediction
                         shift_logits = logits[..., :-1, :].contiguous()

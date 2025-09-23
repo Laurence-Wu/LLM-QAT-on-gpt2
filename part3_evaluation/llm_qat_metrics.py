@@ -103,14 +103,20 @@ class LLMQATEvaluation:
 
     def _apply_bit_config(self, bit_config: Dict):
         """Apply W-A-KV configuration to model"""
-        if hasattr(self.model, 'set_layer_precision'):
+        try:
             weight_bits = bit_config.get('W', 8)
             layer_config = [weight_bits] * self.model.n_layer
             self.model.set_layer_precision(layer_config)
+        except AttributeError:
+            # Model doesn't support layer-specific precision
+            pass
 
-        if hasattr(self.model, 'set_kv_cache_bits'):
+        try:
             kv_bits = bit_config.get('KV', 8)
             self.model.set_kv_cache_bits(kv_bits)
+        except AttributeError:
+            # Model doesn't support KV cache bit setting
+            pass
 
     def run_complete_evaluation(self, configs: List[str] = None, skip_few_shot: bool = True) -> Dict:
         """
