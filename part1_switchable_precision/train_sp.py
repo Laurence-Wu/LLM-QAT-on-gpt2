@@ -13,11 +13,9 @@ import gc
 import json
 import time
 import random
-try:
-    from .distillation_manager import DistillationManager
-except ImportError:
-    from distillation_manager import DistillationManager
 
+from .distillation_manager import DistillationManager
+from .calibration_manager import CalibrationManager
 
 # ============================================================================
 # UTILITY FUNCTIONS
