@@ -130,8 +130,8 @@ class CalibrationManager:
             for err in weight_errors[:3]:
                 print(f"      - {err}")
 
-        # Step 2: Calibrate INPUT quantizers via forward passes
-        print(f"  Step 2: Calibrating input quantizers for {bits}-bit...")
+        # Step 2: Calibrate INPUT and LoRA quantizers via forward passes
+        print(f"  Step 2: Calibrating input and LoRA quantizers for {bits}-bit...")
 
         # Start input quantizer calibration
         input_started = 0
@@ -140,7 +140,23 @@ class CalibrationManager:
                 module.quantizers_input[bits_key].start_calibration()
                 input_started += 1
 
-        print(f"    Started calibration for {input_started} input quantizers")
+        # Start LoRA quantizer calibration (they need forward passes too)
+        lora_started = 0
+        for name, module in self.model.named_modules():
+            if not hasattr(module, 'lora_adapters'):
+                continue
+            if bits_key not in module.lora_adapters:
+                continue
+
+            lora_layer = module.lora_adapters[bits_key]
+            if hasattr(lora_layer, 'quantize_A') and lora_layer.enabled:
+                lora_layer.quantize_A.start_calibration()
+                lora_started += 1
+            if hasattr(lora_layer, 'quantize_B') and lora_layer.enabled:
+                lora_layer.quantize_B.start_calibration()
+                lora_started += 1
+
+        print(f"    Started calibration for {input_started} input quantizers and {lora_started} LoRA quantizers")
 
         # Collect statistics via forward passes
         train_iter = iter(self.train_loader)
@@ -162,47 +178,23 @@ class CalibrationManager:
                 module.quantizers_input[bits_key].finish_calibration(debug=False)
                 input_calibrated += 1
 
-        print(f"    ✓ Calibrated {input_calibrated} input quantizers")
-
-        # Step 3: Calibrate LoRA quantizers AFTER input quantizers
-        print(f"  Step 3: Calibrating LoRA quantizers for {bits}-bit...")
+        # Finish LoRA quantizer calibration
         lora_calibrated = 0
-        lora_errors = []
-
         for name, module in self.model.named_modules():
             if not hasattr(module, 'lora_adapters'):
                 continue
-
             if bits_key not in module.lora_adapters:
                 continue
 
             lora_layer = module.lora_adapters[bits_key]
-
-            # Calibrate LoRA A quantizer if it exists and is enabled
             if hasattr(lora_layer, 'quantize_A') and lora_layer.enabled:
-                try:
-                    lora_layer.quantize_A.start_calibration()
-                    with torch.no_grad():
-                        _ = lora_layer.quantize_A(lora_layer.lora_A)
-                    lora_layer.quantize_A.finish_calibration(debug=False)
-                    lora_calibrated += 1
-                except Exception as e:
-                    lora_errors.append(f"{name}.lora_A: {str(e)}")
-
-            # Calibrate LoRA B quantizer if it exists and is enabled
+                lora_layer.quantize_A.finish_calibration(debug=False)
+                lora_calibrated += 1
             if hasattr(lora_layer, 'quantize_B') and lora_layer.enabled:
-                try:
-                    lora_layer.quantize_B.start_calibration()
-                    with torch.no_grad():
-                        _ = lora_layer.quantize_B(lora_layer.lora_B)
-                    lora_layer.quantize_B.finish_calibration(debug=False)
-                    lora_calibrated += 1
-                except Exception as e:
-                    lora_errors.append(f"{name}.lora_B: {str(e)}")
+                lora_layer.quantize_B.finish_calibration(debug=False)
+                lora_calibrated += 1
 
-        print(f"    ✓ Calibrated {lora_calibrated} LoRA quantizers")
-        if lora_errors:
-            print(f"    ⚠️ {len(lora_errors)} LoRA calibration warnings")
+        print(f"    ✓ Calibrated {input_calibrated} input quantizers and {lora_calibrated} LoRA quantizers")
 
         cleanup_memory()
 
