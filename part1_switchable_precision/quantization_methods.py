@@ -15,10 +15,16 @@ class MinMaxQuantizationFunction(torch.autograd.Function):
         ctx.num_bits = num_bits
         ctx.symmetric = symmetric
 
-        # Always use symmetric quantization
-        quantized = torch.round(input / scale)
-        quantized = torch.clamp(quantized, -(2**(num_bits-1)), 2**(num_bits-1) - 1)
-        output = quantized * scale
+        if symmetric:
+            # Symmetric quantization: centered at 0
+            quantized = torch.round(input / scale)
+            quantized = torch.clamp(quantized, -(2**(num_bits-1)), 2**(num_bits-1) - 1)
+            output = quantized * scale
+        else:
+            # Asymmetric quantization: uses zero_point
+            quantized = torch.round(input / scale + zero_point)
+            quantized = torch.clamp(quantized, 0, 2**num_bits - 1)
+            output = (quantized - zero_point) * scale
 
         return output
 
@@ -27,7 +33,7 @@ class MinMaxQuantizationFunction(torch.autograd.Function):
         # Straight-through estimator
         input, scale, zero_point = ctx.saved_tensors
         grad_input = grad_output.clone()
-        return grad_input, None, None, None, None
+        return grad_input, None, None, None, None, None
 
 
 
@@ -38,7 +44,7 @@ class LogQuantizationFunction(torch.autograd.Function):
     where x_hat = rescale(Q(normalize(|log₂(x)|)))
     """
     @staticmethod
-    def forward(ctx, input, log_min, log_range, num_bits):
+    def forward(ctx, input, log_min, log_range, num_bits, symmetric):
         """
         Args:
             input: Tensor to quantize
@@ -51,6 +57,7 @@ class LogQuantizationFunction(torch.autograd.Function):
         # Save for backward pass
         ctx.save_for_backward(input)
         ctx.num_bits = num_bits
+        ctx.symmetric = symmetric
 
         # Step 1: Handle exact zeros (LogQuant(x) = 0 if x = 0)
         zero_mask = (torch.abs(input) < eps)
@@ -71,12 +78,27 @@ class LogQuantizationFunction(torch.autograd.Function):
         log_normalized = torch.clamp(log_normalized, 0, 1)
 
         # Step 6: Quantize Q(normalized) with num_bits levels
-        n_levels = 2**num_bits - 1
-        quantized = torch.round(log_normalized * n_levels)
-        quantized = torch.clamp(quantized, 0, n_levels)
+        if symmetric:
+            # Symmetric quantization in log space
+            # Map to [-n_levels/2, n_levels/2] then round
+            n_levels = 2**(num_bits - 1) - 1
+            # Center the normalized values around 0.5, then scale
+            centered = log_normalized - 0.5
+            quantized = torch.round(centered * 2 * n_levels)
+            quantized = torch.clamp(quantized, -n_levels, n_levels)
+            # Map back to [0, 1] range for dequantization
+            quantized = (quantized / (2 * n_levels) + 0.5) * (2**num_bits - 1)
+        else:
+            # Asymmetric quantization in log space
+            n_levels = 2**num_bits - 1
+            quantized = torch.round(log_normalized * n_levels)
+            quantized = torch.clamp(quantized, 0, n_levels)
 
         # Step 7: Dequantize back to normalized space [0, 1]
-        q_normalized = quantized / n_levels
+        if symmetric:
+            q_normalized = quantized / (2**num_bits - 1)
+        else:
+            q_normalized = quantized / n_levels
 
         # Step 8: Rescale back to original log space
         # rescale(x) = x · (max(x) - min(x)) + min(x)
@@ -112,7 +134,7 @@ class LogQuantizationFunction(torch.autograd.Function):
         # This helps prevent gradient explosion near zero values
         grad_input = torch.clamp(grad_input, -10, 10)
 
-        return grad_input, None, None, None
+        return grad_input, None, None, None, None
 
 
 def apply_minmax_quantization(x, scale, zero_point, num_bits, symmetric=True):
@@ -123,19 +145,19 @@ def apply_minmax_quantization(x, scale, zero_point, num_bits, symmetric=True):
     Args:
         x: Input tensor
         scale: Quantization scale
-        zero_point: Quantization zero point (unused for symmetric)
+        zero_point: Quantization zero point (used for asymmetric)
         num_bits: Number of quantization bits
-        symmetric: Always True (kept for compatibility)
+        symmetric: Whether to use symmetric quantization
 
     Returns:
         Quantized tensor
     """
-    return MinMaxQuantizationFunction.apply(x, scale, zero_point, num_bits, True)
+    return MinMaxQuantizationFunction.apply(x, scale, zero_point, num_bits, symmetric)
 
 
 
 
-def apply_log_quantization(x, log_min, log_range, num_bits):
+def apply_log_quantization(x, log_min, log_range, num_bits, symmetric=True):
     """
     Apply logarithmic quantization following LogQuant formula.
     LogQuant(x) = 0 if x = 0, else 2^x_hat · sign(x)
@@ -145,8 +167,9 @@ def apply_log_quantization(x, log_min, log_range, num_bits):
         log_min: Minimum log value from calibration
         log_range: Log range from calibration
         num_bits: Number of quantization bits
+        symmetric: Whether to use symmetric quantization in log space
 
     Returns:
         Quantized tensor
     """
-    return LogQuantizationFunction.apply(x, log_min, log_range, num_bits)
+    return LogQuantizationFunction.apply(x, log_min, log_range, num_bits, symmetric)

@@ -51,7 +51,7 @@ def initialize_model(model_config, device):
         embd_pdrop=model_config.embd_pdrop
     )
 
-    # Add switchable precision specific configs
+
     gpt2_config.quantization_bits = model_config.quantization_bits
     gpt2_config.lora_rank = model_config.lora_rank
     gpt2_config.lora_alpha = model_config.lora_alpha
@@ -61,7 +61,7 @@ def initialize_model(model_config, device):
     gpt2_config.quantizer_per_bit = model_config.quantizer_per_bit
     gpt2_config.bit_widths = model_config.bit_widths
 
-    # Print configuration being used
+    #debug
     print(f"Initializing SP Model with configurations:")
     print(f"  Bit widths: {model_config.bit_widths}")
     print(f"  LoRA rank per bit: {model_config.lora_rank_per_bit}")
@@ -69,19 +69,12 @@ def initialize_model(model_config, device):
     print(f"  Activation bits per bit: {model_config.activation_bits_per_bit}")
     print(f"  Quantizer per bit: {gpt2_config.quantizer_per_bit}")
 
-    # Use switchable model if configured
-    
     model = SPLMHeadModel(gpt2_config)
-
-
-    # Explicitly enable gradient checkpointing
     model.use_gradient_checkpointing = True
 
     # initialize all the layers with apply() function
     # layerNorm
 
-    # weights of QKV, projection of the output of transformer
-    # and the two feedforward layers
     load_pretrained_weights(model)
 
     # Model should be on the GPU
@@ -101,19 +94,18 @@ def initialize_model(model_config, device):
 
 def load_pretrained_weights(model):
     print("Loading pretrained GPT-2 weights")
-    from transformers import GPT2LMHeadModel  # Import the correct class with LM head
-    pretrained = GPT2LMHeadModel.from_pretrained('gpt2')  # Load model WITH language model head
-
+    from transformers import GPT2LMHeadModel
+    pretrained = GPT2LMHeadModel.from_pretrained('gpt2')
     import torch.nn as nn
 
     # Copy embeddings - frozen (never trained)
     model.transformer.wte.weight.data = pretrained.transformer.wte.weight.data.clone()
-    model.transformer.wte.weight.requires_grad = False  # Keep frozen
+    model.transformer.wte.weight.requires_grad = False
 
     # Only copy the position embeddings we need (model might have fewer positions than pretrained)
     min_positions = min(model.transformer.wpe.weight.shape[0], pretrained.transformer.wpe.weight.shape[0])
     model.transformer.wpe.weight.data[:min_positions] = pretrained.transformer.wpe.weight.data[:min_positions].clone()
-    model.transformer.wpe.weight.requires_grad = False  # Keep frozen
+    model.transformer.wpe.weight.requires_grad = False
 
     if model.transformer.wpe.weight.shape[0] != pretrained.transformer.wpe.weight.shape[0]:
         print(f"Adjusted position embeddings from {pretrained.transformer.wpe.weight.shape[0]} to {model.transformer.wpe.weight.shape[0]}")
@@ -161,7 +153,6 @@ def load_pretrained_weights(model):
         model.transformer.h[i].mlp.c_proj.linear.weight.requires_grad = False
         model.transformer.h[i].mlp.c_proj.linear.bias.requires_grad = False
 
-    # Final layer normalization - frozen by default
     # Copy to all precision-specific weight and bias parameters
     for precision in model.transformer.ln_f.precision_levels:
         model.transformer.ln_f.weights[str(precision)].data = pretrained.transformer.ln_f.weight.data.clone()
@@ -170,7 +161,7 @@ def load_pretrained_weights(model):
         model.transformer.ln_f.biases[str(precision)].requires_grad = False
 
 
-    # Just ensure LoRA parameters are trainable (they're already initialized in LoRALayer)
+    # LoRA adapters
     lora_count = 0
     for name, module in model.named_modules():
         try:
@@ -182,10 +173,7 @@ def load_pretrained_weights(model):
                     if isinstance(lora_layer.lora_B, nn.Parameter):
                         lora_layer.lora_B.requires_grad = True
         except AttributeError:
-            # Module doesn't have lora_adapters, continue
-            pass
-
-    print(f"Enabled {lora_count} LoRA adapter pairs for training")
+            print(f"Module {name} does not have LoRA adapters")
 
     # Delete pretrained model to free memory immediately
     del pretrained

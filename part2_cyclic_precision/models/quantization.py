@@ -21,7 +21,7 @@ except ImportError:
 
 class LearnableFakeQuantize(nn.Module):
     def __init__(self, num_bits=8, per_channel=True,
-                 channel_dim=0, quantizer_type='minmax', eps=1e-5):
+                 channel_dim=0, quantizer_type='minmax', eps=1e-5, symmetric=True):
         """
         Initialize the quantization layer with configurable quantizer type.
 
@@ -34,7 +34,7 @@ class LearnableFakeQuantize(nn.Module):
         """
         super().__init__()
         self.num_bits = max(1, min(num_bits, 32))
-        self.symmetric = True  # Always use symmetric quantization
+        self.symmetric = symmetric
         self.per_channel = per_channel
         self.channel_dim = channel_dim
         self.quantizer_type = quantizer_type
@@ -128,16 +128,23 @@ class LearnableFakeQuantize(nn.Module):
                     abs_max = torch.clamp(abs_max, min=self.eps)
                     self.scale.resize_as_(abs_max).copy_(abs_max)
                     self.zero_point.resize_as_(abs_max).zero_()
-                elif self.symmetric:
+                elif self.quantizer_type == 'minmax':
+                    if self.symmetric:
+                        abs_max = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
+                        abs_max = torch.clamp(abs_max, min=self.eps)
+                        self.scale.resize_as_(abs_max).copy_(abs_max / (2**(self.num_bits-1) - 1))
+                        self.zero_point.resize_as_(abs_max).zero_()
+                    else:
+                        range_val = torch.clamp(self.running_max - self.running_min, min=self.eps)
+                        self.scale.resize_as_(range_val).copy_(range_val / (2**self.num_bits - 1))
+                        self.zero_point.resize_as_(range_val)
+                        self.zero_point.copy_(torch.round(-self.running_min / self.scale))
+                else:
+                    # Default case (shouldn't reach here with current quantizer types)
                     abs_max = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
                     abs_max = torch.clamp(abs_max, min=self.eps)
                     self.scale.resize_as_(abs_max).copy_(abs_max / (2**(self.num_bits-1) - 1))
                     self.zero_point.resize_as_(abs_max).zero_()
-                else:
-                    range_val = torch.clamp(self.running_max - self.running_min, min=self.eps)
-                    self.scale.resize_as_(range_val).copy_(range_val / (2**self.num_bits - 1))
-                    self.zero_point.resize_as_(range_val)
-                    self.zero_point.copy_(torch.round(self.quant_min - self.running_min / self.scale))
 
                 if debug:
                     print(f"         Computed scale: mean={self.scale.mean().item():.6f}")
@@ -255,6 +262,6 @@ class LearnableFakeQuantize(nn.Module):
         """Apply logarithmic quantization using precomputed log stats."""
         # log_min and log_range are stored in zero_point and scale respectively
         return apply_log_quantization(
-            x, self.zero_point, self.scale, self.num_bits
+            x, self.zero_point, self.scale, self.num_bits, self.symmetric
         )
 

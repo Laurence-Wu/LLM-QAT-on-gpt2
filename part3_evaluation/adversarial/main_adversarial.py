@@ -37,8 +37,7 @@ def load_model_and_tokenizer(model_path: str = None):
         layer_norm_epsilon=1e-5,
         embd_pdrop=0.1,
         lora_rank=16,
-        lora_alpha=32,
-        lora_dropout=0.1
+        lora_alpha=32
     )
 
     model = SwitchableQATGPT2(config, bit_widths=[2, 4, 8, 16])

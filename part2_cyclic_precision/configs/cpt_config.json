@@ -9,7 +9,6 @@
     "dropout": null,
     "lora_rank": null,
     "lora_alpha": null,
-    "lora_dropout": null,
     "kv_cache_bits": null
   },
   "training": {

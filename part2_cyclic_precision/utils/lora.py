@@ -76,7 +76,7 @@ class LoRALayer(nn.Module):
 class LinearWithLoRA(nn.Module):
     """Linear layer with LoRA adapter and quantization."""
     def __init__(self, in_features, out_features, bias=True, bits=8,
-                 lora_rank=8, lora_alpha=16, lora_dropout=0.1, quantizer_type='minmax', eps=1e-5):
+                 lora_rank=8, lora_alpha=16, quantizer_type='minmax', eps=1e-5):
         super().__init__()
         self.bits = bits
         self.in_features = in_features
@@ -152,7 +152,6 @@ class SPLinearWithLoRA(nn.Module):
                  bit_widths=None,
                  lora_rank_per_bit=None,
                  lora_alpha_per_bit=None,
-                 lora_dropout=0.1,
                  quantizer_per_bit=None,
                  eps=1e-5):
         super().__init__()

@@ -365,8 +365,7 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
             layer_norm_epsilon=model_config['layer_norm_epsilon'],  # Required
             embd_pdrop=model_config['embd_pdrop'],  # Required
             lora_rank=model_config.get('lora_rank', None),  # Optional for SP models
-            lora_alpha=model_config.get('lora_alpha', None),  # Optional for SP models
-            lora_dropout=model_config.get('lora_dropout', 0.0)  # Optional, default to 0 if not set
+            lora_alpha=model_config.get('lora_alpha', None)  # Optional for SP models
         )
 
         print(f"\nLoaded Model Configuration:")
