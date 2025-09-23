@@ -251,30 +251,43 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
                     print(f"Auto-detected matching JSON config: {json_path}")
                     break
 
-        if json_path and os.path.exists(json_path):
-            print(f"Using config from: {json_path}")
-
-        # Load checkpoint
+        # Load checkpoint first
         checkpoint = torch.load(model_path, map_location='cuda')
 
-        # Try to get config from JSON file first (more complete), then fall back to checkpoint
+        # Try to get config from JSON file first (most complete), then fall back to checkpoint
         model_config = None
         training_config = None
 
-        if json_path:
+        # Priority 1: User-specified config path
+        if config_path and os.path.exists(config_path):
+            print(f"Using user-specified config from: {config_path}")
+            try:
+                with open(config_path, 'r') as f:
+                    json_data = json.load(f)
+                    model_config = json_data.get('model_config', {})
+                    training_config = json_data.get('training_config', {})
+                    print(f"✓ Loaded configuration from specified JSON file")
+            except Exception as e:
+                print(f"Warning: Could not load specified JSON config: {e}")
+
+        # Priority 2: Auto-detected JSON config
+        elif json_path and os.path.exists(json_path):
+            print(f"Using auto-detected config from: {json_path}")
             try:
                 with open(json_path, 'r') as f:
                     json_data = json.load(f)
                     model_config = json_data.get('model_config', {})
                     training_config = json_data.get('training_config', {})
-                    print(f"Loaded configuration from JSON file")
+                    print(f"✓ Loaded configuration from auto-detected JSON file")
             except Exception as e:
-                print(f"Warning: Could not load JSON config: {e}")
+                print(f"Warning: Could not load auto-detected JSON config: {e}")
 
-        # Fall back to checkpoint config if JSON not available
+        # Priority 3: Config embedded in checkpoint
         if not model_config and isinstance(checkpoint, dict):
-            model_config = checkpoint.get('model_config', {})
-            training_config = checkpoint.get('training_config', {})
+            if 'model_config' in checkpoint:
+                model_config = checkpoint.get('model_config', {})
+                training_config = checkpoint.get('training_config', {})
+                print("Using configuration embedded in checkpoint")
 
         if not model_config:
             raise ValueError("No model configuration found! Please provide a valid checkpoint with model_config or specify --config_path")
@@ -304,19 +317,28 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
             else:
                 raise ValueError("No bit_widths or quantization_bits specified in model config")
 
-        # Get n_positions strictly from config or weights
+        # Get n_positions from actual weights in checkpoint (most reliable)
         actual_n_positions = None
-        if training_config and 'max_seq_length' in training_config:
-            actual_n_positions = training_config['max_seq_length']
-            print(f"Using max_seq_length from training config: {actual_n_positions}")
-        elif 'model_state_dict' in checkpoint and 'wpe.weight' in checkpoint['model_state_dict']:
-            wpe_shape = checkpoint['model_state_dict']['wpe.weight'].shape
-            actual_n_positions = wpe_shape[0]
-            print(f"Detected n_positions from weight shape: {actual_n_positions}")
-        else:
-            # Only use default if absolutely necessary
-            print("WARNING: Could not determine n_positions from config or weights, using 256")
-            actual_n_positions = 256
+        if 'model_state_dict' in checkpoint:
+            # Check transformer.wpe.weight first (SP model format)
+            if 'transformer.wpe.weight' in checkpoint['model_state_dict']:
+                wpe_shape = checkpoint['model_state_dict']['transformer.wpe.weight'].shape
+                actual_n_positions = wpe_shape[0]
+                print(f"Detected n_positions from transformer.wpe.weight shape: {actual_n_positions}")
+            elif 'wpe.weight' in checkpoint['model_state_dict']:
+                wpe_shape = checkpoint['model_state_dict']['wpe.weight'].shape
+                actual_n_positions = wpe_shape[0]
+                print(f"Detected n_positions from wpe.weight shape: {actual_n_positions}")
+
+        # Fallback to config if needed
+        if actual_n_positions is None:
+            if training_config and 'max_seq_length' in training_config:
+                actual_n_positions = training_config['max_seq_length']
+                print(f"Using max_seq_length from training config: {actual_n_positions}")
+            else:
+                # Default to GPT-2 standard
+                actual_n_positions = 1024
+                print("WARNING: Could not determine n_positions, using GPT-2 standard 1024")
 
         # Build config with ONLY values from the loaded configuration
         config = GPT2Config(
@@ -351,69 +373,31 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
         print(f"Creating model with bit-widths: {bit_widths}")
         # Add SP-specific configurations to config
         config.bit_widths = bit_widths
-        # Get LoRA configurations from model_config
-        config.lora_rank_per_bit = model_config.get('lora_rank_per_bit', {6: 32, 8: 16, 16: 8, 32: 0})
-        config.lora_alpha_per_bit = model_config.get('lora_alpha_per_bit', {6: 64, 8: 32, 16: 16, 32: 0})
-        config.activation_bits_per_bit = model_config.get('activation_bits_per_bit', {6: 8, 8: 8, 16: 16, 32: 32})
+
+        # Get LoRA configurations from model_config - use CORRECT defaults from config_sp.py
+        config.lora_rank_per_bit = model_config.get('lora_rank_per_bit', {6: 32, 8: 16, 16: 16, 32: 0})  # Fixed: 16-bit should be rank=16
+        config.lora_alpha_per_bit = model_config.get('lora_alpha_per_bit', {6: 64, 8: 32, 16: 32, 32: 0})  # Fixed: 16-bit alpha=32
+        config.activation_bits_per_bit = model_config.get('activation_bits_per_bit', {6: 6, 8: 8, 16: 16, 32: 32})
         config.quantizer_per_bit = model_config.get('quantizer_per_bit', None)
+
+        # Print what we're using to help debug
+        print(f"LoRA rank per bit: {config.lora_rank_per_bit}")
+        print(f"LoRA alpha per bit: {config.lora_alpha_per_bit}")
 
         # Create SPLMHeadModel instead of SwitchableQATGPT2
         model = SPLMHeadModel(config)
 
-        # Load pre-trained weights first if requested
-        if use_pretrained:
-            model = load_pretrained_weights_into_qat(model, 'gpt2')
+        # Don't load pretrained weights - we'll load from checkpoint directly
+        # This avoids resizing issues
 
         if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
             # Load state dict with size mismatch handling for attention bias
             state_dict = checkpoint['model_state_dict']
 
-            # Fix quantizer shape mismatches first
+            # Fix quantizer shape mismatches only
             state_dict = fix_state_dict_shapes(state_dict)
 
-            model_state = model.state_dict()
-
-            # Handle position embeddings size mismatch FIRST
-            if 'transformer.wpe.weight' in state_dict and 'transformer.wpe.weight' in model_state:
-                saved_wpe = state_dict['transformer.wpe.weight']
-                model_wpe = model_state['transformer.wpe.weight']
-
-                if saved_wpe.shape[0] != model_wpe.shape[0]:
-                    print(f"Resizing position embeddings from {saved_wpe.shape} to {model_wpe.shape}")
-                    # Take only the positions we need
-                    min_pos = min(saved_wpe.shape[0], model_wpe.shape[0])
-                    new_wpe = torch.zeros_like(model_wpe)
-                    new_wpe[:min_pos] = saved_wpe[:min_pos]
-                    state_dict['transformer.wpe.weight'] = new_wpe
-
-            # Handle size mismatches for attention bias
-            for key in list(state_dict.keys()):
-                if '.bias' in key and key in model_state:
-                    saved_bias = state_dict[key]
-                    model_bias = model_state[key]
-
-                    if saved_bias.shape != model_bias.shape:
-                        # Resize the attention bias to match model's n_positions
-                        print(f"Resizing {key} from {saved_bias.shape} to {model_bias.shape}")
-                        # For attention bias (2D causal mask)
-                        if len(saved_bias.shape) == 2 and len(model_bias.shape) == 2:
-                            min_size = min(saved_bias.shape[0], model_bias.shape[0])
-                            new_bias = torch.zeros_like(model_bias)
-                            new_bias[:min_size, :min_size] = saved_bias[:min_size, :min_size]
-                            # Fill the rest with the appropriate causal mask pattern if needed
-                            if min_size < model_bias.shape[0] and 'attn' in key:
-                                # Create proper causal mask for remaining positions
-                                for i in range(min_size, model_bias.shape[0]):
-                                    new_bias[i, :i+1] = 1
-                        else:
-                            # For 1D biases, just copy what we can
-                            min_size = min(saved_bias.shape[0], model_bias.shape[0])
-                            new_bias = torch.zeros_like(model_bias)
-                            if len(saved_bias.shape) == 1:
-                                new_bias[:min_size] = saved_bias[:min_size]
-                            else:
-                                new_bias = saved_bias  # Keep original if shape is unexpected
-                        state_dict[key] = new_bias
+            # Don't resize matrices - model should be created with correct dimensions
 
             # Load the modified state dict with strict=False to handle minor mismatches
             missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
@@ -629,43 +613,16 @@ def main():
                        help='Path to training config JSON file (optional, will auto-detect if not provided)')
     parser.add_argument('--output_dir', type=str, default='part3_evaluation/results',
                        help='Directory to save results')
-    parser.add_argument('--configs', nargs='+',
-                       default=['INT4', 'INT8', 'FP16'],
-                       help='Configurations to evaluate (e.g., INT4 INT8 FP16)')
-    parser.add_argument('--skip_few_shot', action='store_true',
-                       help='Skip few-shot evaluation (faster)')
-    parser.add_argument('--skip_zero_shot', action='store_true',
-                       help='Skip zero-shot evaluation')
-    parser.add_argument('--skip_perplexity', action='store_true',
-                       help='Skip perplexity evaluation')
-    parser.add_argument('--skip_speed', action='store_true',
-                       help='Skip inference speed evaluation')
-    parser.add_argument('--skip_robustness', action='store_true',
-                       help='Skip robustness evaluation')
-    parser.add_argument('--compare_baselines', action='store_true',
-                       help='Compare with baseline methods')
-    parser.add_argument('--use_pretrained', action='store_true', default=True,
-                       help='Use pre-trained GPT-2 weights (strongly recommended)')
-    parser.add_argument('--use_random_init', action='store_true',
-                       help='Use random initialization instead of pre-trained (for testing only)')
-    parser.add_argument('--force_cuda', action='store_true', default=True,
-                       help='Force CUDA usage (default: True)')
-    parser.add_argument('--warm_up_samples', type=int, default=10,
-                       help='Number of samples for warm-up calibration')
-    parser.add_argument('--max_eval_samples', type=int, default=100,
-                       help='Maximum samples for evaluation')
     args = parser.parse_args()
 
-    # Force CUDA check
-    if args.force_cuda and not torch.cuda.is_available():
+    # Force CUDA check - always required
+    if not torch.cuda.is_available():
         print("ERROR: CUDA is required but not available!")
         print("Please ensure you have a CUDA-capable GPU and PyTorch with CUDA support installed.")
         sys.exit(1)
 
-    # Determine whether to use pre-trained weights
-    use_pretrained = not args.use_random_init
-
-    model = load_switchable_model(args.model_path, config_path=args.config_path, use_pretrained=use_pretrained)
+    # Load model from checkpoint
+    model = load_switchable_model(args.model_path, config_path=args.config_path, use_pretrained=False)
     tokenizer = load_tokenizer()
 
     # Initialize evaluation components
@@ -681,7 +638,8 @@ def main():
     calibration_data = []
     for text in calibration_texts:
         tokens = tokenizer(text, return_tensors='pt', max_length=128, truncation=True, padding='max_length')
-        calibration_data.append(tokens['input_ids'])
+        # Squeeze to remove batch dimension since DataLoader will add it back
+        calibration_data.append(tokens['input_ids'].squeeze(0))
 
     calibration_loader = torch.utils.data.DataLoader(
         calibration_data, batch_size=4, shuffle=False
@@ -693,7 +651,8 @@ def main():
         # Try to access bit_widths attribute
         model_bit_widths = model.transformer.bit_widths  # For SPLMHeadModel, bit_widths is in transformer
         print("\nPerforming warm-up calibration for all bit-widths...")
-        calib_manager.warm_up_calibration(calibration_loader, model_bit_widths, num_batches=args.warm_up_samples)
+        warm_up_samples = 10  # Default warm-up samples
+        calib_manager.warm_up_calibration(calibration_loader, model_bit_widths, num_batches=warm_up_samples)
     except AttributeError as e:
         raise AttributeError(f"Model does not support switchable precision: {e}\nPlease ensure the model was trained with SPLMHeadModel.")
 
@@ -703,41 +662,33 @@ def main():
 
     # Map bit-widths to configuration names
     bit_to_config = {
-        2: 'INT2',
-        4: 'INT4',
+        6: 'INT6',
         8: 'INT8',
-        16: 'FP16'
+        16: 'FP16',
+        32: 'FP32'
     }
 
-    # Override args.configs with supported configurations
-    if not args.configs or args.configs == ['INT4', 'INT8', 'FP16']:
-        # Use default or auto-detect
-        args.configs = [bit_to_config.get(b, f'INT{b}') for b in supported_bit_widths if b in bit_to_config]
-        print(f"Auto-detected configurations to evaluate: {args.configs}")
+    # Auto-detect configurations based on model's supported bit widths
+    configs_to_eval = [bit_to_config.get(b, f'INT{b}') for b in supported_bit_widths if b in bit_to_config]
+    print(f"Configurations to evaluate: {configs_to_eval}")
 
-    # Validate that requested configs are supported
-    for config_name in args.configs:
-        if config_name in BitConfigurations.STANDARD_CONFIGS:
-            config = BitConfigurations.STANDARD_CONFIGS[config_name]
-            weight_bits = config['W']
-            if weight_bits not in supported_bit_widths:
-                raise ValueError(f"Configuration {config_name} requires {weight_bits}-bit precision, "
-                               f"but model only supports {supported_bit_widths}. "
-                               f"Please train the model with the required bit-width.")
+    # Hardcoded evaluation settings
+    max_eval_samples = 100
+    output_dir = args.output_dir
 
     print("="*70)
-    print("Running LLM-QAT Paper Evaluation Suite with Standard Methods")
+    print("Running SP Model Evaluation")
     print("="*70)
     print(f"Model: GPT-2 ({evaluator.model_params:.1f}M parameters)")
-    print(f"Configurations to evaluate: {args.configs}")
-    print(f"Output directory: {args.output_dir}")
-    print(f"Warm-up samples: {args.warm_up_samples}")
-    print(f"Max evaluation samples: {args.max_eval_samples}")
+    print(f"Configurations: {configs_to_eval}")
+    print(f"Output directory: {output_dir}")
+    print(f"Max evaluation samples: {max_eval_samples}")
     print("="*70)
 
     results = {}
 
-    for config_name in args.configs:
+    # Run simplified evaluation for each supported bit width
+    for config_name in configs_to_eval:
         print(f"\n{'='*60}")
         print(f"Evaluating configuration: {config_name}")
         print('='*60)
@@ -761,129 +712,42 @@ def main():
         print(f"Model size: {results[config_name]['model_size_gb']} GB")
         print(f"Applying bit configuration W={config['W']}, A={config['A']}, KV={config['KV']}")
 
-        if not args.skip_perplexity:
-            print("\n2. Perplexity evaluation (Standard Method)...")
+        # Run basic perplexity evaluation
+        print("\nPerplexity evaluation...")
 
-            # Load evaluation datasets
-            wiki_dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test')
-            wiki_texts = [sample['text'] for sample in wiki_dataset if len(sample['text'].strip()) > 0][:args.max_eval_samples]
+        # Load evaluation datasets
+        wiki_dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split='test')
+        wiki_texts = [sample['text'] for sample in wiki_dataset if len(sample['text'].strip()) > 0][:max_eval_samples]
 
-            # Tokenize data
-            wiki_data = []
-            for text in wiki_texts:
-                tokens = tokenizer(text, return_tensors='pt', max_length=128, truncation=True, padding='max_length')
-                wiki_data.append(tokens)
+        # Tokenize data
+        wiki_data = []
+        for text in wiki_texts:
+            tokens = tokenizer(text, return_tensors='pt', max_length=128, truncation=True, padding='max_length')
+            wiki_data.append(tokens)
 
-            wiki_loader = torch.utils.data.DataLoader(wiki_data, batch_size=4, shuffle=False)
+        wiki_loader = torch.utils.data.DataLoader(wiki_data, batch_size=4, shuffle=False)
 
-            # Calculate perplexity using standard method
-            wiki_ppl = metrics.calculate_perplexity(model, wiki_loader, max_samples=args.max_eval_samples)
+        # Calculate perplexity
+        wiki_ppl = metrics.calculate_perplexity(model, wiki_loader, max_samples=max_eval_samples)
 
-            # Also use original evaluator for comparison
-            perplexity_results = evaluator.evaluate_perplexity(config)
-            perplexity_results['WikiText2_Standard'] = wiki_ppl
+        results[config_name]['perplexity'] = {'WikiText2': wiki_ppl}
+        print(f"   WikiText2 Perplexity: {wiki_ppl:.1f}")
 
-            results[config_name]['perplexity'] = perplexity_results
-            print(f"   WikiText2 (Original): {perplexity_results.get('WikiText2', float('inf')):.1f}")
-            print(f"   WikiText2 (Standard): {wiki_ppl:.1f}")
-            print(f"   C4: {perplexity_results.get('C4', float('inf')):.1f}")
+        # Simple inference speed test
+        print("\nInference Speed evaluation...")
+        tokens_per_sec = metrics.measure_inference_speed(
+            model, input_shape=(1, 128), num_iterations=20
+        )
+        results[config_name]['inference_speed'] = tokens_per_sec
+        print(f"   Speed: {tokens_per_sec:.1f} tokens/second")
 
-        if not args.skip_zero_shot:
-            print("\n1. Zero-shot common sense evaluation...")
-            zero_shot_results = evaluator.evaluate_zero_shot_common_sense(config)
-            results[config_name]['zero_shot'] = zero_shot_results
-            print(f"   Average score: {zero_shot_results['Average']:.1f}%")
+        # Calculate compression ratio
+        compression = metrics.calculate_compression_ratio(model)
+        results[config_name]['compression_ratio'] = compression
+        print(f"   Compression ratio: {compression:.2f}x")
 
-            # Print only the tasks that were actually evaluated
-            for task, score in zero_shot_results.items():
-                if task != 'Average':
-                    print(f"   {task}: {score:.1f}%")
-
-
-
-        if not args.skip_few_shot:
-            print("\n3. Few-shot evaluation...")
-            few_shot_results = evaluator.evaluate_few_shot(config)
-            results[config_name]['few_shot'] = few_shot_results
-
-            if 'MMLU' in few_shot_results and isinstance(few_shot_results['MMLU'], dict):
-                mmlu = few_shot_results['MMLU']
-                print(f"   MMLU:")
-                for category in ['Humanities', 'STEM', 'Social Sciences', 'Other']:
-                    if category in mmlu:
-                        score = mmlu[category]
-                        if isinstance(score, (int, float)) and not np.isnan(score):
-                            print(f"     {category}: {score:.1f}%")
-                        else:
-                            print(f"     {category}: 0.0%")
-                avg_score = mmlu.get('Average', 0)
-                if isinstance(avg_score, (int, float)) and not np.isnan(avg_score):
-                    print(f"     Average: {avg_score:.1f}%")
-                else:
-                    print(f"     Average: 0.0%")
-
-            if 'TriviaQA' in few_shot_results:
-                print(f"   TriviaQA: {few_shot_results['TriviaQA']:.1f}%")
-
-        # Additional standard evaluations
-        if not args.skip_speed:
-            print("\n4. Inference Speed evaluation...")
-            tokens_per_sec = metrics.measure_inference_speed(
-                model, input_shape=(1, 128), num_iterations=50
-            )
-            results[config_name]['inference_speed'] = tokens_per_sec
-            print(f"   Speed: {tokens_per_sec:.1f} tokens/second")
-
-            # Calculate compression ratio
-            compression = metrics.calculate_compression_ratio(model)
-            results[config_name]['compression_ratio'] = compression
-            print(f"   Compression ratio: {compression:.2f}x")
-
-        if not args.skip_robustness:
-            print("\n5. Robustness evaluation...")
-            # Use a small subset for robustness testing
-            robustness_data = calibration_data[:20]
-            robustness_loader = torch.utils.data.DataLoader(
-                robustness_data, batch_size=2, shuffle=False
-            )
-
-            robustness_scores = metrics.evaluate_robustness(
-                model, robustness_loader, noise_levels=[0.01, 0.05]
-            )
-            results[config_name]['robustness'] = robustness_scores
-
-            for noise_key, score in robustness_scores.items():
-                print(f"   {noise_key}: {score:.1f}% accuracy")
-
-    print("\n" + "="*70)
-    print("Generating result tables...")
-    print("="*70)
-
-    table_gen = ResultTableGenerator(results)
-
-    if not args.skip_zero_shot:
-        table_gen.generate_table_1_zero_shot()
-
-    if not args.skip_perplexity:
-        table_gen.generate_table_2_perplexity()
-
-    if not args.skip_few_shot:
-        table_gen.generate_table_7_few_shot()
-
-    table_gen.export_to_markdown()
-    table_gen.export_to_latex()
-
-    if args.compare_baselines:
-        print("\n" + "="*70)
-        print("Comparing with baseline methods...")
-        print("="*70)
-
-        comparison = BaselineComparison(results)
-        comparison.compare_with_baselines()
-        comparison.plot_accuracy_vs_bits()
-        comparison.calculate_degradation_from_fp16()
-
-    output_path = Path(args.output_dir)
+    # Save results
+    output_path = Path(output_dir)
     output_path.mkdir(exist_ok=True, parents=True)
 
     with open(output_path / 'llm_qat_results.json', 'w') as f:
