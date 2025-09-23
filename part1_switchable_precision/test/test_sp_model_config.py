@@ -12,8 +12,8 @@ import torch.nn as nn
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from part1_switchable_precision.config_sp import ModelConfig
-from shared.models_sp import SPModel, SPLMHeadModel
+from ..config_sp import ModelConfig
+from ..models_sp import SPModel, SPLMHeadModel
 from transformers import GPT2Config
 
 

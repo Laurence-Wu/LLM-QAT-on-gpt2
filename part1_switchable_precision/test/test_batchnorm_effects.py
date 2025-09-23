@@ -15,9 +15,9 @@ from typing import Dict, List, Tuple, Optional
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared.switchable_batchnorm import SwitchableLayerNorm
-from test.fix_model_initialization import create_properly_initialized_model
-from test.utils import get_configured_bit_widths
+from ..switchable_batchnorm import SwitchableLayerNorm
+from .fix_model_initialization import create_properly_initialized_model
+from .utils import get_configured_bit_widths
 from transformers import GPT2Tokenizer
 
 

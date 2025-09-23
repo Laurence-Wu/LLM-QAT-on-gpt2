@@ -12,9 +12,9 @@ import shutil
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from part1_switchable_precision.config_sp import ModelConfig
-from shared.models_sp import SPLMHeadModel
-from shared.deploy import save_sp_checkpoints
+from ..config_sp import ModelConfig
+from ..models_sp import SPLMHeadModel
+from ..deploy import save_sp_checkpoints
 from transformers import GPT2Config
 
 

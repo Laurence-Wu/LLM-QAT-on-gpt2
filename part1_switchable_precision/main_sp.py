@@ -11,7 +11,7 @@ import gc
 import json
 from transformers import GPT2Config, GPT2TokenizerFast
 
-# Add parent directory to path for imports
+# Import fix
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 # Memory optimizations for efficient training
@@ -20,9 +20,9 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 # Import shared components
 # Use the new separated model file for Switchable Precision
-from models_sp import SPModel, SPLMHeadModel
+from models_sp import SPLMHeadModel
 from dataset import create_dataloaders
-from deploy import save_int8_checkpoint, save_sp_checkpoints
+from deploy import save_sp_checkpoints
 
 # Use try/except to handle both direct execution and import cases
 try:

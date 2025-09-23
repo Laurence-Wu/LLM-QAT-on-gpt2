@@ -11,9 +11,9 @@ from transformers import GPT2Config
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from part1_switchable_precision.config_sp import ModelConfig
-from shared.models_sp import SPModel, SPLMHeadModel
-from part3_evaluation.bit_configurations import BitConfigurations
+from ..config_sp import ModelConfig
+from ..models_sp import SPModel, SPLMHeadModel
+from ...part3_evaluation.bit_configurations import BitConfigurations
 
 
 def test_sp_model_creation():

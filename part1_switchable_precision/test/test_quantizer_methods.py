@@ -11,9 +11,9 @@ import torch.nn as nn
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from shared.quantization import LearnableFakeQuantize
-from test.utils import get_configured_bit_widths
-from part1_switchable_precision.config_sp import ModelConfig
+from ..quantization import LearnableFakeQuantize
+from .utils import get_configured_bit_widths
+from ..config_sp import ModelConfig
 
 
 def test_quantizer_methods():
@@ -152,7 +152,7 @@ def test_quantizer_in_layer():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Import the LoRA layer
-    from shared.lora import LinearWithLoRA
+    from ..lora import LinearWithLoRA
 
     # Test configuration
     in_features = 128

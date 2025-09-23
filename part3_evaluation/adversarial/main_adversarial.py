@@ -16,8 +16,8 @@ from tqdm import tqdm
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from shared.models import SwitchableQATGPT2
-from shared.dataset import create_dataloaders
+from part1_switchable_precision.models_sp import SPLMHeadModel
+from part1_switchable_precision.dataset import create_dataloaders
 from transformers import GPT2Config, GPT2Tokenizer
 
 from evaluation_pipeline import AdversarialEvaluationPipeline
