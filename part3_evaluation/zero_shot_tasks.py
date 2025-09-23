@@ -6,10 +6,12 @@ from tqdm import tqdm
 import torch.nn.functional as F
 
 class ZeroShotEvaluator:
-    def __init__(self, model, tokenizer, device='cuda'):
+    def __init__(self, model, tokenizer, device, config):
+        """Initialize with required config - NO DEFAULTS"""
         self.model = model
         self.tokenizer = tokenizer
         self.device = device
+        self.config = config  # Store full config
         self.model = self.model.to(self.device)
         self.tasks = None
 
@@ -25,40 +27,44 @@ class ZeroShotEvaluator:
         """
         tasks = {}
 
+        dataset_configs = self.config['datasets']
+
         try:
-            tasks['BoolQ'] = load_dataset('boolq', split='validation[:1000]')
+            boolq_cfg = dataset_configs['BoolQ']
+            tasks['BoolQ'] = load_dataset(boolq_cfg['dataset_name'], split=boolq_cfg['split'])
         except Exception as e:
             print(f"Warning: Could not load BoolQ dataset: {e}")
 
         try:
-            tasks['HellaSwag'] = load_dataset('hellaswag', split='validation[:1000]')
+            hellaswag_cfg = dataset_configs['HellaSwag']
+            tasks['HellaSwag'] = load_dataset(hellaswag_cfg['dataset_name'], split=hellaswag_cfg['split'])
         except Exception as e:
             print(f"Warning: Could not load HellaSwag dataset: {e}")
-            # Create mock HellaSwag data for testing
-            tasks['HellaSwag'] = [
-                {'ctx': f'Context {i}', 'endings': [f'End A{i}', f'End B{i}', f'End C{i}', f'End D{i}'], 'label': str(i % 4)}
-                for i in range(50)
-            ]
+            tasks['HellaSwag'] = None
 
         try:
-            tasks['WinoGrande'] = load_dataset('winogrande', 'winogrande_m', split='validation[:1000]')
+            wino_cfg = dataset_configs['WinoGrande']
+            tasks['WinoGrande'] = load_dataset(wino_cfg['dataset_name'], wino_cfg['config'], split=wino_cfg['split'])
         except:
             print("Warning: Could not load WinoGrande dataset")
 
         try:
-            tasks['ARC-e'] = load_dataset('ai2_arc', 'ARC-Easy', split='validation[:1000]')
+            arce_cfg = dataset_configs['ARC-e']
+            tasks['ARC-e'] = load_dataset(arce_cfg['dataset_name'], arce_cfg['config'], split=arce_cfg['split'])
         except Exception as e:
             print(f"Warning: Could not load ARC-Easy dataset: {e}")
             tasks['ARC-e'] = None
 
         try:
-            tasks['ARC-c'] = load_dataset('ai2_arc', 'ARC-Challenge', split='validation[:1000]')
+            arcc_cfg = dataset_configs['ARC-c']
+            tasks['ARC-c'] = load_dataset(arcc_cfg['dataset_name'], arcc_cfg['config'], split=arcc_cfg['split'])
         except Exception as e:
             print(f"Warning: Could not load ARC-Challenge dataset: {e}")
             tasks['ARC-c'] = None
 
         try:
-            tasks['OBQA'] = load_dataset('openbookqa', 'main', split='validation[:1000]')
+            obqa_cfg = dataset_configs['OBQA']
+            tasks['OBQA'] = load_dataset(obqa_cfg['dataset_name'], obqa_cfg['config'], split=obqa_cfg['split'])
         except Exception as e:
             print(f"Warning: Could not load OBQA dataset: {e}")
             tasks['OBQA'] = None
@@ -76,6 +82,8 @@ class ZeroShotEvaluator:
         correct = 0
         total = 0
         errors = 0
+        max_errors = self.config.get('max_errors', 10)
+        show_errors = self.config.get('show_first_n_errors', 3)
 
         self.model.eval()
         with torch.no_grad():
@@ -90,17 +98,17 @@ class ZeroShotEvaluator:
                     break
                 except Exception as e:
                     errors += 1
-                    if errors <= 3:  # Show first 3 errors for debugging
+                    if errors <= show_errors:
                         print(f"\nError in {task_name} example {total}: {str(e)}")
                         import traceback
                         if errors == 1:  # Show full traceback for first error
                             traceback.print_exc()
-                    if errors > 10:
+                    if errors > max_errors:
                         print(f"\nToo many errors in {task_name} ({errors} total), stopping evaluation")
                         break
                     continue
 
-                if total >= 500:  # Reduced for faster evaluation
+                if total >= self.config['max_samples']:
                     break
 
         accuracy = (correct / max(total, 1)) * 100
