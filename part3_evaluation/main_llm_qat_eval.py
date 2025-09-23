@@ -122,7 +122,7 @@ def load_pretrained_weights_into_qat(sp_model, model_name='gpt2'):
 class CalibrationManager:
     """Manages quantizer calibration with warm-up phase"""
 
-    def __init__(self, model, device='cuda'):
+    def __init__(self, model, device):
         self.model = model
         self.device = device
         self.calibrated_bits = set()
@@ -473,77 +473,114 @@ def load_tokenizer():
 # Removed EvaluationMetrics class - using specialized evaluators instead
 
 
+def load_evaluation_config(config_path):
+    """Load evaluation configuration from JSON file. NO DEFAULTS ALLOWED."""
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Evaluation config required but not found: {config_path}\n"
+                              f"Please ensure evaluation_config.json exists at: {config_path}")
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+
+    # Validate required sections
+    required_sections = ['device', 'calibration', 'zero_shot', 'few_shot', 'perplexity', 'output', 'model']
+    missing = [s for s in required_sections if s not in config]
+    if missing:
+        raise ValueError(f"Missing required config sections: {missing}")
+
+    return config
+
+
 def main():
     parser = argparse.ArgumentParser(description='LLM-QAT Paper Evaluation Suite with Standard Methods')
-    parser.add_argument('--model_path', type=str, default=None,
+    parser.add_argument('--model_path', type=str, required=True,
                        help='Path to trained model checkpoint (.pth file)')
-    parser.add_argument('--config_path', type=str, default=None,
+    parser.add_argument('--config_path', type=str,
                        help='Path to training config JSON file (optional, will auto-detect if not provided)')
-    parser.add_argument('--output_dir', type=str, default='part3_evaluation/results',
-                       help='Directory to save results')
+    parser.add_argument('--eval_config', type=str,
+                       default='part3_evaluation/evaluation_config.json',
+                       help='Path to evaluation configuration JSON file')
     args = parser.parse_args()
 
-    # Force CUDA check - always required
-    if not torch.cuda.is_available():
-        print("ERROR: CUDA is required but not available!")
-        print("Please ensure you have a CUDA-capable GPU and PyTorch with CUDA support installed.")
-        sys.exit(1)
+    # Load evaluation configuration (NO DEFAULTS)
+    eval_config = load_evaluation_config(args.eval_config)
+    print(f"Loaded evaluation config from: {args.eval_config}")
+
+    # Check CUDA requirement from config
+    if eval_config['model']['require_cuda']:
+        if not torch.cuda.is_available():
+            print("ERROR: CUDA is required (per evaluation config) but not available!")
+            print("Please ensure you have a CUDA-capable GPU and PyTorch with CUDA support installed.")
+            sys.exit(1)
 
     # Load model from checkpoint
     model = load_switchable_model(args.model_path, config_path=args.config_path, use_pretrained=False)
     tokenizer = load_tokenizer()
 
-    # Initialize all evaluation components
+    # Initialize all evaluation components with config
+    device = eval_config['device']
     evaluator = LLMQATEvaluation(model, tokenizer)
-    zero_shot_evaluator = ZeroShotEvaluator(model, tokenizer)
-    few_shot_evaluator = FewShotEvaluator(model, tokenizer)
-    perplexity_evaluator = PerplexityEvaluator(model, tokenizer)
+    zero_shot_evaluator = ZeroShotEvaluator(model, tokenizer, device=device, config=eval_config['zero_shot'])
+    few_shot_evaluator = FewShotEvaluator(model, tokenizer, device=device, config=eval_config['few_shot'])
+    perplexity_evaluator = PerplexityEvaluator(model, tokenizer, device=device, config=eval_config['perplexity'])
 
-    # Prepare calibration data
-    print("\nPreparing calibration data...")
-    calibration_dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split='validation')
-    calibration_texts = [sample['text'] for sample in calibration_dataset if len(sample['text'].strip()) > 0][:100]
+    # Prepare calibration data from config
+    calib_cfg = eval_config['calibration']
+    print(f"\nPreparing calibration data from {calib_cfg['dataset']}...")
+    calibration_dataset = load_dataset(
+        calib_cfg['dataset'],
+        calib_cfg['dataset_config'],
+        split=calib_cfg['split']
+    )
+    calibration_texts = [sample['text'] for sample in calibration_dataset
+                        if len(sample['text'].strip()) > 0][:calib_cfg['num_samples']]
 
-    # Tokenize calibration data
+    # Tokenize calibration data with config parameters
     calibration_data = []
     for text in calibration_texts:
-        tokens = tokenizer(text, return_tensors='pt', max_length=128, truncation=True, padding='max_length')
+        tokens = tokenizer(
+            text,
+            return_tensors='pt',
+            max_length=calib_cfg['max_length'],
+            truncation=calib_cfg['truncation'],
+            padding=calib_cfg['padding']
+        )
         # Squeeze to remove batch dimension since DataLoader will add it back
         calibration_data.append(tokens['input_ids'].squeeze(0))
 
     calibration_loader = torch.utils.data.DataLoader(
-        calibration_data, batch_size=4, shuffle=False
+        calibration_data,
+        batch_size=calib_cfg['batch_size'],
+        shuffle=False
     )
 
     # Initialize calibration manager and perform warm-up
-    calib_manager = CalibrationManager(model)
+    calib_manager = CalibrationManager(model, device=device)
     try:
         # Try to access bit_widths attribute
         model_bit_widths = model.transformer.bit_widths  # For SPLMHeadModel, bit_widths is in transformer
         print("\nPerforming warm-up calibration for all bit-widths...")
-        warm_up_samples = 10  # Default warm-up samples
-        calib_manager.warm_up_calibration(calibration_loader, model_bit_widths, num_batches=warm_up_samples)
+        warm_up_batches = calib_cfg['warm_up_batches']  # From config, no default
+        calib_manager.warm_up_calibration(calibration_loader, model_bit_widths, num_batches=warm_up_batches)
     except AttributeError as e:
         raise AttributeError(f"Model does not support switchable precision: {e}\nPlease ensure the model was trained with SPLMHeadModel.")
 
     # Get current model's bit configuration
-    current_bits = model.transformer.current_bits if hasattr(model.transformer, 'current_bits') else 32
+    try:
+        current_bits = model.transformer.current_bits
+    except AttributeError:
+        # Use config default if attribute doesn't exist
+        current_bits = eval_config['model']['default_precision']
+        print(f"Warning: Could not get current_bits from model, using config default: {current_bits}")
     print(f"Current model precision: {current_bits}-bit")
 
-    # Map current bit-width to configuration name
-    bit_to_config = {
-        6: 'INT6',
-        8: 'INT8',
-        16: 'FP16',
-        32: 'FP32'
-    }
+    # Map current bit-width to configuration name from config
+    bit_to_config = {int(k): v for k, v in eval_config['model']['bit_to_config_mapping'].items()}
 
     config_name = bit_to_config.get(current_bits, f'INT{current_bits}')
     print(f"Configuration to evaluate: {config_name}")
 
-    # Hardcoded evaluation settings
-    max_eval_samples = 100
-    output_dir = args.output_dir
+    # Get evaluation settings from config
+    output_dir = eval_config['output']['directory']
 
     print("="*70)
     print("Running SP Model Evaluation")
@@ -551,7 +588,9 @@ def main():
     print(f"Model: GPT-2 ({evaluator.model_params:.1f}M parameters)")
     print(f"Current precision: {current_bits}-bit ({config_name})")
     print(f"Output directory: {output_dir}")
-    print(f"Max evaluation samples: {max_eval_samples}")
+    print(f"Max zero-shot samples: {eval_config['zero_shot']['max_samples']}")
+    print(f"Max few-shot samples: {eval_config['few_shot']['max_samples']}")
+    print(f"Max perplexity samples: {eval_config['perplexity']['max_samples']}")
     print("="*70)
 
     results = {}
@@ -646,7 +685,8 @@ def main():
     output_path = Path(output_dir)
     output_path.mkdir(exist_ok=True, parents=True)
 
-    with open(output_path / 'llm_qat_results.json', 'w') as f:
+    results_filename = eval_config['output']['results_filename']
+    with open(output_path / results_filename, 'w') as f:
         json.dump(results, f, indent=2)
 
     print(f"\n{'='*70}")
