@@ -233,7 +233,6 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
 
         if not json_path and model_path.endswith('.pth'):
             # Try to auto-detect matching JSON file
-            import os.path
             dir_path = os.path.dirname(model_path) if os.path.dirname(model_path) else '.'
             base_name = os.path.basename(model_path)
             timestamp = base_name.split('_')[-1].replace('.pth', '')
