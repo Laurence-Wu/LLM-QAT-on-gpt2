@@ -83,7 +83,7 @@ def initialize_model(model_config, device):
     # Set to 32-bit precision to unfreeze teacher weights after loading
     # This is critical - load_pretrained_weights freezes everything,
     # but 32-bit teacher needs unfrozen weights for training
-    model.unfreeze_weights_for_bit(32)
+    model.unfreeze_weights(32)
     print("Set initial precision to 32-bit (teacher mode) - weights unfrozen for teacher training")
 
     print(f"SP Model: {model_config.n_layer} layers, bit-widths: {model_config.bit_widths}")
