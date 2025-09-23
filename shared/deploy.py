@@ -203,6 +203,28 @@ def save_int8_checkpoint(model, filepath, model_config=None, training_config=Non
     return checkpoint
 
 
+def fix_quantizer_shapes(state_dict):
+    """Fix shape mismatches for quantizer parameters.
+
+    Converts scalar tensors torch.Size([]) to torch.Size([1]) for compatibility.
+    """
+    import torch
+
+    fixed_dict = {}
+    for key, value in state_dict.items():
+        # Check if this is a quantizer parameter that needs fixing
+        if any(param in key for param in ['scale', 'zero_point', 'running_min', 'running_max']):
+            if torch.is_tensor(value) and value.dim() == 0:  # Scalar tensor
+                # Convert to size [1] tensor
+                fixed_dict[key] = value.unsqueeze(0)
+            else:
+                fixed_dict[key] = value
+        else:
+            fixed_dict[key] = value
+
+    return fixed_dict
+
+
 def save_sp_checkpoints(model, base_filename, model_config, training_config=None):
     """
     Save Switchable Precision model checkpoints for all configured bit widths.
@@ -218,6 +240,7 @@ def save_sp_checkpoints(model, base_filename, model_config, training_config=None
     """
     import os
     import time
+    import json
 
     # Get configured bit widths from model config
     bit_widths = getattr(model_config, 'bit_widths', [6, 8, 16, 32])
@@ -229,6 +252,35 @@ def save_sp_checkpoints(model, base_filename, model_config, training_config=None
     print(f"{'='*60}")
     print(f"Configured bit widths: {bit_widths}")
 
+    # First, save complete configuration to JSON
+    json_filename = f"{base_filename}_config_{timestamp}.json"
+    config_data = {
+        'model_config': {},
+        'training_config': {},
+        'timestamp': timestamp
+    }
+
+    # Save ALL model config attributes
+    for attr_name in dir(model_config):
+        if not attr_name.startswith('_'):
+            attr_value = getattr(model_config, attr_name)
+            # Skip methods
+            if not callable(attr_value):
+                config_data['model_config'][attr_name] = attr_value
+
+    # Save ALL training config attributes if provided
+    if training_config:
+        for attr_name in dir(training_config):
+            if not attr_name.startswith('_'):
+                attr_value = getattr(training_config, attr_name)
+                if not callable(attr_value):
+                    config_data['training_config'][attr_name] = attr_value
+
+    # Write JSON config
+    with open(json_filename, 'w') as f:
+        json.dump(config_data, f, indent=2)
+    print(f"✓ Saved complete configuration to: {json_filename}")
+
     for bits in bit_widths:
         if bits == 32:
             # Save FP32 teacher model
@@ -236,13 +288,18 @@ def save_sp_checkpoints(model, base_filename, model_config, training_config=None
             model.set_precision(32)
             fp32_filename = f"{base_filename}_32bit_fp32_{timestamp}.pth"
 
+            # Get state dict and fix shape mismatches
+            state_dict = model.state_dict()
+            state_dict = fix_quantizer_shapes(state_dict)
+
             # Save full FP32 checkpoint
             torch.save({
-                'model_state_dict': model.state_dict(),
+                'model_state_dict': state_dict,
                 'model_config': model_config.__dict__,
                 'training_config': training_config.__dict__ if training_config else None,
                 'bit_width': 32,
-                'timestamp': timestamp
+                'timestamp': timestamp,
+                'config_json_path': json_filename  # Reference to complete config
             }, fp32_filename)
 
             saved_checkpoints[32] = fp32_filename

@@ -193,6 +193,25 @@ class CalibrationManager:
         torch.cuda.empty_cache()
 
 
+def fix_state_dict_shapes(state_dict):
+    """Fix shape mismatches in loaded state dict.
+
+    Handles conversion between scalar tensors and size [1] tensors.
+    """
+    fixed_dict = {}
+    for key, value in state_dict.items():
+        # Check if this is a quantizer parameter
+        if any(param in key for param in ['scale', 'zero_point', 'running_min', 'running_max']):
+            if torch.is_tensor(value) and value.dim() == 0:
+                # Convert scalar to size [1] tensor
+                fixed_dict[key] = value.unsqueeze(0)
+            else:
+                fixed_dict[key] = value
+        else:
+            fixed_dict[key] = value
+    return fixed_dict
+
+
 def load_switchable_model(model_path: str = None, config_path: str = None, use_pretrained: bool = True):
     """Load switchable precision model with proper configuration"""
 
@@ -214,11 +233,24 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
 
         if not json_path and model_path.endswith('.pth'):
             # Try to auto-detect matching JSON file
-            timestamp = model_path.split('_')[-1].replace('.pth', '')
-            possible_json = f"qat_training_stats_{timestamp}.json"
-            if os.path.exists(possible_json):
-                json_path = possible_json
-                print(f"Auto-detected matching JSON config: {json_path}")
+            import os.path
+            dir_path = os.path.dirname(model_path) if os.path.dirname(model_path) else '.'
+            base_name = os.path.basename(model_path)
+            timestamp = base_name.split('_')[-1].replace('.pth', '')
+
+            # Try multiple patterns
+            possible_jsons = [
+                os.path.join(dir_path, f"sp_gpt2_config_{timestamp}.json"),  # New format
+                os.path.join(dir_path, f"qat_training_stats_{timestamp}.json"),  # Old format
+                f"sp_gpt2_config_{timestamp}.json",
+                f"qat_training_stats_{timestamp}.json"
+            ]
+
+            for possible_json in possible_jsons:
+                if os.path.exists(possible_json):
+                    json_path = possible_json
+                    print(f"Auto-detected matching JSON config: {json_path}")
+                    break
 
         if json_path and os.path.exists(json_path):
             print(f"Using config from: {json_path}")
@@ -336,6 +368,10 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
         if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
             # Load state dict with size mismatch handling for attention bias
             state_dict = checkpoint['model_state_dict']
+
+            # Fix quantizer shape mismatches first
+            state_dict = fix_state_dict_shapes(state_dict)
+
             model_state = model.state_dict()
 
             # Handle size mismatches for attention bias
@@ -367,9 +403,26 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
                                 new_bias = saved_bias  # Keep original if shape is unexpected
                         state_dict[key] = new_bias
 
-            # Load the modified state dict
-            model.load_state_dict(state_dict, strict=False)
-            print("Model checkpoint loaded successfully")
+            # Load the modified state dict with strict=False to handle minor mismatches
+            missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+
+            if missing_keys:
+                print(f"Warning: Missing keys in checkpoint: {len(missing_keys)} keys")
+                # Only show first 10 missing keys to avoid clutter
+                for key in missing_keys[:10]:
+                    print(f"  - {key}")
+                if len(missing_keys) > 10:
+                    print(f"  ... and {len(missing_keys) - 10} more")
+
+            if unexpected_keys:
+                print(f"Warning: Unexpected keys in checkpoint: {len(unexpected_keys)} keys")
+                # Only show first 10 unexpected keys
+                for key in unexpected_keys[:10]:
+                    print(f"  - {key}")
+                if len(unexpected_keys) > 10:
+                    print(f"  ... and {len(unexpected_keys) - 10} more")
+
+            print("Model checkpoint loaded successfully (with shape fixes and warnings handled)")
         elif not isinstance(checkpoint, dict):
             model = checkpoint
     else:
