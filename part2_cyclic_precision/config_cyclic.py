@@ -22,7 +22,6 @@ class ModelConfig:
         # LoRA settings
         self.lora_rank = 8
         self.lora_alpha = 16
-        self.lora_dropout = 0.1
 
 
 class CyclicTrainingConfig:

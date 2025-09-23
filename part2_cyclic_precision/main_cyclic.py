@@ -48,7 +48,6 @@ def initialize_model(model_config, device):
     # Add LoRA configuration to the config object
     gpt2_config.lora_rank = model_config.lora_rank
     gpt2_config.lora_alpha = model_config.lora_alpha
-    gpt2_config.lora_dropout = model_config.lora_dropout
 
     # Initialize model
     model = CPTLMHeadModel(gpt2_config)

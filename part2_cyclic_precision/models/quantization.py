@@ -20,7 +20,7 @@ except ImportError:
 
 
 class LearnableFakeQuantize(nn.Module):
-    def __init__(self, num_bits=8, symmetric=False, per_channel=True,
+    def __init__(self, num_bits=8, per_channel=True,
                  channel_dim=0, quantizer_type='minmax', eps=1e-5):
         """
         Initialize the quantization layer with configurable quantizer type.
@@ -34,7 +34,7 @@ class LearnableFakeQuantize(nn.Module):
         """
         super().__init__()
         self.num_bits = max(1, min(num_bits, 32))
-        self.symmetric = symmetric
+        self.symmetric = True  # Always use symmetric quantization
         self.per_channel = per_channel
         self.channel_dim = channel_dim
         self.quantizer_type = quantizer_type

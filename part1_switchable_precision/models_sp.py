@@ -36,7 +36,6 @@ class SPAttention(nn.Module):
         # Get LoRA configs from config - throw error if not provided
         lora_rank_per_bit = config.lora_rank_per_bit
         lora_alpha_per_bit = config.lora_alpha_per_bit
-        lora_dropout = config.lora_dropout
         quantizer_per_bit = config.quantizer_per_bit
 
         # Switchable layers with per-bit-width LoRA modules
@@ -45,7 +44,6 @@ class SPAttention(nn.Module):
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
-            lora_dropout=lora_dropout,
             quantizer_per_bit=quantizer_per_bit
         )
         self.c_proj = SPLinearWithLoRA(
@@ -53,7 +51,6 @@ class SPAttention(nn.Module):
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
-            lora_dropout=lora_dropout,
             quantizer_per_bit=quantizer_per_bit
         )
 
@@ -110,7 +107,6 @@ class SPMLP(nn.Module):
                 f"Config missing required switchable precision attributes: {e}\n"
                 "Required: lora_rank_per_bit, lora_alpha_per_bit"
             )
-        lora_dropout = getattr(config, 'lora_dropout', 0.1)
         quantizer_per_bit = getattr(config, 'quantizer_per_bit', None)
 
         # Switchable layers with per-bit-width LoRA modules
@@ -119,7 +115,6 @@ class SPMLP(nn.Module):
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
-            lora_dropout=lora_dropout,
             quantizer_per_bit=quantizer_per_bit
         )
         self.c_proj = SPLinearWithLoRA(
@@ -127,7 +122,6 @@ class SPMLP(nn.Module):
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
-            lora_dropout=lora_dropout,
             quantizer_per_bit=quantizer_per_bit
         )
         self.act = nn.GELU()

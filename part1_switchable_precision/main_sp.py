@@ -55,7 +55,6 @@ def initialize_model(model_config, device):
     gpt2_config.quantization_bits = model_config.quantization_bits
     gpt2_config.lora_rank = model_config.lora_rank
     gpt2_config.lora_alpha = model_config.lora_alpha
-    gpt2_config.lora_dropout = model_config.lora_dropout
     gpt2_config.lora_rank_per_bit = model_config.lora_rank_per_bit
     gpt2_config.lora_alpha_per_bit = model_config.lora_alpha_per_bit
     gpt2_config.activation_bits_per_bit = model_config.activation_bits_per_bit

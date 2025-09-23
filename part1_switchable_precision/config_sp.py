@@ -34,7 +34,6 @@ class ModelConfig:
         # LoRA settings (used when not in switchable mode)
         self.lora_rank = 16
         self.lora_alpha = 32
-        self.lora_dropout = 0.1
 
         # Switchable precision settings
         self.bit_widths = [6, 8, 16, 32]  # Include teacher bit-width in list

@@ -151,20 +151,13 @@ class LearnableFakeQuantize(nn.Module):
             self.num_batches_collected += 1
 
     def forward(self, x):
-        """
-        Forward pass with multiple quantization strategies.
-        The quantizer type determines how we transform and quantize the input.
-        """
-        # Skip quantization for 32-bit FP32 teacher
         if self.num_bits >= 32:
             return x
-
-        # Calibration mode - just collect stats, no quantization
         if self.collecting_stats:
             self._collect_statistics_batch(x)
             return x
 
-        # Require manual calibration - no fallback
+        # You always need the manual calibration
         if not self.calibrated:
             raise RuntimeError(f"Quantizer not calibrated. Please run calibration first for {self.quantizer_type} quantizer.")
 

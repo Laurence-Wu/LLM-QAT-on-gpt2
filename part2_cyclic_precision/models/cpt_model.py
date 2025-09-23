@@ -33,26 +33,23 @@ class CPTAttention(nn.Module):
         # Single LoRA adapter that will be trained with cyclic precision
         lora_rank = getattr(config, 'lora_rank', 16)
         lora_alpha = getattr(config, 'lora_alpha', 32)
-        lora_dropout = getattr(config, 'lora_dropout', 0.1)
 
         self.c_attn = LinearWithLoRA(
             config.n_embd, 3 * config.n_embd,
             bits=bits,
             lora_rank=lora_rank,
-            lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout
+            lora_alpha=lora_alpha
         )
         self.c_proj = LinearWithLoRA(
             config.n_embd, config.n_embd,
             bits=bits,
             lora_rank=lora_rank,
-            lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout
+            lora_alpha=lora_alpha
         )
 
         # KV cache quantizer
         kv_bits = getattr(config, 'kv_cache_bits', bits)
-        self.kv_quantizer = LearnableFakeQuantize(num_bits=kv_bits, symmetric=False, eps=1e-5)
+        self.kv_quantizer = LearnableFakeQuantize(num_bits=kv_bits, eps=1e-5)
 
         self.register_buffer("bias", torch.tril(torch.ones(config.n_positions, config.n_positions)))
 
@@ -112,21 +109,18 @@ class CPTMLP(nn.Module):
         # Single LoRA adapter that will be trained with cyclic precision
         lora_rank = getattr(config, 'lora_rank', 16)
         lora_alpha = getattr(config, 'lora_alpha', 32)
-        lora_dropout = getattr(config, 'lora_dropout', 0.1)
 
         self.c_fc = LinearWithLoRA(
             config.n_embd, 4 * config.n_embd,
             bits=bits,
             lora_rank=lora_rank,
-            lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout
+            lora_alpha=lora_alpha
         )
         self.c_proj = LinearWithLoRA(
             4 * config.n_embd, config.n_embd,
             bits=bits,
             lora_rank=lora_rank,
-            lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout
+            lora_alpha=lora_alpha
         )
         self.act = nn.GELU()
 

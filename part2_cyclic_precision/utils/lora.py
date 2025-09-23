@@ -44,9 +44,9 @@ class LoRALayer(nn.Module):
 
             # Quantizers for LoRA weights (only for low-bit modes)
             # A: [rank, in_features] -> quantize along in_features (dim=1)
-            self.quantize_A = LearnableFakeQuantize(num_bits=bits, symmetric=True, quantizer_type=quantizer_type, channel_dim=1, eps=eps)
+            self.quantize_A = LearnableFakeQuantize(num_bits=bits, quantizer_type=quantizer_type, channel_dim=1, eps=eps)
             # B: [out_features, rank] -> quantize along out_features (dim=0)
-            self.quantize_B = LearnableFakeQuantize(num_bits=bits, symmetric=True, quantizer_type=quantizer_type, channel_dim=0, eps=eps)
+            self.quantize_B = LearnableFakeQuantize(num_bits=bits, quantizer_type=quantizer_type, channel_dim=0, eps=eps)
 
         # Only allocate buffers if LoRA is enabled to save memory
         if self.enabled:
@@ -87,9 +87,9 @@ class LinearWithLoRA(nn.Module):
 
         # Fake quantizers
         # Weight: [out_features, in_features] -> channel_dim=0 (per output channel)
-        self.quantize_weight = LearnableFakeQuantize(num_bits=bits, symmetric=True, quantizer_type=quantizer_type, channel_dim=0, eps=eps)
+        self.quantize_weight = LearnableFakeQuantize(num_bits=bits, quantizer_type=quantizer_type, channel_dim=0, eps=eps)
         # Input: [batch, in_features] -> channel_dim=1 (per feature)
-        self.quantize_input = LearnableFakeQuantize(num_bits=bits, symmetric=True, quantizer_type=quantizer_type, channel_dim=1, eps=eps)
+        self.quantize_input = LearnableFakeQuantize(num_bits=bits, quantizer_type=quantizer_type, channel_dim=1, eps=eps)
 
         # LoRA adapter with config parameters
         self.lora = LoRALayer(in_features, out_features,
@@ -181,13 +181,13 @@ class SPLinearWithLoRA(nn.Module):
 
         # Weight quantizers: [out_features, in_features] -> channel_dim=0 (per output channel)
         self.quantizers_weight = nn.ModuleDict({
-            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True,
+            f'{bits}bit': LearnableFakeQuantize(num_bits=bits,
                                                 quantizer_type=quantizer_per_bit.get(bits, 'minmax'), channel_dim=0, eps=eps)
             for bits in bit_widths
         })
         # Input quantizers: [batch, in_features] -> channel_dim=1 (per feature)
         self.quantizers_input = nn.ModuleDict({
-            f'{bits}bit': LearnableFakeQuantize(num_bits=bits, symmetric=True,
+            f'{bits}bit': LearnableFakeQuantize(num_bits=bits,
                                                 quantizer_type=quantizer_per_bit.get(bits, 'minmax'), channel_dim=1, eps=eps)
             for bits in bit_widths
         })
