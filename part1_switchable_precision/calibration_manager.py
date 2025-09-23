@@ -1,3 +1,5 @@
+import gc
+import torch
 
 class CalibrationManager:
     """Manages quantizer calibration for different bit-widths."""
@@ -131,7 +133,8 @@ class CalibrationManager:
 
         print(f"    ✓ Calibrated {input_calibrated} input quantizers and {lora_calibrated} LoRA quantizers")
 
-        cleanup_memory()
+        torch.cuda.empty_cache()
+        gc.collect()
 
     def ensure_calibrated(self, bits):
         """Ensure the given bit-width is calibrated, calibrate if not."""
