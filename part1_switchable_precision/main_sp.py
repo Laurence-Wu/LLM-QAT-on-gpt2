@@ -20,9 +20,9 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 # Import shared components
 # Use the new separated model file for Switchable Precision
-from shared.models_sp import SPModel, SPLMHeadModel
-from shared.dataset import create_dataloaders
-from shared.deploy import save_int8_checkpoint, save_sp_checkpoints
+from models_sp import SPModel, SPLMHeadModel
+from dataset import create_dataloaders
+from deploy import save_int8_checkpoint, save_sp_checkpoints
 
 # Use try/except to handle both direct execution and import cases
 try:

@@ -1,0 +1,63 @@
+{
+  "model": {
+    "n_layer": null,
+    "n_head": null,
+    "n_embd": null,
+    "vocab_size": null,
+    "n_positions": null,
+    "block_size": null,
+    "dropout": null,
+    "lora_rank": null,
+    "lora_alpha": null,
+    "lora_dropout": null,
+    "kv_cache_bits": null
+  },
+  "training": {
+    "Bmin": null,
+    "Bmax": null,
+    "total_epochs": null,
+    "num_cycles": null,
+    "learning_rate": null,
+    "batch_size": null,
+    "gradient_bits": null,
+    "weight_decay": null,
+    "warmup_steps": null,
+    "gradient_clip": null,
+    "checkpoint_interval": null
+  },
+  "prt": {
+    "use_prt": null,
+    "test_iterations": null,
+    "threshold": null,
+    "min_test_bits": null,
+    "max_test_bits": null
+  },
+  "calibration": {
+    "calib_batches": null,
+    "recalib_threshold": null,
+    "calibration_method": null
+  },
+  "data": {
+    "dataset_name": null,
+    "data_path": null,
+    "train_split": null,
+    "val_split": null,
+    "test_split": null,
+    "max_length": null,
+    "stride": null,
+    "num_workers": null
+  },
+  "evaluation": {
+    "eval_interval": null,
+    "eval_batches": null,
+    "save_best": null,
+    "metric": null
+  },
+  "logging": {
+    "log_interval": null,
+    "save_dir": null,
+    "experiment_name": null,
+    "use_wandb": null,
+    "wandb_project": null
+  }
+}

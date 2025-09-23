@@ -12,17 +12,16 @@ import time
 import json
 from transformers import GPT2Config, GPT2TokenizerFast, GPT2Model
 
-# Add shared folder to path for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'shared'))
+# Imports are now local to this folder
 
 # Memory optimizations
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True,max_split_size_mb:512'
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
-# Import shared components
-# Use the new separated model file for Cyclic Precision Training
-from models_cpt import CPTModel, CPTLMHeadModel, CyclicPrecisionScheduler
-from dataset import create_dataloaders
+# Import CPT components
+from models.cpt_model import CPTModel, CPTLMHeadModel
+from training.cpt_scheduler import CPTScheduler
+from utils.dataset import create_dataloaders
 
 # Import local configurations and training
 from config_cyclic import ModelConfig, CyclicTrainingConfig, CyclicPrecisionConfig
