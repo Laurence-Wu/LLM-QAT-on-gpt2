@@ -109,6 +109,8 @@ class SPLinearWithLoRA(nn.Module):
         self.register_buffer('input_quantized', None)
 
     def set_precision(self, bits) -> int:
+        if bits >= 32:
+            return 32
         self.current_bits = bits
         bits_key = f'{bits}bit'
         # Update quantizers
