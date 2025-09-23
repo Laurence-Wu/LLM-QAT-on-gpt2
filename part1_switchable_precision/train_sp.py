@@ -100,7 +100,7 @@ class CalibrationManager:
                 continue
 
             if bits_key not in module.quantizers_weight:
-                weight_errors.append(f"{name}: Missing {bits_key} in quantizers_weight")
+                print(f"{name}: Missing {bits_key} in quantizers_weight")
                 continue
 
             weight_quantizer = module.quantizers_weight[bits_key]
@@ -129,6 +129,47 @@ class CalibrationManager:
             print(f"    ⚠️ {len(weight_errors)} warnings (showing first 3):")
             for err in weight_errors[:3]:
                 print(f"      - {err}")
+
+         # Step 2: Calibrate LoRA quantizers
+        print(f"  Step 2: Calibrating LoRA quantizers for {bits}-bit...")
+        lora_calibrated = 0
+        lora_errors = []
+
+        for name, module in self.model.named_modules():
+            if not hasattr(module, 'lora_adapters'):
+                continue
+
+            if bits_key not in module.lora_adapters:
+                continue
+
+            lora_layer = module.lora_adapters[bits_key]
+
+            # Calibrate LoRA A quantizer if it exists and is enabled
+            if hasattr(lora_layer, 'quantize_A') and lora_layer.enabled:
+                try:
+                    lora_layer.quantize_A.start_calibration()
+                    with torch.no_grad():
+                        _ = lora_layer.quantize_A(lora_layer.lora_A)
+                    lora_layer.quantize_A.finish_calibration(debug=False)
+                    lora_calibrated += 1
+                except Exception as e:
+                    lora_errors.append(f"{name}.lora_A: {str(e)}")
+
+            # Calibrate LoRA B quantizer if it exists and is enabled
+            if hasattr(lora_layer, 'quantize_B') and lora_layer.enabled:
+                try:
+                    lora_layer.quantize_B.start_calibration()
+                    with torch.no_grad():
+                        _ = lora_layer.quantize_B(lora_layer.lora_B)
+                    lora_layer.quantize_B.finish_calibration(debug=False)
+                    lora_calibrated += 1
+                except Exception as e:
+                    lora_errors.append(f"{name}.lora_B: {str(e)}")
+
+        print(f"    ✓ Calibrated {lora_calibrated} LoRA quantizers")
+        if lora_errors:
+            print(f"    ⚠️ {len(lora_errors)} LoRA calibration warnings")
+
 
         # Step 2: Calibrate INPUT quantizers via forward passes
         print(f"  Step 2: Calibrating input quantizers for {bits}-bit...")
@@ -163,6 +204,7 @@ class CalibrationManager:
                 input_calibrated += 1
 
         print(f"    ✓ Calibrated {input_calibrated} input quantizers")
+
 
         cleanup_memory()
 
