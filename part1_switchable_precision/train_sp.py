@@ -198,6 +198,114 @@ class CalibrationManager:
 
         cleanup_memory()
 
+    def ensure_calibrated(self, bits):
+        """Ensure the given bit-width is calibrated, calibrate if not."""
+        if bits >= 32:
+            # 32-bit doesn't need calibration
+            return
+
+        if bits not in self.calibrated_bits:
+            print(f"  ⚠️ {bits}-bit not calibrated, calibrating now...")
+            self.model.set_precision(bits)
+            self._calibrate_precision(bits, num_batches=10)
+            self.calibrated_bits.add(bits)
+
+        # Print calibration statistics for debugging
+        self._print_calibration_stats(bits)
+
+    def _print_calibration_stats(self, bits):
+        """Print detailed calibration statistics for debugging."""
+        bits_key = f'{bits}bit'
+        print(f"\n  📊 Calibration Statistics for {bits}-bit:")
+
+        # Collect statistics for weight quantizers
+        weight_stats = []
+        for name, module in self.model.named_modules():
+            if hasattr(module, 'quantizers_weight') and bits_key in module.quantizers_weight:
+                q = module.quantizers_weight[bits_key]
+                if q.calibrated:
+                    weight_stats.append({
+                        'name': f"{name}.weight",
+                        'scale': q.scale.mean().item() if q.scale.numel() > 1 else q.scale.item(),
+                        'zero_point': q.zero_point.mean().item() if q.zero_point.numel() > 1 else q.zero_point.item(),
+                        'min': q.running_min.min().item() if hasattr(q, 'running_min') else 0,
+                        'max': q.running_max.max().item() if hasattr(q, 'running_max') else 0,
+                        'type': q.quantizer_type
+                    })
+
+        # Collect statistics for LoRA quantizers
+        lora_stats = []
+        for name, module in self.model.named_modules():
+            if hasattr(module, 'lora_adapters') and bits_key in module.lora_adapters:
+                lora_layer = module.lora_adapters[bits_key]
+                if hasattr(lora_layer, 'quantize_A') and lora_layer.enabled and lora_layer.quantize_A.calibrated:
+                    q = lora_layer.quantize_A
+                    lora_stats.append({
+                        'name': f"{name}.lora_A",
+                        'scale': q.scale.mean().item() if q.scale.numel() > 1 else q.scale.item(),
+                        'zero_point': q.zero_point.mean().item() if q.zero_point.numel() > 1 else q.zero_point.item(),
+                        'min': q.running_min.min().item() if hasattr(q, 'running_min') else 0,
+                        'max': q.running_max.max().item() if hasattr(q, 'running_max') else 0,
+                        'type': q.quantizer_type
+                    })
+                if hasattr(lora_layer, 'quantize_B') and lora_layer.enabled and lora_layer.quantize_B.calibrated:
+                    q = lora_layer.quantize_B
+                    lora_stats.append({
+                        'name': f"{name}.lora_B",
+                        'scale': q.scale.mean().item() if q.scale.numel() > 1 else q.scale.item(),
+                        'zero_point': q.zero_point.mean().item() if q.zero_point.numel() > 1 else q.zero_point.item(),
+                        'min': q.running_min.min().item() if hasattr(q, 'running_min') else 0,
+                        'max': q.running_max.max().item() if hasattr(q, 'running_max') else 0,
+                        'type': q.quantizer_type
+                    })
+
+        # Print weight quantizer statistics
+        if weight_stats:
+            print(f"  Weight Quantizers ({len(weight_stats)} total):")
+            # Check for duplicate scales
+            scales = [s['scale'] for s in weight_stats]
+            unique_scales = len(set(scales))
+            if unique_scales < len(scales):
+                print(f"    ⚠️ WARNING: Only {unique_scales} unique scale values out of {len(scales)} quantizers!")
+
+            # Show distribution
+            scale_min = min(scales)
+            scale_max = max(scales)
+            scale_mean = sum(scales) / len(scales)
+            print(f"    Scale range: [{scale_min:.6f}, {scale_max:.6f}], mean: {scale_mean:.6f}")
+
+            # Show sample of quantizers with same scale (if any)
+            from collections import Counter
+            scale_counts = Counter(scales)
+            duplicates = [(scale, count) for scale, count in scale_counts.items() if count > 1]
+            if duplicates:
+                print(f"    Duplicate scales found:")
+                for scale, count in duplicates[:3]:  # Show first 3
+                    print(f"      Scale {scale:.6f}: {count} quantizers")
+
+        # Print LoRA quantizer statistics
+        if lora_stats:
+            print(f"  LoRA Quantizers ({len(lora_stats)} total):")
+            scales = [s['scale'] for s in lora_stats]
+            unique_scales = len(set(scales))
+            if unique_scales < len(scales):
+                print(f"    ⚠️ WARNING: Only {unique_scales} unique scale values out of {len(scales)} quantizers!")
+
+            scale_min = min(scales)
+            scale_max = max(scales)
+            scale_mean = sum(scales) / len(scales)
+            print(f"    Scale range: [{scale_min:.6f}, {scale_max:.6f}], mean: {scale_mean:.6f}")
+
+            # Group by type (A vs B)
+            a_scales = [s['scale'] for s in lora_stats if 'lora_A' in s['name']]
+            b_scales = [s['scale'] for s in lora_stats if 'lora_B' in s['name']]
+            if a_scales:
+                print(f"    LoRA A scales - min: {min(a_scales):.6f}, max: {max(a_scales):.6f}, unique: {len(set(a_scales))}")
+            if b_scales:
+                print(f"    LoRA B scales - min: {min(b_scales):.6f}, max: {max(b_scales):.6f}, unique: {len(set(b_scales))}")
+
+        print()  # Empty line for readability
+
 
 # ============================================================================
 # STATISTICS TRACKER
