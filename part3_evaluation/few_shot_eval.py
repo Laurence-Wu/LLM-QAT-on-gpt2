@@ -6,13 +6,15 @@ from tqdm import tqdm
 import random
 
 class FewShotEvaluator:
-    def __init__(self, model, tokenizer, device='cuda'):
+    def __init__(self, model, tokenizer, device, config):
+        """Initialize with required config - NO DEFAULTS"""
         self.model = model
         self.tokenizer = tokenizer
         self.device = device
+        self.config = config  # Store full config
         self.model = self.model.to(self.device)
 
-    def evaluate_mmlu(self, bit_config: Dict, num_shots: int = 5) -> Dict:
+    def evaluate_mmlu(self, bit_config: Dict, num_shots: int = None) -> Dict:
         """
         Evaluate on MMLU with 5-shot prompting
         Return scores by category:
@@ -22,8 +24,12 @@ class FewShotEvaluator:
         - Other
         - Average
         """
+        if num_shots is None:
+            num_shots = self.config['num_shots']
+
+        mmlu_cfg = self.config['datasets']['MMLU']
         try:
-            dataset = load_dataset('cais/mmlu', 'all', split='test[:1000]')
+            dataset = load_dataset(mmlu_cfg['dataset_name'], mmlu_cfg['config'], split=mmlu_cfg['split'])
         except Exception as e:
             print(f"Warning: Could not load MMLU dataset: {e}")
             return {
@@ -34,20 +40,19 @@ class FewShotEvaluator:
                 'Average': 0.0
             }
 
-        categories = {
-            'Humanities': ['history', 'philosophy', 'law'],
-            'STEM': ['physics', 'chemistry', 'biology', 'computer_science', 'math', 'engineering'],
-            'Social Sciences': ['politics', 'sociology', 'psychology', 'economics'],
-            'Other': ['other', 'business', 'health']
-        }
+        categories = self.config['mmlu_categories']
 
         results_by_category = {cat: [] for cat in categories.keys()}
 
         self.model.eval()
         errors = 0
+        max_errors = self.config.get('max_errors', 10)
+        show_errors = self.config.get('show_first_n_errors', 3)
+        max_samples = self.config['max_samples']
+
         with torch.no_grad():
             for i, example in enumerate(tqdm(dataset, desc="Evaluating MMLU", leave=False)):
-                if i >= 500:  # Reduced for faster evaluation
+                if i >= max_samples:
                     break
                 try:
                     subject = example.get('subject', 'other')
@@ -61,7 +66,7 @@ class FewShotEvaluator:
                     prompt = self._create_mmlu_prompt(example, num_shots)
                     answer = example['answer']
 
-                    predicted = self._generate_answer(prompt, max_length=5)
+                    predicted = self._generate_answer(prompt)
 
                     predicted_answer = self._extract_answer_choice(predicted)
                     correct = predicted_answer == str(answer)
@@ -69,12 +74,12 @@ class FewShotEvaluator:
                     results_by_category[category].append(float(correct))
                 except Exception as e:
                     errors += 1
-                    if errors <= 3:
+                    if errors <= show_errors:
                         print(f"\nError in MMLU example {i}: {str(e)}")
                         if errors == 1:
                             import traceback
                             traceback.print_exc()
-                    if errors > 10:
+                    if errors > max_errors:
                         print(f"\nToo many errors in MMLU ({errors} total), stopping")
                         break
                     continue
@@ -91,13 +96,17 @@ class FewShotEvaluator:
 
         return scores
 
-    def evaluate_triviaqa(self, bit_config: Dict, num_shots: int = 5) -> float:
+    def evaluate_triviaqa(self, bit_config: Dict, num_shots: int = None) -> float:
         """
         Evaluate on TriviaQA with 5-shot prompting
         Return exact match score
         """
+        if num_shots is None:
+            num_shots = self.config['num_shots']
+
+        triviaqa_cfg = self.config['datasets']['TriviaQA']
         try:
-            dataset = load_dataset('trivia_qa', 'rc.nocontext', split='validation[:1000]')
+            dataset = load_dataset(triviaqa_cfg['dataset_name'], triviaqa_cfg['config'], split=triviaqa_cfg['split'])
         except Exception as e:
             print(f"Warning: Could not load TriviaQA dataset: {e}")
             return 0.0
@@ -105,6 +114,9 @@ class FewShotEvaluator:
         correct = 0
         total = 0
         errors = 0
+        max_errors = self.config.get('max_errors', 10)
+        show_errors = self.config.get('show_first_n_errors', 3)
+        max_samples = self.config['max_samples']
 
         self.model.eval()
         with torch.no_grad():
@@ -115,24 +127,24 @@ class FewShotEvaluator:
 
                     prompt = self._create_triviaqa_prompt(question, num_shots)
 
-                    predicted = self._generate_answer(prompt, max_length=20)
+                    predicted = self._generate_answer(prompt)
 
                     if any(ans.lower() in predicted.lower() for ans in answers):
                         correct += 1
                     total += 1
                 except Exception as e:
                     errors += 1
-                    if errors <= 3:
+                    if errors <= show_errors:
                         print(f"\nError in TriviaQA example {total}: {str(e)}")
                         if errors == 1:
                             import traceback
                             traceback.print_exc()
-                    if errors > 10:
+                    if errors > max_errors:
                         print(f"\nToo many errors in TriviaQA ({errors} total), stopping")
                         break
                     continue
 
-                if total >= 500:  # Reduced for faster evaluation
+                if total >= max_samples:
                     break
 
         accuracy = (correct / max(total, 1)) * 100
@@ -157,7 +169,11 @@ class FewShotEvaluator:
     def _create_mmlu_prompt(self, example: Dict, num_shots: int) -> str:
         """Create MMLU prompt with few-shot examples"""
         # For limited context models, create a more concise prompt
-        max_positions = self.model.config.n_positions if hasattr(self.model.config, 'n_positions') else 256
+        try:
+            max_positions = self.model.config.n_positions
+        except AttributeError:
+            max_positions = 256
+            print(f"Warning: Could not get n_positions, using {max_positions}")
 
         if max_positions <= 256:
             # Ultra-concise format for small context models
@@ -184,7 +200,11 @@ class FewShotEvaluator:
 
     def _create_triviaqa_prompt(self, question: str, num_shots: int) -> str:
         """Create TriviaQA prompt with few-shot examples"""
-        max_positions = self.model.config.n_positions if hasattr(self.model.config, 'n_positions') else 256
+        try:
+            max_positions = self.model.config.n_positions
+        except AttributeError:
+            max_positions = 256
+            print(f"Warning: Could not get n_positions, using {max_positions}")
 
         if max_positions <= 256:
             # For limited context, use fewer examples and shorter format
@@ -225,10 +245,17 @@ class FewShotEvaluator:
 
         return prompt
 
-    def _generate_answer(self, prompt: str, max_length: int = 10) -> str:
+    def _generate_answer(self, prompt: str, max_length: int = None) -> str:
         """Generate answer using the model"""
+        if max_length is None:
+            max_length = self.config['generation']['max_length']
+
         # Get model's max position from config
-        max_positions = self.model.config.n_positions if hasattr(self.model.config, 'n_positions') else 256
+        try:
+            max_positions = self.model.config.n_positions
+        except AttributeError:
+            max_positions = 256
+            print(f"Warning: Could not get n_positions, using {max_positions}")
         # Leave room for generation
         max_input_length = max(max_positions - max_length - 1, 10)  # Ensure at least 10 tokens
 
@@ -249,11 +276,12 @@ class FewShotEvaluator:
             actual_max_new = min(max_length, remaining_length)
             total_length = current_length + actual_max_new
 
+            gen_cfg = self.config['generation']
             outputs = self.model.generate(
                 inputs['input_ids'],  # Only pass input_ids
                 max_length=total_length,
-                temperature=0.1,
-                do_sample=False,
+                temperature=gen_cfg['temperature'],
+                do_sample=gen_cfg['do_sample'],
                 eos_token_id=self.tokenizer.eos_token_id
             )
 

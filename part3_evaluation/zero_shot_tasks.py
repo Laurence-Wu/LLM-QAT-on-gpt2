@@ -117,8 +117,14 @@ class ZeroShotEvaluator:
     def _evaluate_single_example(self, task_name: str, example) -> float:
         """Evaluate a single example based on task type"""
         # Get max positions for prompt construction
-        max_positions = self.model.config.n_positions if hasattr(self.model.config, 'n_positions') else 256
-        is_limited_context = max_positions <= 256
+        try:
+            max_positions = self.model.config.n_positions
+        except AttributeError:
+            max_positions = 256
+            print(f"Warning: Could not get n_positions from model config, using {max_positions}")
+
+        truncation = self.config['prompt_truncation']
+        is_limited_context = max_positions <= truncation['limited_context_threshold']
 
         if task_name == 'BoolQ':
             question = example['question']
@@ -127,12 +133,13 @@ class ZeroShotEvaluator:
 
             if is_limited_context:
                 # Truncate passage for limited context models
-                passage = passage[:200]
-                question = question[:100]
+                passage = passage[:truncation['passage_limit']]
+                question = question[:truncation['question_limit']]
                 prompt = f"Passage: {passage}\nQ: {question}\nTrue/False:"
             else:
                 prompt = f"Passage: {passage}\nQuestion: {question}\nAnswer (True/False):"
-            predicted = self._generate_answer(prompt, max_length=5)
+            gen_cfg = self.config['generation']
+            predicted = self._generate_answer(prompt, max_length=gen_cfg['max_length'])
 
             predicted_bool = 'true' in predicted.lower()
             return float(predicted_bool == answer)
@@ -144,10 +151,10 @@ class ZeroShotEvaluator:
 
             if is_limited_context:
                 # Truncate for limited context
-                context = context[:150]
+                context = context[:truncation['context_limit']]
                 prompt = f"Context: {context}\n"
                 for i, ending in enumerate(endings[:4]):  # Limit endings
-                    ending_text = ending[:50]  # Truncate each ending
+                    ending_text = ending[:truncation['endings_limit']]  # Truncate each ending
                     prompt += f"{chr(65+i)}: {ending_text}\n"
                 prompt += "Best:"
             else:
@@ -156,7 +163,8 @@ class ZeroShotEvaluator:
                     prompt += f"{chr(65+i)}: {ending}\n"
                 prompt += "Which ending is most likely? Answer:"
 
-            predicted = self._generate_answer(prompt, max_length=5)
+            gen_cfg = self.config['generation']
+            predicted = self._generate_answer(prompt, max_length=gen_cfg['max_length'])
 
             for i in range(len(endings)):
                 if chr(65+i).lower() in predicted.lower():
@@ -171,11 +179,12 @@ class ZeroShotEvaluator:
 
             if is_limited_context:
                 # More concise format
-                sentence = sentence[:150]
+                sentence = sentence[:truncation['context_limit']]
                 prompt = f"S: {sentence}\n1: {option1}\n2: {option2}\nBest:"
             else:
                 prompt = f"Sentence: {sentence}\nOption 1: {option1}\nOption 2: {option2}\nWhich option fills the blank better (1 or 2)?"
-            predicted = self._generate_answer(prompt, max_length=5)
+            gen_cfg = self.config['generation']
+            predicted = self._generate_answer(prompt, max_length=gen_cfg['max_length'])
 
             predicted_answer = '1' if '1' in predicted else '2'
             return float(predicted_answer == answer)
@@ -187,11 +196,11 @@ class ZeroShotEvaluator:
 
             if is_limited_context:
                 # Truncate question and choices
-                question = question[:150]
+                question = question[:truncation['context_limit']]
                 prompt = f"Q: {question}\n"
                 for i, choice in enumerate(choices['text'][:4]):  # Limit to 4 choices
                     label = choices['label'][i]
-                    choice_text = choice[:60]  # Truncate long choices
+                    choice_text = choice[:truncation['choice_limit']]  # Truncate long choices
                     prompt += f"{label}: {choice_text}\n"
                 prompt += "A:"
             else:
@@ -201,7 +210,8 @@ class ZeroShotEvaluator:
                     prompt += f"{label}: {choice}\n"
                 prompt += "Answer:"
 
-            predicted = self._generate_answer(prompt, max_length=5)
+            gen_cfg = self.config['generation']
+            predicted = self._generate_answer(prompt, max_length=gen_cfg['max_length'])
             return float(answer.upper() in predicted.upper())
 
         elif task_name == 'OBQA':
@@ -211,11 +221,11 @@ class ZeroShotEvaluator:
 
             if is_limited_context:
                 # Truncate for limited context
-                question = question[:150]
+                question = question[:truncation['context_limit']]
                 prompt = f"Q: {question}\n"
                 for i, choice in enumerate(choices['text'][:4]):
                     label = choices['label'][i]
-                    choice_text = choice[:60]
+                    choice_text = choice[:truncation['choice_limit']]
                     prompt += f"{label}: {choice_text}\n"
                 prompt += "A:"
             else:
@@ -225,15 +235,20 @@ class ZeroShotEvaluator:
                     prompt += f"{label}: {choice}\n"
                 prompt += "Answer:"
 
-            predicted = self._generate_answer(prompt, max_length=5)
+            gen_cfg = self.config['generation']
+            predicted = self._generate_answer(prompt, max_length=gen_cfg['max_length'])
             return float(answer.upper() in predicted.upper())
 
         return 0.0
 
-    def _generate_answer(self, prompt: str, max_length: int = 10) -> str:
-        """Generate answer using the model"""
+    def _generate_answer(self, prompt: str, max_length: int) -> str:
+        """Generate answer using the model - max_length from config"""
         # Get model's max position from config
-        max_positions = self.model.config.n_positions if hasattr(self.model.config, 'n_positions') else 256
+        try:
+            max_positions = self.model.config.n_positions
+        except AttributeError:
+            max_positions = 256
+            print(f"Warning: Could not get n_positions, using {max_positions}")
         # Leave room for generation
         max_input_length = max_positions - max_length - 1
 
@@ -252,11 +267,12 @@ class ZeroShotEvaluator:
             current_length = inputs['input_ids'].size(1)
             total_length = min(current_length + max_length, max_positions)
 
+            gen_cfg = self.config['generation']
             outputs = self.model.generate(
                 inputs['input_ids'],
                 max_length=total_length,
-                temperature=0.1,
-                do_sample=False,
+                temperature=gen_cfg['temperature'],
+                do_sample=gen_cfg['do_sample'],
                 eos_token_id=self.tokenizer.eos_token_id
             )
 
