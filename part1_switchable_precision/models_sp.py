@@ -215,7 +215,7 @@ class SPModel(nn.Module):
         # Use Switchable LayerNorm for final layer
         self.ln_f = SwitchableLayerNorm(
             config.n_embd,
-            precision_levels=self.bit_wisths,
+            precision_levels=self.bit_widths,
             eps=config.layer_norm_epsilon
         )
 

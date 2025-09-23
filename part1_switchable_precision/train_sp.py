@@ -74,27 +74,11 @@ class CalibrationManager:
         self.calibrated_bits = set()
 
     def calibrate_all_precisions(self, bit_widths, num_batches=10):
-        """Calibrate all bit-widths at once during initialization."""
-        print("\n📊 INITIAL CALIBRATION PHASE")
-        print("=" * 50)
-
         for bits in bit_widths:
-            if bits < 32 and bits not in self.calibrated_bits:  # Calibrate all students (4, 8, 16)
-                print(f"\nCalibrating {bits}-bit precision...")
+            if bits < 32 and bits not in self.calibrated_bits:
                 self.model.set_precision(bits)
                 self._calibrate_precision(bits, num_batches)
                 self.calibrated_bits.add(bits)
-
-        print("\n✅ Initial calibration complete for all precisions")
-        print("=" * 50)
-
-    def ensure_calibrated(self, bits, num_batches=5):
-        """Ensure a specific bit-width is calibrated."""
-        if bits < 32 and bits not in self.calibrated_bits:  # Calibrate all students
-            print(f"\n⚠️ {bits}-bit not calibrated, calibrating now...")
-            self._calibrate_precision(bits, num_batches)
-            self.calibrated_bits.add(bits)
-            print(f"✅ Calibration complete for {bits}-bit")
 
     def _calibrate_precision(self, bits, num_batches):
         """Internal calibration logic with separate weight and input calibration."""
@@ -435,14 +419,8 @@ def evaluate(model, val_loader, device):
     return total_loss / max(num_batches, 1)
 
 
-# ============================================================================
-# MAIN TRAINING FUNCTION
-# ============================================================================
-
 def train_sp(model, train_loader, val_loader, config, model_config):
-    """Simplified SP training with clean separation of concerns."""
 
-    # Setup
     device = torch.device('cuda')
     model = model.to(device)
     cleanup_memory()
