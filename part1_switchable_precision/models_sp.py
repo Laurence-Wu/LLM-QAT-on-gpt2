@@ -218,7 +218,39 @@ class SPModel(nn.Module):
             precision_levels=self.bit_widths,
             eps=config.layer_norm_epsilon
         )
+    
+    def unfreeze_weights(self, bits):
+        if bits == 32:
+            # Unfreeze transformer block weights for teacher training
+            for block in self.h:
+                # Layer normalizations (SwitchableLayerNorm has weights and biases dicts)
+                if isinstance(block.ln_1, SwitchableLayerNorm):
+                    for precision in block.ln_1.precision_levels:
+                        block.ln_1.weights[str(precision)].requires_grad = True
+                        block.ln_1.biases[str(precision)].requires_grad = True
+                if isinstance(block.ln_2, SwitchableLayerNorm):
+                    for precision in block.ln_2.precision_levels:
+                        block.ln_2.weights[str(precision)].requires_grad = True
+                        block.ln_2.biases[str(precision)].requires_grad = True
 
+                # Attention weights
+                block.attn.c_attn.linear.weight.requires_grad = True
+                block.attn.c_attn.linear.bias.requires_grad = True
+                block.attn.c_proj.linear.weight.requires_grad = True
+                block.attn.c_proj.linear.bias.requires_grad = True
+
+                # MLP weights
+                block.mlp.c_fc.linear.weight.requires_grad = True
+                block.mlp.c_fc.linear.bias.requires_grad = True
+                block.mlp.c_proj.linear.weight.requires_grad = True
+                block.mlp.c_proj.linear.bias.requires_grad = True
+
+            # Final layer norm (SwitchableLayerNorm)
+            if isinstance(self.ln_f, SwitchableLayerNorm):
+                for precision in self.ln_f.precision_levels:
+                    self.ln_f.weights[str(precision)].requires_grad = True
+                    self.ln_f.biases[str(precision)].requires_grad = True
+    
     def set_precision(self, bits) -> int:
         if bits not in self.bit_widths:
             raise ValueError(f"Bit width {bits} not in configured widths {self.bit_widths}")
@@ -437,38 +469,6 @@ class SPLMHeadModel(nn.Module):
 
         return precision
 
-    def unfreeze_weights(self, bits):
-        if bits == 32:
-            # Unfreeze transformer block weights for teacher training
-            for block in self.h:
-                # Layer normalizations (SwitchableLayerNorm has weights and biases dicts)
-                if isinstance(block.ln_1, SwitchableLayerNorm):
-                    for precision in block.ln_1.precision_levels:
-                        block.ln_1.weights[str(precision)].requires_grad = True
-                        block.ln_1.biases[str(precision)].requires_grad = True
-                if isinstance(block.ln_2, SwitchableLayerNorm):
-                    for precision in block.ln_2.precision_levels:
-                        block.ln_2.weights[str(precision)].requires_grad = True
-                        block.ln_2.biases[str(precision)].requires_grad = True
-
-                # Attention weights
-                block.attn.c_attn.linear.weight.requires_grad = True
-                block.attn.c_attn.linear.bias.requires_grad = True
-                block.attn.c_proj.linear.weight.requires_grad = True
-                block.attn.c_proj.linear.bias.requires_grad = True
-
-                # MLP weights
-                block.mlp.c_fc.linear.weight.requires_grad = True
-                block.mlp.c_fc.linear.bias.requires_grad = True
-                block.mlp.c_proj.linear.weight.requires_grad = True
-                block.mlp.c_proj.linear.bias.requires_grad = True
-
-            # Final layer norm (SwitchableLayerNorm)
-            if isinstance(self.ln_f, SwitchableLayerNorm):
-                for precision in self.ln_f.precision_levels:
-                    self.ln_f.weights[str(precision)].requires_grad = True
-                    self.ln_f.biases[str(precision)].requires_grad = True
-    
 
     def verify_precision_consistency(self) -> Tuple[bool, Dict]:
         """Verify all components are at the same precision.
