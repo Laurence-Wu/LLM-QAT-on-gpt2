@@ -14,8 +14,8 @@ import json
 import time
 import random
 
-from .distillation_manager import DistillationManager
-from .calibration_manager import CalibrationManager
+from distillation_manager import DistillationManager
+from calibration_manager import CalibrationManager
 
 # ============================================================================
 # UTILITY FUNCTIONS
