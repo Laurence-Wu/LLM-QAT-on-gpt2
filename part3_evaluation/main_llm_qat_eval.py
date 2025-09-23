@@ -373,6 +373,19 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
 
             model_state = model.state_dict()
 
+            # Handle position embeddings size mismatch FIRST
+            if 'transformer.wpe.weight' in state_dict and 'transformer.wpe.weight' in model_state:
+                saved_wpe = state_dict['transformer.wpe.weight']
+                model_wpe = model_state['transformer.wpe.weight']
+
+                if saved_wpe.shape[0] != model_wpe.shape[0]:
+                    print(f"Resizing position embeddings from {saved_wpe.shape} to {model_wpe.shape}")
+                    # Take only the positions we need
+                    min_pos = min(saved_wpe.shape[0], model_wpe.shape[0])
+                    new_wpe = torch.zeros_like(model_wpe)
+                    new_wpe[:min_pos] = saved_wpe[:min_pos]
+                    state_dict['transformer.wpe.weight'] = new_wpe
+
             # Handle size mismatches for attention bias
             for key in list(state_dict.keys()):
                 if '.bias' in key and key in model_state:
