@@ -23,14 +23,8 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 from models_sp import SPLMHeadModel
 from dataset import create_dataloaders
 from deploy import save_sp_checkpoints
-
-# Use try/except to handle both direct execution and import cases
-try:
-    from config_sp import ModelConfig, TrainingConfig
-    from train_sp import train_sp
-except ImportError:
-    from .config_sp import ModelConfig, TrainingConfig
-    from .train_sp import train_sp
+from config_sp import ModelConfig, TrainingConfig
+from train_sp import train_sp
 
 
 def initialize_model(model_config, device):
@@ -52,12 +46,9 @@ def initialize_model(model_config, device):
         n_embd=model_config.n_embd,
         n_layer=model_config.n_layer,
         n_head=model_config.n_head,
+        activation_function='gelu_new',
         layer_norm_epsilon=model_config.layer_norm_epsilon,
         embd_pdrop=model_config.embd_pdrop,
-        quantization_bits=model_config.quantization_bits,
-        lora_rank=model_config.lora_rank,
-        lora_alpha=model_config.lora_alpha,
-        lora_dropout=model_config.lora_dropout
     )
 
     # Add switchable precision specific configs

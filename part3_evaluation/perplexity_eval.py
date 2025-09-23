@@ -49,12 +49,12 @@ class PerplexityEvaluator:
         elif dataset_name == 'c4':
             try:
                 c4_cfg = datasets_config.get('C4', {})
-                # Load a smaller subset of C4 for evaluation
+                # Load C4 validation set in streaming mode
                 dataset = load_dataset(
                     c4_cfg.get('dataset_name', 'allenai/c4'),
                     c4_cfg.get('config', 'en'),
-                    split=c4_cfg.get('split', 'validation[:1000]'),
-                    streaming=c4_cfg.get('streaming', True)
+                    split='validation',  # Use validation split without slice notation
+                    streaming=True  # Always use streaming for C4 due to size
                 )
                 texts = []
                 max_docs = self.config.get('max_samples', 100)
