@@ -130,8 +130,42 @@ class CalibrationManager:
             for err in weight_errors[:3]:
                 print(f"      - {err}")
 
-         # Step 2: Calibrate LoRA quantizers
-        print(f"  Step 2: Calibrating LoRA quantizers for {bits}-bit...")
+        # Step 2: Calibrate INPUT quantizers via forward passes
+        print(f"  Step 2: Calibrating input quantizers for {bits}-bit...")
+
+        # Start input quantizer calibration
+        input_started = 0
+        for name, module in self.model.named_modules():
+            if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].start_calibration()
+                input_started += 1
+
+        print(f"    Started calibration for {input_started} input quantizers")
+
+        # Collect statistics via forward passes
+        train_iter = iter(self.train_loader)
+        with torch.no_grad():
+            for i in range(num_batches):
+                try:
+                    batch = next(train_iter)
+                    input_ids = batch['input_ids'].to(self.device, non_blocking=True)
+                    _ = self.model(input_ids)
+                    del batch, input_ids
+                except StopIteration:
+                    print(f"    Only {i} batches available")
+                    break
+
+        # Finish input quantizer calibration
+        input_calibrated = 0
+        for name, module in self.model.named_modules():
+            if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].finish_calibration(debug=False)
+                input_calibrated += 1
+
+        print(f"    ✓ Calibrated {input_calibrated} input quantizers")
+
+        # Step 3: Calibrate LoRA quantizers AFTER input quantizers
+        print(f"  Step 3: Calibrating LoRA quantizers for {bits}-bit...")
         lora_calibrated = 0
         lora_errors = []
 
@@ -169,42 +203,6 @@ class CalibrationManager:
         print(f"    ✓ Calibrated {lora_calibrated} LoRA quantizers")
         if lora_errors:
             print(f"    ⚠️ {len(lora_errors)} LoRA calibration warnings")
-
-
-        # Step 2: Calibrate INPUT quantizers via forward passes
-        print(f"  Step 2: Calibrating input quantizers for {bits}-bit...")
-
-        # Start input quantizer calibration
-        input_started = 0
-        for name, module in self.model.named_modules():
-            if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
-                module.quantizers_input[bits_key].start_calibration()
-                input_started += 1
-
-        print(f"    Started calibration for {input_started} input quantizers")
-
-        # Collect statistics via forward passes
-        train_iter = iter(self.train_loader)
-        with torch.no_grad():
-            for i in range(num_batches):
-                try:
-                    batch = next(train_iter)
-                    input_ids = batch['input_ids'].to(self.device, non_blocking=True)
-                    _ = self.model(input_ids)
-                    del batch, input_ids
-                except StopIteration:
-                    print(f"    Only {i} batches available")
-                    break
-
-        # Finish input quantizer calibration
-        input_calibrated = 0
-        for name, module in self.model.named_modules():
-            if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
-                module.quantizers_input[bits_key].finish_calibration(debug=False)
-                input_calibrated += 1
-
-        print(f"    ✓ Calibrated {input_calibrated} input quantizers")
-
 
         cleanup_memory()
 
