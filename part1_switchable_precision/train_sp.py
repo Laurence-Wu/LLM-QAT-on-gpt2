@@ -234,26 +234,40 @@ class StatsTracker:
         }
 
     def save(self, filepath, model_config=None, training_config=None):
-        """Save statistics to JSON file."""
+        """Save statistics to JSON file with COMPLETE configuration."""
         data = self.to_dict()
 
-        # Add configuration information if provided
+        # Save ALL model configuration attributes
         if model_config:
-            data['model_config'] = {
-                'quantization_bits': getattr(model_config, 'quantization_bits', None),
-                'bit_widths': getattr(model_config, 'bit_widths', None),
-                'n_layer': getattr(model_config, 'n_layer', None),
-                'n_embd': getattr(model_config, 'n_embd', None),
-                'n_head': getattr(model_config, 'n_head', None)
-            }
+            model_config_dict = {}
+            # Iterate through all attributes of model_config
+            for attr_name in dir(model_config):
+                if not attr_name.startswith('_'):  # Skip private attributes
+                    attr_value = getattr(model_config, attr_name)
+                    # Skip methods
+                    if not callable(attr_value):
+                        model_config_dict[attr_name] = attr_value
 
+            data['model_config'] = model_config_dict
+
+            # Log what was saved for debugging
+            print(f"Saved {len(model_config_dict)} model config attributes")
+
+        # Save ALL training configuration attributes
         if training_config:
-            data['training_config'] = {
-                'batch_size': training_config.batch_size,
-                'learning_rate': training_config.learning_rate,
-                'num_iterations': training_config.num_iterations,
-                'gradient_accumulation_steps': training_config.gradient_accumulation_steps,
-            }
+            training_config_dict = {}
+            # Iterate through all attributes of training_config
+            for attr_name in dir(training_config):
+                if not attr_name.startswith('_'):  # Skip private attributes
+                    attr_value = getattr(training_config, attr_name)
+                    # Skip methods
+                    if not callable(attr_value):
+                        training_config_dict[attr_name] = attr_value
+
+            data['training_config'] = training_config_dict
+
+            # Log what was saved for debugging
+            print(f"Saved {len(training_config_dict)} training config attributes")
 
         with open(filepath, 'w') as f:
             json.dump(data, f, indent=2)

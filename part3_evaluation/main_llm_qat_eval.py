@@ -212,6 +212,23 @@ def fix_state_dict_shapes(state_dict):
     return fixed_dict
 
 
+def validate_model_config(config):
+    """Validate that all required model configuration parameters are present."""
+    required_params = [
+        'vocab_size', 'n_positions', 'n_embd', 'n_layer', 'n_head',
+        'layer_norm_epsilon', 'embd_pdrop', 'bit_widths',
+        'lora_rank_per_bit', 'lora_alpha_per_bit',
+        'activation_bits_per_bit', 'quantizer_per_bit'
+    ]
+
+    missing = [key for key in required_params if key not in config]
+    if missing:
+        raise ValueError(f"Missing required configuration parameters: {missing}\n"
+                        f"Please ensure your checkpoint was saved with complete configuration.")
+
+    print(f"✅ Configuration validation passed: {len(required_params)} required parameters found")
+
+
 def load_switchable_model(model_path: str = None, config_path: str = None, use_pretrained: bool = True):
     """Load switchable precision model with proper configuration"""
 
@@ -221,9 +238,6 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
 
     print(f"CUDA device: {torch.cuda.get_device_name(0)}")
     print(f"CUDA memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
-
-    # Default bit widths - will be overridden if loading from checkpoint
-    default_bit_widths = [6, 8, 16]
 
     if model_path and os.path.exists(model_path):
         print(f"Loading model from {model_path}")
@@ -290,32 +304,30 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
                 print("Using configuration embedded in checkpoint")
 
         if not model_config:
-            raise ValueError("No model configuration found! Please provide a valid checkpoint with model_config or specify --config_path")
+            raise ValueError("No model configuration found! Please provide a valid checkpoint with model_config or specify --config_path.\n"
+                           "The checkpoint must be saved with complete configuration using the updated training script.")
 
         # STRICT CONFIG USAGE - Use exactly what's in the config, no defaults
         print("\n" + "="*50)
         print("USING STRICT CONFIGURATION FROM CHECKPOINT/JSON")
         print("="*50)
 
-        # Extract required values from model_config
-        n_layer = model_config.get('n_layer')
-        n_embd = model_config.get('n_embd')
-        n_head = model_config.get('n_head')
-        quantization_bits = model_config.get('quantization_bits')
+        # Validate configuration has all required parameters
+        validate_model_config(model_config)
+
+        # Extract required values from model_config (NO DEFAULTS)
+        n_layer = model_config['n_layer']
+        n_embd = model_config['n_embd']
+        n_head = model_config['n_head']
+        quantization_bits = model_config.get('quantization_bits')  # Optional field
 
         # Validate required fields
         if n_layer is None or n_embd is None or n_head is None:
             raise ValueError(f"Missing required model config fields. Got: n_layer={n_layer}, n_embd={n_embd}, n_head={n_head}")
 
-        # Determine bit widths from config or use switchable defaults only if not specified
-        bit_widths = model_config.get('bit_widths')
-        if bit_widths is None:
-            # Only use defaults if bit_widths not explicitly set
-            if quantization_bits:
-                print(f"Model trained with quantization_bits={quantization_bits}, using switchable bit widths [6, 8, 16]")
-                bit_widths = [6, 8, 16]
-            else:
-                raise ValueError("No bit_widths or quantization_bits specified in model config")
+        # Bit widths MUST be specified in config
+        bit_widths = model_config['bit_widths']  # Will raise KeyError if missing
+        print(f"Using bit widths from config: {bit_widths}")
 
         # Get n_positions from actual weights in checkpoint (most reliable)
         actual_n_positions = None
@@ -340,18 +352,18 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
                 actual_n_positions = 1024
                 print("WARNING: Could not determine n_positions, using GPT-2 standard 1024")
 
-        # Build config with ONLY values from the loaded configuration
+        # Build config with values from the loaded configuration (NO DEFAULTS)
         config = GPT2Config(
-            vocab_size=model_config.get('vocab_size', 50257),  # GPT-2 standard
-            n_positions=actual_n_positions,
-            n_embd=n_embd,  # From config, no default
-            n_layer=n_layer,  # From config, no default
-            n_head=n_head,  # From config, no default
-            layer_norm_epsilon=model_config.get('layer_norm_epsilon', 1e-5),
-            embd_pdrop=model_config.get('embd_pdrop', 0.1),
-            lora_rank=model_config.get('lora_rank', 16),
-            lora_alpha=model_config.get('lora_alpha', 32),
-            lora_dropout=model_config.get('lora_dropout', 0.1)
+            vocab_size=model_config['vocab_size'],  # Required
+            n_positions=actual_n_positions,  # Detected from weights
+            n_embd=n_embd,  # Required
+            n_layer=n_layer,  # Required
+            n_head=n_head,  # Required
+            layer_norm_epsilon=model_config['layer_norm_epsilon'],  # Required
+            embd_pdrop=model_config['embd_pdrop'],  # Required
+            lora_rank=model_config.get('lora_rank', None),  # Optional for SP models
+            lora_alpha=model_config.get('lora_alpha', None),  # Optional for SP models
+            lora_dropout=model_config.get('lora_dropout', 0.0)  # Optional, default to 0 if not set
         )
 
         print(f"\nLoaded Model Configuration:")
@@ -365,20 +377,20 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
 
         if training_config:
             print(f"\nTraining Configuration:")
-            print(f"  - batch_size: {training_config.get('batch_size', 'N/A')}")
-            print(f"  - max_seq_length: {training_config.get('max_seq_length', 'N/A')}")
-            print(f"  - learning_rate: {training_config.get('learning_rate', 'N/A')}")
-            print(f"  - num_iterations: {training_config.get('num_iterations', 'N/A')}")
+            print(f"  - batch_size: {training_config.get('batch_size')}")
+            print(f"  - max_seq_length: {training_config.get('max_seq_length')}")
+            print(f"  - learning_rate: {training_config.get('learning_rate')}")
+            print(f"  - num_iterations: {training_config.get('num_iterations')}")
 
         print(f"Creating model with bit-widths: {bit_widths}")
         # Add SP-specific configurations to config
         config.bit_widths = bit_widths
 
-        # Get LoRA configurations from model_config - use CORRECT defaults from config_sp.py
-        config.lora_rank_per_bit = model_config.get('lora_rank_per_bit', {6: 32, 8: 16, 16: 16, 32: 0})  # Fixed: 16-bit should be rank=16
-        config.lora_alpha_per_bit = model_config.get('lora_alpha_per_bit', {6: 64, 8: 32, 16: 32, 32: 0})  # Fixed: 16-bit alpha=32
-        config.activation_bits_per_bit = model_config.get('activation_bits_per_bit', {6: 6, 8: 8, 16: 16, 32: 32})
-        config.quantizer_per_bit = model_config.get('quantizer_per_bit', None)
+        # Get SP-specific configurations from model_config (NO DEFAULTS)
+        config.lora_rank_per_bit = model_config['lora_rank_per_bit']  # Required for SP
+        config.lora_alpha_per_bit = model_config['lora_alpha_per_bit']  # Required for SP
+        config.activation_bits_per_bit = model_config['activation_bits_per_bit']  # Required for SP
+        config.quantizer_per_bit = model_config['quantizer_per_bit']  # Required for SP
 
         # Print what we're using to help debug
         print(f"LoRA rank per bit: {config.lora_rank_per_bit}")
@@ -763,10 +775,12 @@ def main():
     for config_name, result in results.items():
         print(f"\n{config_name} ({result['bits']}):")
         if 'zero_shot' in result and result['zero_shot']:
-            print(f"  Zero-shot avg: {result['zero_shot'].get('Average', 0):.1f}%")
+            print(f"  Zero-shot avg: {result['zero_shot'].get('Average'):.1f}%")
         if 'perplexity' in result and result['perplexity']:
-            print(f"  WikiText2 PPL: {result['perplexity'].get('WikiText2', float('inf')):.1f}")
-            print(f"  C4 PPL: {result['perplexity'].get('C4', float('inf')):.1f}")
+            if 'WikiText2' in result['perplexity']:
+                print(f"  WikiText2 PPL: {result['perplexity']['WikiText2']:.1f}")
+            if 'C4' in result['perplexity']:
+                print(f"  C4 PPL: {result['perplexity']['C4']:.1f}")
 
 
 if __name__ == "__main__":

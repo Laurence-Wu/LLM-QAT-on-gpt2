@@ -98,30 +98,41 @@ def create_test_checkpoint(output_dir: str = ".", model_size: str = "tiny"):
     model.set_precision(32)
     fp32_filename = os.path.join(output_dir, f"test_sp_model_32bit_fp32_{timestamp}.pth")
 
-    # Create model config dict
-    model_config_dict = {
-        'vocab_size': model_config.vocab_size,
-        'n_positions': model_config.n_positions,
-        'n_embd': model_config.n_embd,
-        'n_layer': model_config.n_layer,
-        'n_head': model_config.n_head,
-        'layer_norm_epsilon': model_config.layer_norm_epsilon,
-        'bit_widths': model_config.bit_widths,
-        'lora_rank_per_bit': model_config.lora_rank_per_bit,
-        'lora_alpha_per_bit': model_config.lora_alpha_per_bit,
-        'activation_bits_per_bit': model_config.activation_bits_per_bit,
-        'quantization_bits': 32,
-        'teacher_bits': 32
-    }
+    # Create COMPLETE model config dict with ALL attributes
+    model_config_dict = {}
+    for attr_name in dir(model_config):
+        if not attr_name.startswith('_'):  # Skip private attributes
+            attr_value = getattr(model_config, attr_name)
+            # Skip methods
+            if not callable(attr_value):
+                model_config_dict[attr_name] = attr_value
 
-    # Create training config dict (minimal)
-    training_config_dict = {
-        'batch_size': 4,
-        'max_seq_length': model_config.n_positions,
-        'learning_rate': 1e-4,
-        'num_iterations': 100,
-        'test_checkpoint': True
-    }
+    # Ensure critical attributes are present
+    model_config_dict['quantization_bits'] = 32  # Override for FP32 checkpoint
+    model_config_dict['teacher_bits'] = 32
+
+    print(f"Creating checkpoint with {len(model_config_dict)} model config attributes")
+
+    # Create COMPLETE training config dict from TrainingConfig class
+    from part1_switchable_precision.config_sp import TrainingConfig
+    training_config = TrainingConfig()
+
+    # Override with test values
+    training_config.batch_size = 4
+    training_config.max_seq_length = model_config.n_positions
+    training_config.num_iterations = 100
+
+    # Convert to dict with ALL attributes
+    training_config_dict = {}
+    for attr_name in dir(training_config):
+        if not attr_name.startswith('_'):
+            attr_value = getattr(training_config, attr_name)
+            if not callable(attr_value):
+                training_config_dict[attr_name] = attr_value
+
+    training_config_dict['test_checkpoint'] = True
+
+    print(f"Creating checkpoint with {len(training_config_dict)} training config attributes")
 
     # Save checkpoint
     checkpoint = {
@@ -139,14 +150,20 @@ def create_test_checkpoint(output_dir: str = ".", model_size: str = "tiny"):
     print(f"✅ Saved: {fp32_filename}")
     print(f"   Size: {file_size_mb:.2f} MB")
 
-    # Also save matching JSON config
+    # Also save matching JSON config with COMPLETE configuration
     json_filename = os.path.join(output_dir, f"test_training_stats_{timestamp}.json")
+
+    # Create complete training config dict
+    complete_training_config = {}
+    for key, value in training_config_dict.items():
+        complete_training_config[key] = value
+
     json_config = {
-        'model_config': model_config_dict,
-        'training_config': training_config_dict,
+        'model_config': model_config_dict,  # Complete model config
+        'training_config': complete_training_config,  # Complete training config
         'final_metrics': {
             'test_checkpoint': True,
-            'description': f'Test configuration for {model_size} model'
+            'description': f'Test configuration for {model_size} model with complete configuration'
         }
     }
 
