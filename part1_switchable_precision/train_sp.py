@@ -34,9 +34,6 @@ def get_next_batch(train_iter, train_loader):
         train_iter = iter(train_loader)
         return next(train_iter)
 
-import gc
-import torch
-
 class CalibrationManager:
     """Manages quantizer calibration for different bit-widths."""
 
@@ -103,8 +100,8 @@ class CalibrationManager:
             for err in weight_errors[:3]:
                 print(f"      - {err}")
 
-        # Step 2: Calibrate INPUT and LoRA quantizers via forward passes
-        print(f"  Step 2: Calibrating input and LoRA quantizers for {bits}-bit...")
+        # Step 2: Calibrate INPUT quantizers via forward passes (skip LoRA initially)
+        print(f"  Step 2: Calibrating input quantizers for {bits}-bit...")
 
         # Start input quantizer calibration
         input_started = 0
@@ -113,23 +110,7 @@ class CalibrationManager:
                 module.quantizers_input[bits_key].start_calibration()
                 input_started += 1
 
-        # Start LoRA quantizer calibration (they need forward passes too)
-        lora_started = 0
-        for name, module in self.model.named_modules():
-            if not hasattr(module, 'lora_adapters'):
-                continue
-            if bits_key not in module.lora_adapters:
-                continue
-
-            lora_layer = module.lora_adapters[bits_key]
-            if hasattr(lora_layer, 'quantize_A') and lora_layer.enabled:
-                lora_layer.quantize_A.start_calibration()
-                lora_started += 1
-            if hasattr(lora_layer, 'quantize_B') and lora_layer.enabled:
-                lora_layer.quantize_B.start_calibration()
-                lora_started += 1
-
-        print(f"    Started calibration for {input_started} input quantizers and {lora_started} LoRA quantizers")
+        print(f"    Started calibration for {input_started} input quantizers")
 
         # Collect statistics via forward passes
         train_iter = iter(self.train_loader)
@@ -151,7 +132,19 @@ class CalibrationManager:
                 module.quantizers_input[bits_key].finish_calibration(debug=False)
                 input_calibrated += 1
 
-        # Finish LoRA quantizer calibration
+        print(f"    ✓ Calibrated {input_calibrated} input quantizers")
+
+        torch.cuda.empty_cache()
+        gc.collect()
+
+    def calibrate_lora_only(self, bits, num_batches=10):
+        """Calibrate only LoRA quantizers for given bit-width by directly calibrating on weight tensors."""
+        if bits >= 32:
+            return
+
+        bits_key = f'{bits}bit'
+
+        # Directly calibrate LoRA quantizers on the actual weight tensors
         lora_calibrated = 0
         for name, module in self.model.named_modules():
             if not hasattr(module, 'lora_adapters'):
@@ -160,17 +153,32 @@ class CalibrationManager:
                 continue
 
             lora_layer = module.lora_adapters[bits_key]
-            if hasattr(lora_layer, 'quantize_A') and lora_layer.enabled:
-                lora_layer.quantize_A.finish_calibration(debug=False)
-                lora_calibrated += 1
-            if hasattr(lora_layer, 'quantize_B') and lora_layer.enabled:
-                lora_layer.quantize_B.finish_calibration(debug=False)
-                lora_calibrated += 1
 
-        print(f"    ✓ Calibrated {input_calibrated} input quantizers and {lora_calibrated} LoRA quantizers")
+            # Calibrate quantize_A directly on lora_A weights
+            if hasattr(lora_layer, 'quantize_A') and hasattr(lora_layer, 'lora_A') and lora_layer.enabled:
+                try:
+                    lora_layer.quantize_A.start_calibration()
+                    with torch.no_grad():
+                        _ = lora_layer.quantize_A(lora_layer.lora_A)
+                    lora_layer.quantize_A.finish_calibration(debug=False)
+                    lora_calibrated += 1
+                except Exception as e:
+                    print(f"    Warning calibrating {name} quantize_A: {e}")
 
-        torch.cuda.empty_cache()
-        gc.collect()
+            # Calibrate quantize_B directly on lora_B weights
+            if hasattr(lora_layer, 'quantize_B') and hasattr(lora_layer, 'lora_B') and lora_layer.enabled:
+                try:
+                    lora_layer.quantize_B.start_calibration()
+                    with torch.no_grad():
+                        _ = lora_layer.quantize_B(lora_layer.lora_B)
+                    lora_layer.quantize_B.finish_calibration(debug=False)
+                    lora_calibrated += 1
+                except Exception as e:
+                    print(f"    Warning calibrating {name} quantize_B: {e}")
+
+        if lora_calibrated > 0:
+            torch.cuda.empty_cache()
+            gc.collect()
 
     def ensure_calibrated(self, bits):
         """Ensure the given bit-width is calibrated, calibrate if not."""
@@ -206,33 +214,6 @@ class CalibrationManager:
                         'max': q.running_max.max().item() if hasattr(q, 'running_max') else 0,
                         'type': q.quantizer_type
                     })
-
-        # Collect statistics for LoRA quantizers
-        lora_stats = []
-        for name, module in self.model.named_modules():
-            if hasattr(module, 'lora_adapters') and bits_key in module.lora_adapters:
-                lora_layer = module.lora_adapters[bits_key]
-                if hasattr(lora_layer, 'quantize_A') and lora_layer.enabled and lora_layer.quantize_A.calibrated:
-                    q = lora_layer.quantize_A
-                    lora_stats.append({
-                        'name': f"{name}.lora_A",
-                        'scale': q.scale.mean().item() if q.scale.numel() > 1 else q.scale.item(),
-                        'zero_point': q.zero_point.mean().item() if q.zero_point.numel() > 1 else q.zero_point.item(),
-                        'min': q.running_min.min().item() if hasattr(q, 'running_min') else 0,
-                        'max': q.running_max.max().item() if hasattr(q, 'running_max') else 0,
-                        'type': q.quantizer_type
-                    })
-                if hasattr(lora_layer, 'quantize_B') and lora_layer.enabled and lora_layer.quantize_B.calibrated:
-                    q = lora_layer.quantize_B
-                    lora_stats.append({
-                        'name': f"{name}.lora_B",
-                        'scale': q.scale.mean().item() if q.scale.numel() > 1 else q.scale.item(),
-                        'zero_point': q.zero_point.mean().item() if q.zero_point.numel() > 1 else q.zero_point.item(),
-                        'min': q.running_min.min().item() if hasattr(q, 'running_min') else 0,
-                        'max': q.running_max.max().item() if hasattr(q, 'running_max') else 0,
-                        'type': q.quantizer_type
-                    })
-
         # Print weight quantizer statistics
         if weight_stats:
             print(f"  Weight Quantizers ({len(weight_stats)} total):")
@@ -256,29 +237,6 @@ class CalibrationManager:
                 print(f"    Duplicate scales found:")
                 for scale, count in duplicates[:3]:  # Show first 3
                     print(f"      Scale {scale:.6f}: {count} quantizers")
-
-        # Print LoRA quantizer statistics
-        if lora_stats:
-            print(f"  LoRA Quantizers ({len(lora_stats)} total):")
-            scales = [s['scale'] for s in lora_stats]
-            unique_scales = len(set(scales))
-            if unique_scales < len(scales):
-                print(f"    ⚠️ WARNING: Only {unique_scales} unique scale values out of {len(scales)} quantizers!")
-
-            scale_min = min(scales)
-            scale_max = max(scales)
-            scale_mean = sum(scales) / len(scales)
-            print(f"    Scale range: [{scale_min:.6f}, {scale_max:.6f}], mean: {scale_mean:.6f}")
-
-            # Group by type (A vs B)
-            a_scales = [s['scale'] for s in lora_stats if 'lora_A' in s['name']]
-            b_scales = [s['scale'] for s in lora_stats if 'lora_B' in s['name']]
-            if a_scales:
-                print(f"    LoRA A scales - min: {min(a_scales):.6f}, max: {max(a_scales):.6f}, unique: {len(set(a_scales))}")
-            if b_scales:
-                print(f"    LoRA B scales - min: {min(b_scales):.6f}, max: {max(b_scales):.6f}, unique: {len(set(b_scales))}")
-
-        print()  # Empty line for readability
 
 
 # Removed get_next_bitwidth - using fixed precision for distillation-based training
@@ -419,36 +377,29 @@ def compute_loss_single_precision(model, batch, precision, teacher_bits, distill
 
     with torch.amp.autocast('cuda'):  # Always use AMP
         if precision == teacher_bits:
-            # TEACHER MODE (32-bit): Train with ground truth and cache outputs
+            # teacher and cache the outputs
             outputs = model(input_ids, labels=input_ids, attention_mask=attention_mask,
                            output_hidden_states=True, return_dict=True)
             loss = outputs['loss']
 
             # Cache teacher outputs for future student training
             with torch.no_grad():
-                if distill_mgr:
-                    # Store the teacher outputs in cache
-                    distill_mgr.update_teacher(input_ids, attention_mask)
+                distill_mgr.update_teacher(input_ids, attention_mask)
 
         else:
-            # STUDENT MODE (4/8/16-bit): Train with distillation
-
+            # student
             # First ensure teacher outputs are cached
-            if distill_mgr and distill_mgr._get_from_cache(input_ids) is None:
-                # Generate and cache teacher outputs first
-                with torch.no_grad():
-                    model.set_precision(teacher_bits)
-                    distill_mgr.update_teacher(input_ids, attention_mask)
-                    model.set_precision(precision)  # Switch back to student precision
+            if distill_mgr._get_from_cache(input_ids) is None:
+                raise ValueError(f"Teacher outputs not cached for student precision {precision}-bit")
+                # # Generate and cache teacher outputs first
+                # with torch.no_grad():
+                #     model.set_precision(teacher_bits)
+                #     distill_mgr.update_teacher(input_ids, attention_mask)
+                #     model.set_precision(precision)  # Switch back to student precision
 
             # Now compute student outputs and distillation loss
             outputs = model(input_ids, output_hidden_states=True, return_dict=True)
-
-            if distill_mgr:
-                # Use distillation loss with cached teacher outputs
-                loss = distill_mgr.compute_distillation_loss(outputs, input_ids)
-            else:
-                raise ValueError(f"Distillation manager required for student precision {precision}-bit")
+            loss = distill_mgr.compute_distillation_loss(outputs, input_ids)
 
     # Clean up
     del outputs, input_ids
@@ -463,7 +414,7 @@ def compute_loss_single_precision(model, batch, precision, teacher_bits, distill
 # ============================================================================
 
 def train_step(model, train_iter, train_loader, optimizer, scaler,
-               available_precisions, distill_mgr, config, iteration, stats_tracker=None):
+               available_precisions, distill_mgr, config, iteration, stats_tracker,calib_mgr,scheduler):
     """
     Execute a single training step with random precision sampling.
     Each batch in the gradient accumulation uses a randomly selected precision.
@@ -478,7 +429,7 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
     torch.set_grad_enabled(True)
 
     # Process gradient accumulation steps
-    for step in range(config.gradient_accumulation_steps):
+    for bit_step in range(config.gradient_accumulation_steps):
         # Get batch
         batch = get_next_batch(train_iter, train_loader)
 
@@ -486,6 +437,10 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
         # Over many iterations, all precisions will be trained
         precision = random.choice(available_precisions)
         precisions_used.append(precision)
+
+        if calib_mgr and iteration > 0 and precision < 32:
+            model.set_precision(precision)
+            calib_mgr.calibrate_lora_only(precision, num_batches=2)
 
         # Track precision usage
         if stats_tracker:
@@ -497,13 +452,15 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
             teacher_bits=32,  # 32-bit is always the teacher
             distill_mgr=distill_mgr,
             config=config,
-            iteration=iteration + step
+            iteration=iteration + bit_step
         )
 
         total_loss += loss.detach().item()
 
         # Backward pass - gradients accumulate from the selected precision
         scaler.scale(loss).backward()
+        # Update learning rate
+        scheduler.step()
 
         # Clean up
         del batch, loss
@@ -606,18 +563,14 @@ def train_sp(model, train_loader, val_loader, config, model_config):
         calib_mgr.ensure_calibrated(bits)
 
     for iteration in progress_bar:
-        # Execute training step with random precision sampling
+        # Execute training steps (cycles all the bit widths) with random precision sampling
         total_loss = train_step(
             model, train_iter, train_loader, optimizer, scaler,
-            available_precisions, distill_mgr, config, iteration, stats
+            available_precisions, distill_mgr, config, iteration, stats, calib_mgr,scheduler
         )
 
-        # Update learning rate
-        scheduler.step()
-
         # Update distillation manager
-        if distill_mgr:
-            distill_mgr.step()
+        distill_mgr.step()
 
         # Track statistics (use max precision for tracking)
         stats.update(iteration, total_loss, 32, optimizer)  # Use 32 as default for tracking
@@ -662,10 +615,6 @@ def train_sp(model, train_loader, val_loader, config, model_config):
             cleanup_memory()
 
     print("\nTraining complete.")
-
-    # Clean up distillation manager
-    if distill_mgr:
-        distill_mgr.clear_cache()
 
     # Save statistics
     timestamp = time.strftime('%Y%m%d_%H%M%S')

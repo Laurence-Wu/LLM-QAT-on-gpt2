@@ -49,25 +49,6 @@ class DistillationManager:
         self.last_teacher_update = -1
         self.pending_teacher_update = False
 
-    def should_update_teacher(self, current_bits, iteration):
-        """
-        Determine if teacher cache should be updated.
-
-        Args:
-            current_bits: Current model precision
-            iteration: Current training iteration
-
-        Returns:
-            bool: Whether to update teacher
-        """
-        # Update teacher when:
-        # 1. At full precision AND interval reached
-        # 2. Pending update flag is set (switching from full precision)
-        at_full_precision = (current_bits == self.full_precision_bits)
-        interval_reached = (iteration - self.last_teacher_update) >= self.config.teacher_update_interval
-
-        return at_full_precision and (interval_reached or self.pending_teacher_update)
-
     def update_teacher(self, input_ids, attention_mask=None):
         """
         Update teacher cache with current batch outputs.
@@ -114,17 +95,6 @@ class DistillationManager:
         return cache_entry
 
     def compute_distillation_loss(self, student_outputs, input_ids):
-        """
-        Compute distillation loss for student (low-precision) model.
-        Following paper: L_q = α₁·L_out + α₂·L_f
-
-        Args:
-            student_outputs: Model outputs with 'logits' and 'hidden_states'
-            input_ids: Input IDs for cache lookup
-
-        Returns:
-            Loss tensor (scalar)
-        """
         # Get cached teacher outputs
         teacher = self._get_from_cache(input_ids)
         if teacher is None:
@@ -225,17 +195,6 @@ class DistillationManager:
 
         return result
 
-    def mark_switch_from_teacher(self):
-        """Mark that we're switching away from teacher precision."""
-        self.pending_teacher_update = True
-
-    def clear_cache(self):
-        """Clear all cached teacher outputs to free memory."""
-        self.teacher_cache.clear()
-        self.cache_keys.clear()
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
     def step(self):
         """Increment iteration counter."""
