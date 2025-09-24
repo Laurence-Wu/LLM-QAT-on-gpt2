@@ -332,10 +332,13 @@ def main():
     print(f"Model size: {results['model_size_gb']:.3f} GB")
     print(f"Compression ratio: {results['compression_ratio']:.2f}x")
 
+    # Create simple bit config for evaluators
+    bit_config = {'W': current_bits, 'A': current_bits, 'KV': current_bits}
+
     # 1. Zero-shot evaluation (6 benchmarks)
     print("\n1. Zero-shot common sense evaluation...")
     try:
-        zero_shot_results = zero_shot_evaluator.evaluate_all_tasks()
+        zero_shot_results = zero_shot_evaluator.evaluate_all_tasks(bit_config)
         results['zero_shot'] = zero_shot_results
         print(f"   BoolQ: {zero_shot_results.get('BoolQ', 0):.1f}%")
         print(f"   HellaSwag: {zero_shot_results.get('HellaSwag', 0):.1f}%")
@@ -351,7 +354,7 @@ def main():
     # 2. Perplexity evaluation with sliding window
     print("\n2. Perplexity evaluation (sliding window)...")
     try:
-        perplexity_results = perplexity_evaluator.evaluate_all_datasets()
+        perplexity_results = perplexity_evaluator.evaluate_all_datasets(bit_config)
         results['perplexity'] = perplexity_results
         print(f"   WikiText2: {perplexity_results['WikiText2']:.1f}")
         print(f"   C4: {perplexity_results['C4']:.1f}")
@@ -362,8 +365,8 @@ def main():
     # 3. Few-shot evaluation (5-shot)
     print("\n3. Few-shot evaluation (5-shot)...")
     try:
-        mmlu_scores = few_shot_evaluator.evaluate_mmlu(num_shots=5)
-        triviaqa_score = few_shot_evaluator.evaluate_triviaqa(num_shots=5)
+        mmlu_scores = few_shot_evaluator.evaluate_mmlu(bit_config, num_shots=5)
+        triviaqa_score = few_shot_evaluator.evaluate_triviaqa(bit_config, num_shots=5)
 
         results['few_shot'] = {
             'MMLU': mmlu_scores,
