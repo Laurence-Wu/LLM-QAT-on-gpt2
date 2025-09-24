@@ -205,15 +205,23 @@ class CalibrationManager:
 def fix_state_dict_shapes(state_dict):
     """Fix shape mismatches in loaded state dict.
 
-    Handles conversion between scalar tensors and size [1] tensors.
+    Handles conversion between multi-dimensional tensors and size [1] tensors.
     """
     fixed_dict = {}
     for key, value in state_dict.items():
         # Check if this is a quantizer parameter
         if any(param in key for param in ['scale', 'zero_point', 'running_min', 'running_max']):
-            if torch.is_tensor(value) and value.dim() == 0:
-                # Convert scalar to size [1] tensor
-                fixed_dict[key] = value.unsqueeze(0)
+            if torch.is_tensor(value):
+                if value.dim() == 0:
+                    # Convert scalar to size [1] tensor
+                    fixed_dict[key] = value.unsqueeze(0)
+                elif value.numel() == 1:
+                    # Squeeze multi-dimensional tensors with single element to [1]
+                    fixed_dict[key] = value.reshape(1)
+                else:
+                    # For multi-dimensional tensors, squeeze to scalar then expand to [1]
+                    # This handles cases like [768, 1] -> [1]
+                    fixed_dict[key] = torch.tensor([value.mean().item()])
             else:
                 fixed_dict[key] = value
         else:
