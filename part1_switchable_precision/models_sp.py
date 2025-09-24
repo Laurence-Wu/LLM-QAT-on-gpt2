@@ -267,6 +267,18 @@ class SPModel(nn.Module):
 
         return self.current_bit_width
 
+    def disable_lora_for_calibration(self):
+        """Disable LoRA during calibration by setting calibration_mode=True on all SPLinearWithLoRA layers."""
+        for module in self.modules():
+            if module.__class__.__name__ == 'SPLinearWithLoRA':
+                module.calibration_mode = True
+
+    def enable_lora_after_calibration(self):
+        """Re-enable LoRA after calibration by setting calibration_mode=False on all SPLinearWithLoRA layers."""
+        for module in self.modules():
+            if module.__class__.__name__ == 'SPLinearWithLoRA':
+                module.calibration_mode = False
+
     def verify_precision_consistency(self) -> Tuple[bool, Dict]:
         """Verify all components are at the same precision.
 
