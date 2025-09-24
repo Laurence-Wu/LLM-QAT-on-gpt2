@@ -21,6 +21,12 @@ import random
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Add part1_switchable_precision to path for imports
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+part1_dir = os.path.join(parent_dir, 'part1_switchable_precision')
+if part1_dir not in sys.path:
+    sys.path.insert(0, part1_dir)
+
 from part1_switchable_precision.models_sp import SPModel, SPLMHeadModel
 from transformers import GPT2Config, GPT2Tokenizer, GPT2LMHeadModel
 from datasets import load_dataset
