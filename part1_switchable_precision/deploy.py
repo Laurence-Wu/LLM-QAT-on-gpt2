@@ -218,6 +218,7 @@ def save_sp_checkpoints(model, base_filename, model_config, training_config=None
     """
     import os
     import time
+    import traceback
 
     # Get configured bit widths from model config
     bit_widths = getattr(model_config, 'bit_widths', [6, 8, 16, 32])
@@ -230,45 +231,82 @@ def save_sp_checkpoints(model, base_filename, model_config, training_config=None
     print(f"Configured bit widths: {bit_widths}")
 
     for bits in bit_widths:
+        if bits == 32:
+            # Skip 32-bit models as requested (not needed for quantized deployment)
+            print(f"\nSkipping 32-bit model (not needed for quantized deployment)")
+            continue
+
+        print(f"\n{'='*40}")
+        print(f"Processing {bits}-bit model...")
+
+        # Set precision and get state dict
         model.set_precision(bits)
         state_dict = model.state_dict()
-        if bits == 32:
+
+        # Debug: Print state dict size
+        state_dict_size = sum(p.numel() * p.element_size() for p in state_dict.values())
+        print(f"State dict size: {state_dict_size / (1024*1024):.2f} MB")
+        print(f"Number of parameters: {sum(p.numel() for p in state_dict.values()):,}")
+
+        # Save model
+        filename = f"{base_filename}_{bits}bit_FP32_{timestamp}.pth"
+        print(f"Saving to: {filename}")
+
+        checkpoint = {
+            'model_state_dict': state_dict,
+            'model_config': model_config.__dict__,
+            'training_config': training_config.__dict__ if training_config else None,
+            'bit_width': bits,  # Save as integer
+            'timestamp': timestamp,
+            'checkpoint_version': '1.1',  # Version tracking
+            'pytorch_version': torch.__version__,
+            'save_complete': False  # Flag to verify complete save
+        }
+
+        # Save with error handling and verification
+        try:
+            # Save checkpoint
+            torch.save(checkpoint, filename)
+
+            # Verify saved file
+            file_size = os.path.getsize(filename)
+            print(f"File saved, size: {file_size / (1024*1024):.2f} MB")
+
+            # Try to reload to verify integrity
+            print("Verifying checkpoint integrity...")
+            test_load = torch.load(filename, map_location='cpu')
+
+            # Check critical fields
+            assert 'model_state_dict' in test_load, "Missing model_state_dict"
+            assert 'bit_width' in test_load, "Missing bit_width"
+            assert test_load['bit_width'] == bits, f"Bit width mismatch: {test_load['bit_width']} vs {bits}"
+
+            # Update save_complete flag
+            checkpoint['save_complete'] = True
+            torch.save(checkpoint, filename)
+
+            print(f"✅ Verification passed for {bits}-bit model")
+            saved_checkpoints[bits] = filename
+
+        except Exception as e:
+            print(f"❌ ERROR saving {bits}-bit model: {str(e)}")
+            traceback.print_exc()
+            # Try to remove corrupted file
+            if os.path.exists(filename):
+                try:
+                    os.remove(filename)
+                    print(f"Removed corrupted file: {filename}")
+                except:
+                    print(f"WARNING: Could not remove corrupted file: {filename}")
             continue
-            # Save FP32 teacher model
-            print(f"\nSaving 32-bit FP32 teacher model...")
-            fp32_filename = f"{base_filename}_32bit_fp32_{timestamp}.pth"
-
-            # Save full FP32 checkpoint
-            torch.save({
-                'model_state_dict': state_dict,
-                'model_config': model_config.__dict__,
-                'training_config': training_config.__dict__ if training_config else None,
-                'bit_width': 32,
-                'timestamp': timestamp
-            }, fp32_filename)
-
-            saved_checkpoints[32] = fp32_filename
-            print(f"✓ Saved 32-bit FP32 teacher to: {fp32_filename}")
-
-        else:
-            if bits == 8:
-                # Save INT8 student models
-                print(f"\nSaving {bits}-bit INT8 student model...")
-                int_filename = f"{base_filename}_{bits}bit_FP32_{timestamp}.pth"
-
-                torch.save({
-                    'model_state_dict': state_dict,
-                    'model_config': model_config.__dict__,
-                    'training_config': training_config.__dict__ if training_config else None,
-                    'bit_width': bits,
-                    'timestamp': timestamp
-                }, int_filename)
-
-                saved_checkpoints[bits] = int_filename
-                print(f"✓ Saved {bits}-bit INT student to: {int_filename}")
 
     print(f"\n{'='*60}")
-    print(f"All checkpoints saved successfully!")
+    if saved_checkpoints:
+        print(f"Successfully saved {len(saved_checkpoints)} checkpoint(s)")
+        for bits, path in saved_checkpoints.items():
+            print(f"  {bits}-bit: {path}")
+    else:
+        print("WARNING: No checkpoints were saved successfully!")
     print(f"{'='*60}\n")
 
     return saved_checkpoints

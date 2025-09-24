@@ -57,32 +57,97 @@ def save_final_models(model: CPTModel, config: dict, output_dir: str):
     Save final models at each precision level for Part 3 evaluation.
     CRITICAL: Saves bit_width as integer (not string) for Part 3 compatibility.
     """
+    import traceback
     os.makedirs(output_dir, exist_ok=True)
     timestamp = time.strftime('%Y%m%d_%H%M%S')
 
     saved_models = {}
+    print(f"\n{'='*60}")
+    print(f"Saving CPT Model Checkpoints")
+    print(f"{'='*60}")
+    print(f"Configured bit widths: {config['model'].bit_widths}")
 
     for bits in config['model'].bit_widths:
+        if bits == 32:
+            # Skip 32-bit models as not needed for quantized deployment
+            print(f"\nSkipping 32-bit model (not needed for quantized deployment)")
+            continue
+
+        print(f"\n{'='*40}")
+        print(f"Processing {bits}-bit model...")
+
         # Set model to specific precision
         model.set_precision(bits)
+        state_dict = model.state_dict()
+
+        # Debug: Print state dict size
+        state_dict_size = sum(p.numel() * p.element_size() for p in state_dict.values())
+        print(f"State dict size: {state_dict_size / (1024*1024):.2f} MB")
+        print(f"Number of parameters: {sum(p.numel() for p in state_dict.values()):,}")
 
         # Create filename
         filename = os.path.join(output_dir, f"cpt_model_{bits}bit_{timestamp}.pth")
+        print(f"Saving to: {filename}")
 
         # Save checkpoint with integer bit_width (NOT string)
         checkpoint = {
-            'model_state_dict': model.state_dict(),
+            'model_state_dict': state_dict,
             'model_config': config['model'].__dict__,
             'training_config': config['training'].__dict__,
             'bit_width': bits,  # CRITICAL: Save as integer, not f"{bits}bit"
             'timestamp': timestamp,
             'lora_rank': config['model'].lora_rank_per_bit.get(bits, 0),
-            'lora_alpha': config['model'].lora_alpha_per_bit.get(bits, 0)
+            'lora_alpha': config['model'].lora_alpha_per_bit.get(bits, 0),
+            'checkpoint_version': '1.1',  # Version tracking
+            'pytorch_version': torch.__version__,
+            'save_complete': False  # Flag to verify complete save
         }
 
-        torch.save(checkpoint, filename)
-        saved_models[bits] = filename
-        print(f"Saved {bits}-bit model to {filename}")
+        # Save with error handling and verification
+        try:
+            # Save checkpoint
+            torch.save(checkpoint, filename)
+
+            # Verify saved file
+            file_size = os.path.getsize(filename)
+            print(f"File saved, size: {file_size / (1024*1024):.2f} MB")
+
+            # Try to reload to verify integrity
+            print("Verifying checkpoint integrity...")
+            test_load = torch.load(filename, map_location='cpu')
+
+            # Check critical fields
+            assert 'model_state_dict' in test_load, "Missing model_state_dict"
+            assert 'bit_width' in test_load, "Missing bit_width"
+            assert test_load['bit_width'] == bits, f"Bit width mismatch: {test_load['bit_width']} vs {bits}"
+
+            # Update save_complete flag
+            checkpoint['save_complete'] = True
+            torch.save(checkpoint, filename)
+
+            print(f"✅ Verification passed for {bits}-bit model")
+            saved_models[bits] = filename
+
+        except Exception as e:
+            print(f"❌ ERROR saving {bits}-bit model: {str(e)}")
+            traceback.print_exc()
+            # Try to remove corrupted file
+            if os.path.exists(filename):
+                try:
+                    os.remove(filename)
+                    print(f"Removed corrupted file: {filename}")
+                except:
+                    print(f"WARNING: Could not remove corrupted file: {filename}")
+            continue
+
+    print(f"\n{'='*60}")
+    if saved_models:
+        print(f"Successfully saved {len(saved_models)} checkpoint(s)")
+        for bits, path in saved_models.items():
+            print(f"  {bits}-bit: {path}")
+    else:
+        print("WARNING: No checkpoints were saved successfully!")
+    print(f"{'='*60}\n")
 
     # Save model info summary
     summary_file = os.path.join(output_dir, f"model_summary_{timestamp}.txt")
@@ -178,8 +243,11 @@ def save_int8_checkpoint(model: CPTModel, filepath: str, target_bits: int = 8, c
     """
     Save model in INT8 format for efficient deployment.
     """
+    print(f"\nConverting {target_bits}-bit model to INT8 format...")
+
     # Convert to INT8
     int8_state_dict = convert_to_int8(model, target_bits)
+    print(f"Converted {len(int8_state_dict)} tensors to INT8")
 
     # Calculate model sizes
     fp32_params = sum(p.numel() for p in model.parameters())
@@ -222,8 +290,25 @@ def save_int8_checkpoint(model: CPTModel, filepath: str, target_bits: int = 8, c
         checkpoint['training_config'] = config['training'].__dict__
         checkpoint['bit_widths'] = config['model'].bit_widths
 
-    # Save checkpoint
-    torch.save(checkpoint, filepath)
+    # Save checkpoint with verification
+    try:
+        torch.save(checkpoint, filepath)
+
+        # Verify saved file
+        file_size = os.path.getsize(filepath)
+        print(f"INT8 file saved, actual size: {file_size / (1024*1024):.2f} MB")
+
+        # Verify integrity
+        test_load = torch.load(filepath, map_location='cpu')
+        assert 'int8_state_dict' in test_load, "Missing int8_state_dict"
+        assert 'bit_width' in test_load, "Missing bit_width"
+        print("✅ INT8 checkpoint verification passed")
+
+    except Exception as e:
+        print(f"❌ ERROR saving INT8 checkpoint: {str(e)}")
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        raise
 
     # Print summary
     print(f"\n{'='*60}")
@@ -248,10 +333,20 @@ def export_for_inference(model: CPTModel, output_dir: str, config: dict):
     os.makedirs(output_dir, exist_ok=True)
     exported_models = {}
 
+    print(f"\n{'='*60}")
+    print(f"Exporting Models for Inference")
+    print(f"{'='*60}")
+    print(f"Output directory: {output_dir}")
+    print(f"Bit widths to export: {[b for b in config['model'].bit_widths if b != 32]}")
+
     for bits in config['model'].bit_widths:
         # Skip FP32 (no quantization needed)
         if bits == 32:
+            print(f"\nSkipping 32-bit model (no quantization needed)")
             continue
+
+        print(f"\n{'='*40}")
+        print(f"Exporting {bits}-bit model...")
 
         # Set precision
         model.set_precision(bits)
@@ -259,9 +354,21 @@ def export_for_inference(model: CPTModel, output_dir: str, config: dict):
 
         # Export INT8 version
         int8_path = os.path.join(output_dir, f"cpt_model_{bits}bit_int8.pth")
-        save_int8_checkpoint(model, int8_path, bits, config)
+        try:
+            save_int8_checkpoint(model, int8_path, bits, config)
+            exported_models[bits] = int8_path
+            print(f"✅ Successfully exported {bits}-bit model")
+        except Exception as e:
+            print(f"❌ Failed to export {bits}-bit model: {str(e)}")
+            continue
 
-        exported_models[bits] = int8_path
+    print(f"\n{'='*60}")
+    if exported_models:
+        print(f"Successfully exported {len(exported_models)} model(s) for inference:")
+        for bits, path in exported_models.items():
+            print(f"  {bits}-bit: {path}")
+    else:
+        print("WARNING: No models were exported successfully!")
+    print(f"{'='*60}\n")
 
-    print(f"Exported {len(exported_models)} models for inference")
     return exported_models
