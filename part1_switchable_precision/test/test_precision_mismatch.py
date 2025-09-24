@@ -11,12 +11,17 @@ import torch.nn as nn
 import numpy as np
 from typing import Dict, List, Tuple, Optional
 
-# Add parent directory to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add parent directory (part1_switchable_precision) to path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
 
-from ..quantization import LearnableFakeQuantize
-from ..switchable_batchnorm import SwitchableLayerNorm
-from .fix_model_initialization import create_properly_initialized_model
+# Add test directory to path
+test_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, test_dir)
+
+from quantization import LearnableFakeQuantize
+from switchable_batchnorm import SwitchableLayerNorm
+from fix_model_initialization import create_properly_initialized_model
 from transformers import GPT2Tokenizer
 
 

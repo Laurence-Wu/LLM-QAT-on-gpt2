@@ -7,8 +7,9 @@ import sys
 import os
 import torch
 
-# Add parent directory to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add parent directory (part1_switchable_precision) to path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
 
 
 def get_configured_bit_widths(model=None, config=None):
@@ -38,7 +39,7 @@ def get_configured_bit_widths(model=None, config=None):
 
     # Fallback: import from config_sp
     try:
-        from part1_switchable_precision.config_sp import ModelConfig
+        from config_sp import ModelConfig
         return ModelConfig().bit_widths
     except ImportError:
         # Ultimate fallback - return the current default
@@ -81,7 +82,7 @@ def get_quantizer_type(model, precision):
 
     # Fallback to config
     try:
-        from part1_switchable_precision.config_sp import ModelConfig
+        from config_sp import ModelConfig
         config = ModelConfig()
         if hasattr(config, 'quantizer_per_bit') and precision in config.quantizer_per_bit:
             return config.quantizer_per_bit[precision]

@@ -8,12 +8,17 @@ import os
 import torch
 import torch.nn as nn
 
-# Add parent directory to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add parent directory (part1_switchable_precision) to path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
 
-from ..quantization import LearnableFakeQuantize
-from .utils import get_configured_bit_widths
-from ..config_sp import ModelConfig
+# Add test directory to path
+test_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, test_dir)
+
+from quantization import LearnableFakeQuantize
+from utils import get_configured_bit_widths
+from config_sp import ModelConfig
 
 
 def test_quantizer_methods():

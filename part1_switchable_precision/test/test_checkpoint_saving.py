@@ -9,12 +9,13 @@ import torch
 import tempfile
 import shutil
 
-# Add parent directory to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add parent directory (part1_switchable_precision) to path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
 
-from ..config_sp import ModelConfig
-from ..models_sp import SPLMHeadModel
-from ..deploy import save_sp_checkpoints
+from config_sp import ModelConfig
+from models_sp import SPLMHeadModel
+from deploy import save_sp_checkpoints
 from transformers import GPT2Config
 
 
