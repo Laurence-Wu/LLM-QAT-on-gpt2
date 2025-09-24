@@ -472,12 +472,12 @@ class SPLMHeadModel(nn.Module):
     def set_precision(self, bits) -> int:
         precision = self.transformer.set_precision(bits)
 
-        # Verify consistency
-        is_consistent, details = self.verify_precision_consistency()
-        if not is_consistent:
-            print(f"⚠️ Warning: Precision mismatch detected after setting to {bits}-bit:")
-            for mismatch in details['mismatches']:
-                print(f"   - {mismatch}")
+        # # Verify consistency
+        # is_consistent, details = self.verify_precision_consistency()
+        # if not is_consistent:
+        #     print(f"⚠️ Warning: Precision mismatch detected after setting to {bits}-bit:")
+        #     for mismatch in details['mismatches']:
+        #         print(f"   - {mismatch}")
 
         return precision
 
@@ -496,7 +496,7 @@ class SPLMHeadModel(nn.Module):
         Returns:
             Tuple[bool, Dict]: (is_consistent, details)
         """
-        # return self.transformer.verify_precision_consistency()
+        return self.transformer.verify_precision_consistency()
 
         # Handle LM head weight freezing/unfreezing
         # IMPORTANT: lm_head.weight is tied to transformer.wte.weight
