@@ -104,41 +104,70 @@ def save_final_models(model: CPTModel, config: dict, output_dir: str):
         }
 
         # Save with error handling and verification
-        try:
-            # Save checkpoint
-            torch.save(checkpoint, filename)
+        max_retries = 3
+        retry_count = 0
+        save_successful = False
 
-            # Verify saved file
-            file_size = os.path.getsize(filename)
-            print(f"File saved, size: {file_size / (1024*1024):.2f} MB")
+        while retry_count < max_retries and not save_successful:
+            try:
+                # Clear any GPU cache before saving
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
-            # Try to reload to verify integrity
-            print("Verifying checkpoint integrity...")
-            # Use weights_only=False for verification since we store torch.__version__
-            test_load = torch.load(filename, map_location='cpu', weights_only=False)
+                # Save checkpoint with pickle protocol 4 for better compatibility
+                torch.save(checkpoint, filename, pickle_protocol=4)
 
-            # Check critical fields
-            assert 'model_state_dict' in test_load, "Missing model_state_dict"
-            assert 'bit_width' in test_load, "Missing bit_width"
-            assert test_load['bit_width'] == bits, f"Bit width mismatch: {test_load['bit_width']} vs {bits}"
+                # Small delay to ensure write completion
+                time.sleep(0.5)
 
-            # Update save_complete flag
-            checkpoint['save_complete'] = True
-            torch.save(checkpoint, filename)
+                # Verify saved file
+                file_size = os.path.getsize(filename)
+                print(f"File saved, size: {file_size / (1024*1024):.2f} MB")
 
-            print(f"✅ Verification passed for {bits}-bit model")
-            saved_models[bits] = filename
+                # Try to reload to verify integrity
+                print("Verifying checkpoint integrity...")
+                # Use weights_only=False for verification since we store torch.__version__
+                test_load = torch.load(filename, map_location='cpu', weights_only=False)
+                save_successful = True
 
-        except Exception as e:
-            print(f"❌ ERROR saving {bits}-bit model: {str(e)}")
-            traceback.print_exc()
-            # Try to remove corrupted file
-            if os.path.exists(filename):
-                try:
-                    os.remove(filename)
-                    print(f"Removed corrupted file: {filename}")
-                except:
-                    print(f"WARNING: Could not remove corrupted file: {filename}")
+                # Check critical fields
+                assert 'model_state_dict' in test_load, "Missing model_state_dict"
+                assert 'bit_width' in test_load, "Missing bit_width"
+                assert test_load['bit_width'] == bits, f"Bit width mismatch: {test_load['bit_width']} vs {bits}"
+
+                # Update save_complete flag
+                checkpoint['save_complete'] = True
+                torch.save(checkpoint, filename, pickle_protocol=4)
+
+                print(f"✅ Verification passed for {bits}-bit model")
+                saved_models[bits] = filename
+
+            except Exception as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    print(f"⚠️ Attempt {retry_count} failed: {str(e)}")
+                    print(f"Retrying... ({retry_count}/{max_retries})")
+                    # Try to remove potentially corrupted file
+                    if os.path.exists(filename):
+                        try:
+                            os.remove(filename)
+                        except:
+                            pass
+                    # Wait before retry
+                    time.sleep(1.0)
+                else:
+                    print(f"❌ ERROR saving {bits}-bit model after {max_retries} attempts: {str(e)}")
+                    traceback.print_exc()
+                    # Try to remove corrupted file
+                    if os.path.exists(filename):
+                        try:
+                            os.remove(filename)
+                            print(f"Removed corrupted file: {filename}")
+                        except:
+                            print(f"WARNING: Could not remove corrupted file: {filename}")
+                    break
+
+        if not save_successful:
             continue
 
     print(f"\n{'='*60}")
