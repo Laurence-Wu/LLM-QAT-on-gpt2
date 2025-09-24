@@ -274,7 +274,8 @@ def save_sp_checkpoints(model, base_filename, model_config, training_config=None
 
             # Try to reload to verify integrity
             print("Verifying checkpoint integrity...")
-            test_load = torch.load(filename, map_location='cpu')
+            # Use weights_only=False for verification since we store torch.__version__
+            test_load = torch.load(filename, map_location='cpu', weights_only=False)
 
             # Check critical fields
             assert 'model_state_dict' in test_load, "Missing model_state_dict"

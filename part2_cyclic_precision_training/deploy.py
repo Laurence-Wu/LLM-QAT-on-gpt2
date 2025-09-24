@@ -114,7 +114,8 @@ def save_final_models(model: CPTModel, config: dict, output_dir: str):
 
             # Try to reload to verify integrity
             print("Verifying checkpoint integrity...")
-            test_load = torch.load(filename, map_location='cpu')
+            # Use weights_only=False for verification since we store torch.__version__
+            test_load = torch.load(filename, map_location='cpu', weights_only=False)
 
             # Check critical fields
             assert 'model_state_dict' in test_load, "Missing model_state_dict"
@@ -299,7 +300,8 @@ def save_int8_checkpoint(model: CPTModel, filepath: str, target_bits: int = 8, c
         print(f"INT8 file saved, actual size: {file_size / (1024*1024):.2f} MB")
 
         # Verify integrity
-        test_load = torch.load(filepath, map_location='cpu')
+        # Use weights_only=False for verification
+        test_load = torch.load(filepath, map_location='cpu', weights_only=False)
         assert 'int8_state_dict' in test_load, "Missing int8_state_dict"
         assert 'bit_width' in test_load, "Missing bit_width"
         print("✅ INT8 checkpoint verification passed")
