@@ -125,82 +125,6 @@ def load_pretrained_weights_into_qat(sp_model, model_name='gpt2'):
     return sp_model
 
 
-class CalibrationManager:
-    """Manages quantizer calibration with warm-up phase"""
-
-    def __init__(self, model, device):
-        self.model = model
-        self.device = device
-        self.calibrated_bits = set()
-
-    def warm_up_calibration(self, data_loader, bit_widths: List[int], num_batches: int = 10):
-        """Warm-up phase for calibrating all bit-widths"""
-        print("\n" + "="*60)
-        print("WARM-UP CALIBRATION PHASE")
-        print("="*60)
-
-        for bits in bit_widths:
-            if bits < 16:  # No calibration needed for FP16
-                print(f"\nCalibrating {bits}-bit precision...")
-                self.calibrate_precision(bits, data_loader, num_batches)
-                self.calibrated_bits.add(bits)
-
-        print("\n✅ Warm-up calibration complete for all precisions")
-        print("="*60)
-
-    def calibrate_precision(self, bits: int, data_loader, num_batches: int):
-        """Calibrate quantizers for specific bit-width"""
-        # Set model to calibration bit-width
-        self.model.set_precision(bits)
-        self.model.train()  # Calibration requires training mode
-
-        # Start calibration for all quantizers
-        bits_key = f'{bits}bit'
-        for name, module in self.model.named_modules():
-            try:
-                # Try to access quantizers_weight and quantizers_input
-                quantizers_weight = module.quantizers_weight
-                quantizers_input = module.quantizers_input
-
-                if bits_key in quantizers_weight:
-                    quantizers_weight[bits_key].start_calibration()
-                if bits_key in quantizers_input:
-                    quantizers_input[bits_key].start_calibration()
-            except AttributeError:
-                # Module doesn't have quantizers, continue
-                continue
-
-        # Collect statistics
-        with torch.no_grad():
-            for i, batch in enumerate(data_loader):
-                if i >= num_batches:
-                    break
-
-                if isinstance(batch, dict):
-                    input_ids = batch['input_ids'].to(self.device)
-                else:
-                    input_ids = batch.to(self.device)
-
-                _ = self.model(input_ids)
-
-        # Finish calibration
-        for name, module in self.model.named_modules():
-            try:
-                # Try to access quantizers_weight and quantizers_input
-                quantizers_weight = module.quantizers_weight
-                quantizers_input = module.quantizers_input
-
-                if bits_key in quantizers_weight:
-                    quantizers_weight[bits_key].finish_calibration()
-                if bits_key in quantizers_input:
-                    quantizers_input[bits_key].finish_calibration()
-            except AttributeError:
-                # Module doesn't have quantizers, continue
-                continue
-
-        self.model.eval()  # Return to eval mode
-        torch.cuda.empty_cache()
-
 
 
 def validate_model_config(config):
@@ -235,6 +159,11 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
 
         # Load checkpoint
         checkpoint = torch.load(model_path, map_location='cuda')
+
+        # Get the bit width this checkpoint was saved at
+        checkpoint_bit_width = checkpoint.get('bit_width', None)
+        if checkpoint_bit_width:
+            print(f"Checkpoint was saved at {checkpoint_bit_width}-bit precision")
 
         # Config embedded in checkpoint
         if isinstance(checkpoint, dict):
@@ -373,6 +302,11 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
                     print(f"  ... and {len(unexpected_keys) - 10} more")
 
             print("Model checkpoint loaded successfully (with shape fixes and warnings handled)")
+
+            # Set model to the bit width from checkpoint
+            if checkpoint_bit_width:
+                model.set_precision(checkpoint_bit_width)
+                print(f"Model set to {checkpoint_bit_width}-bit precision from checkpoint")
         elif not isinstance(checkpoint, dict):
             model = checkpoint
     else:
@@ -440,46 +374,8 @@ def main():
     few_shot_evaluator = FewShotEvaluator(model, tokenizer, device=device, config=eval_config['few_shot'])
     perplexity_evaluator = PerplexityEvaluator(model, tokenizer, device=device, config=eval_config['perplexity'])
 
-    # Prepare calibration data from config
-    calib_cfg = eval_config['calibration']
-    print(f"\nPreparing calibration data from {calib_cfg['dataset']}...")
-    calibration_dataset = load_dataset(
-        calib_cfg['dataset'],
-        calib_cfg['dataset_config'],
-        split=calib_cfg['split']
-    )
-    calibration_texts = [sample['text'] for sample in calibration_dataset
-                        if len(sample['text'].strip()) > 0][:calib_cfg['num_samples']]
-
-    # Tokenize calibration data with config parameters
-    calibration_data = []
-    for text in calibration_texts:
-        tokens = tokenizer(
-            text,
-            return_tensors='pt',
-            max_length=calib_cfg['max_length'],
-            truncation=calib_cfg['truncation'],
-            padding=calib_cfg['padding']
-        )
-        # Squeeze to remove batch dimension since DataLoader will add it back
-        calibration_data.append(tokens['input_ids'].squeeze(0))
-
-    calibration_loader = torch.utils.data.DataLoader(
-        calibration_data,
-        batch_size=calib_cfg['batch_size'],
-        shuffle=False
-    )
-
-    # Initialize calibration manager and perform warm-up
-    calib_manager = CalibrationManager(model, device=device)
-    try:
-        # Try to access bit_widths attribute
-        model_bit_widths = model.transformer.bit_widths  # For SPLMHeadModel, bit_widths is in transformer
-        print("\nPerforming warm-up calibration for all bit-widths...")
-        warm_up_batches = calib_cfg['warm_up_batches']  # From config, no default
-        calib_manager.warm_up_calibration(calibration_loader, model_bit_widths, num_batches=warm_up_batches)
-    except AttributeError as e:
-        raise AttributeError(f"Model does not support switchable precision: {e}\nPlease ensure the model was trained with SPLMHeadModel.")
+    # No calibration needed - using calibration parameters from checkpoint
+    print("\nUsing calibration parameters from checkpoint (no recalibration needed)")
 
     # Get current model's bit configuration
     try:

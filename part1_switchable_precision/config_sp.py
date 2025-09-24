@@ -88,3 +88,7 @@ class TrainingConfig:
         self.distill_warmup_steps = 100  # Steps before starting distillation
         self.feature_layers = None  # Which layers to match (None = all)
         self.cache_size = 32  # Teacher cache size
+
+
+        # Evaluation
+        self.current_bit_width = 32

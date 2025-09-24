@@ -41,7 +41,7 @@ class LearnableFakeQuantize(nn.Module):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        """Override to resize buffers to match checkpoint shapes."""
+        """Override to resize buffers to match checkpoint shapes and set calibrated flag."""
         # Resize our buffers to match the shapes in the checkpoint
         for buffer_name in ['scale', 'zero_point', 'running_min', 'running_max']:
             key = prefix + buffer_name
@@ -54,6 +54,12 @@ class LearnableFakeQuantize(nn.Module):
         # Call parent implementation to actually load the values
         super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                       missing_keys, unexpected_keys, error_msgs)
+
+        # Set calibrated flag if we loaded calibration parameters
+        # This indicates the quantizer has valid calibration data from checkpoint
+        if (prefix + 'scale' in state_dict and
+            prefix + 'zero_point' in state_dict):
+            self.calibrated = True
 
     def set_num_bits(self, value):
         """Update num_bits and recalculate quantization ranges."""

@@ -251,21 +251,21 @@ def save_sp_checkpoints(model, base_filename, model_config, training_config=None
             saved_checkpoints[32] = fp32_filename
             print(f"✓ Saved 32-bit FP32 teacher to: {fp32_filename}")
 
-        # else:
-        #     # Save INT8 student models
-        #     print(f"\nSaving {bits}-bit INT8 student model...")
-        #     int8_filename = f"{base_filename}_{bits}bit_int8_{timestamp}.pth"
+        else:
+            # Save INT8 student models
+            print(f"\nSaving {bits}-bit INT8 student model...")
+            int8_filename = f"{base_filename}_{bits}bit_FP32_{timestamp}.pth"
 
-        #     save_int8_checkpoint(
-        #         model,
-        #         int8_filename,
-        #         model_config,
-        #         training_config,
-        #         target_bits=bits
-        #     )
+            torch.save({
+                'model_state_dict': state_dict,
+                'model_config': model_config.__dict__,
+                'training_config': training_config.__dict__ if training_config else None,
+                'bit_width': f"{bits}bit",
+                'timestamp': timestamp
+            }, fp32_filename)
 
-        #     saved_checkpoints[bits] = int8_filename
-        #     print(f"✓ Saved {bits}-bit INT8 student to: {int8_filename}")
+            saved_checkpoints[bits] = int8_filename
+            print(f"✓ Saved {bits}-bit INT8 student to: {int8_filename}")
 
     print(f"\n{'='*60}")
     print(f"All checkpoints saved successfully!")
