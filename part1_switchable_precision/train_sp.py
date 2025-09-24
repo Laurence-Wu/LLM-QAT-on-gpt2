@@ -428,7 +428,7 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
     """
     optimizer.zero_grad(set_to_none=True)
     total_loss = 0
-    precisions_used = []
+    precisions_used = [config.model_config.teacher_bits]
 
     # Ensure training mode
     model.train()
@@ -561,7 +561,7 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     progress_bar = tqdm(range(config.num_iterations), desc="SP Training")
 
     # All available precisions for random sampling (including teacher)
-    available_precisions = model_config.bit_widths  # [6, 8, 16, 32]
+    available_precisions = [b for b in model_config.bit_widths if b != config.teacher_bits]   # [6, 8, 16, 32]
 
     # Ensure all student precisions are calibrated
     student_bits = [b for b in available_precisions if b < 32]
