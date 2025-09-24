@@ -54,7 +54,7 @@ class TrainingConfig:
     """Training configuration for Switchable Precision."""
     def __init__(self):
         # Dataset
-        self.train_split = 'train[:20000]'
+        self.train_split = 'train'
         self.val_split = 'validation[:5000]'
         self.batch_size = 32
         self.max_seq_length = 256
