@@ -70,6 +70,9 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
     print(f"CUDA device: {torch.cuda.get_device_name(0)}")
     print(f"CUDA memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
 
+    # Initialize checkpoint_bit_width to None (will be set if found in checkpoint)
+    checkpoint_bit_width = None
+
     if model_path and os.path.exists(model_path):
         print(f"Loading model from {model_path}")
 
@@ -198,31 +201,96 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
 
             # Don't resize matrices - model should be created with correct dimensions
 
-            # Load the modified state dict with strict=False to handle minor mismatches
-            missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+            # First try with strict=True to ensure all weights are loaded correctly
+            print("\nAttempting to load state dict with strict=True for complete weight loading...")
+            try:
+                missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=True)
+                print("✅ SUCCESS: All weights loaded perfectly with strict=True!")
+                print("   No missing or unexpected keys - model is fully loaded.")
+            except RuntimeError as e:
+                print(f"⚠️ WARNING: Cannot load with strict=True due to: {str(e)[:200]}")
+                print("   Falling back to strict=False - this may cause underperformance!")
 
-            if missing_keys:
-                print(f"Warning: Missing keys in checkpoint: {len(missing_keys)} keys")
-                # Only show first 10 missing keys to avoid clutter
-                for key in missing_keys[:10]:
-                    print(f"  - {key}")
-                if len(missing_keys) > 10:
-                    print(f"  ... and {len(missing_keys) - 10} more")
+                # Load with strict=False as fallback
+                missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
 
-            if unexpected_keys:
-                print(f"Warning: Unexpected keys in checkpoint: {len(unexpected_keys)} keys")
-                # Only show first 10 unexpected keys
-                for key in unexpected_keys[:10]:
-                    print(f"  - {key}")
-                if len(unexpected_keys) > 10:
-                    print(f"  ... and {len(unexpected_keys) - 10} more")
+                if missing_keys:
+                    print(f"\n❌ CRITICAL: Missing {len(missing_keys)} keys in checkpoint!")
+                    print("   These weights will use random initialization, causing poor performance:")
+                    # Show ALL missing keys for critical debugging
+                    for i, key in enumerate(missing_keys):
+                        if i < 50:  # Show first 50
+                            print(f"     - {key}")
+                    if len(missing_keys) > 50:
+                        print(f"     ... and {len(missing_keys) - 50} more missing keys")
 
-            print("Model checkpoint loaded successfully (with shape fixes and warnings handled)")
+                if unexpected_keys:
+                    print(f"\n⚠️ Warning: {len(unexpected_keys)} unexpected keys in checkpoint")
+                    print("   These keys exist in checkpoint but not in model:")
+                    for i, key in enumerate(unexpected_keys):
+                        if i < 20:  # Show first 20
+                            print(f"     - {key}")
+                    if len(unexpected_keys) > 20:
+                        print(f"     ... and {len(unexpected_keys) - 20} more")
+
+            print("\n🔍 Performing weight verification...")
+            # Check if critical weights are loaded
+            critical_modules = ['transformer.wte.weight', 'transformer.wpe.weight', 'lm_head.weight']
+            for module_name in critical_modules:
+                if module_name in state_dict:
+                    print(f"   ✓ {module_name} found in checkpoint")
+                else:
+                    print(f"   ✗ {module_name} MISSING from checkpoint!")
 
             # Set model to the bit width from checkpoint
             if checkpoint_bit_width:
                 model.set_precision(checkpoint_bit_width)
-                print(f"Model set to {checkpoint_bit_width}-bit precision from checkpoint")
+                print(f"\n✅ Model set to {checkpoint_bit_width}-bit precision from checkpoint")
+
+            # Diagnostic: Check quantizer calibration status
+            print("\n🔍 Checking quantizer calibration status...")
+            calibrated_count = 0
+            uncalibrated_count = 0
+            for name, module in model.named_modules():
+                if hasattr(module, 'quantizers_weight'):
+                    for bit_key, quantizer in module.quantizers_weight.items():
+                        if hasattr(quantizer, 'calibrated'):
+                            if quantizer.calibrated:
+                                calibrated_count += 1
+                            else:
+                                uncalibrated_count += 1
+                                print(f"   ⚠️ Uncalibrated: {name}.quantizers_weight.{bit_key}")
+
+            print(f"   Quantizer status: {calibrated_count} calibrated, {uncalibrated_count} uncalibrated")
+            if uncalibrated_count > 0:
+                print(f"   ❌ WARNING: {uncalibrated_count} quantizers are not calibrated!")
+
+            # Diagnostic: Quick inference test
+            print("\n🔍 Running quick inference test...")
+            with torch.no_grad():
+                test_input = torch.randint(0, model.config.vocab_size, (1, 10)).cuda()
+                test_output = model(test_input)
+                test_logits = test_output.logits if hasattr(test_output, 'logits') else test_output
+
+                # Check output statistics
+                mean_val = test_logits.mean().item()
+                std_val = test_logits.std().item()
+                min_val = test_logits.min().item()
+                max_val = test_logits.max().item()
+
+                print(f"   Output stats: mean={mean_val:.4f}, std={std_val:.4f}, "
+                      f"min={min_val:.4f}, max={max_val:.4f}")
+
+                # Check for issues
+                if torch.isnan(test_logits).any():
+                    print("   ❌ ERROR: Output contains NaN values!")
+                if torch.isinf(test_logits).any():
+                    print("   ❌ ERROR: Output contains Inf values!")
+                if (test_logits == 0).all():
+                    print("   ❌ ERROR: Output is all zeros!")
+                if std_val < 1e-6:
+                    print("   ⚠️ WARNING: Very low output variance - model may be broken!")
+
         elif not isinstance(checkpoint, dict):
             model = checkpoint
     else:
@@ -232,10 +300,11 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
     device = torch.device('cuda:0')
     model = model.to(device)
     model.eval()  # Set to evaluation mode
-    print(f"Model moved to {device}")
-    print(f"Model device check: {next(model.parameters()).device}")
+    print(f"\n✅ Model moved to {device}")
+    print(f"   Device check: {next(model.parameters()).device}")
+
     # Return both model and the bit width from checkpoint
-    return model, checkpoint_bit_width if 'checkpoint_bit_width' in locals() else None
+    return model, checkpoint_bit_width
 
 
 def load_tokenizer():
