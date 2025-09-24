@@ -72,7 +72,10 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
         checkpoint = torch.load(model_path, map_location='cuda')
 
         # Get the bit width this checkpoint was saved at
-        checkpoint_bit_width = checkpoint.get('bit_width', None)
+        # Get bit_width from checkpoint - required field
+        if 'bit_width' not in checkpoint:
+            raise ValueError(f"bit_width not found in checkpoint. Available keys: {list(checkpoint.keys())}")
+        checkpoint_bit_width = checkpoint['bit_width']
         if checkpoint_bit_width:
             print(f"Checkpoint was saved at {checkpoint_bit_width}-bit precision")
 
@@ -242,14 +245,21 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
             calibrated_count = 0
             uncalibrated_count = 0
             for name, module in model.named_modules():
-                if hasattr(module, 'quantizers_weight'):
-                    for bit_key, quantizer in module.quantizers_weight.items():
-                        if hasattr(quantizer, 'calibrated'):
+                try:
+                    quantizers = module.quantizers_weight
+                    for bit_key, quantizer in quantizers.items():
+                        try:
                             if quantizer.calibrated:
                                 calibrated_count += 1
                             else:
                                 uncalibrated_count += 1
                                 print(f"   ⚠️ Uncalibrated: {name}.quantizers_weight.{bit_key}")
+                        except AttributeError:
+                            # Quantizer doesn't have calibrated attribute - skip
+                            pass
+                except AttributeError:
+                    # Module doesn't have quantizers_weight - skip
+                    pass
 
             print(f"   Quantizer status: {calibrated_count} calibrated, {uncalibrated_count} uncalibrated")
             if uncalibrated_count > 0:
@@ -259,10 +269,17 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
             print("\n🔍 Running quick inference test...")
             with torch.no_grad():
                 # Use max_seq_length from training_config to match calibrated quantizers
-                test_seq_length = training_config.get('max_seq_length', 256) if training_config else 256
+                if not training_config:
+                    raise ValueError("Training config is required but not found in checkpoint")
+                if 'max_seq_length' not in training_config:
+                    raise ValueError(f"max_seq_length not found in training_config. Available keys: {list(training_config.keys())}")
+                test_seq_length = training_config['max_seq_length']
                 test_input = torch.randint(0, model.config.vocab_size, (1, test_seq_length)).cuda()
                 test_output = model(test_input)
-                test_logits = test_output.logits if hasattr(test_output, 'logits') else test_output
+                try:
+                    test_logits = test_output.logits
+                except AttributeError:
+                    test_logits = test_output
 
                 # Check output statistics
                 mean_val = test_logits.mean().item()

@@ -259,8 +259,31 @@ class FewShotEvaluator:
         # Leave room for generation
         max_input_length = max(max_positions - max_length - 1, 10)  # Ensure at least 10 tokens
 
-        inputs = self.tokenizer(prompt, return_tensors='pt', truncation=True, max_length=max_input_length)
+        # Get training sequence length from model config
+        try:
+            training_seq_len = self.model.config.n_positions
+        except AttributeError as e:
+            raise ValueError(f"Cannot get n_positions from model config: {e}")
+
+        # Tokenize with padding to match training sequence length
+        inputs = self.tokenizer(prompt, return_tensors='pt', truncation=True,
+                               max_length=min(max_input_length, training_seq_len),
+                               padding='max_length')
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+        # Ensure input matches training sequence length
+        if inputs['input_ids'].size(1) < training_seq_len:
+            pad_length = training_seq_len - inputs['input_ids'].size(1)
+            pad_token_id = self.tokenizer.pad_token_id
+            inputs['input_ids'] = torch.cat([
+                inputs['input_ids'],
+                torch.full((1, pad_length), pad_token_id, device=self.device)
+            ], dim=1)
+            if 'attention_mask' in inputs:
+                inputs['attention_mask'] = torch.cat([
+                    inputs['attention_mask'],
+                    torch.zeros((1, pad_length), device=self.device, dtype=inputs['attention_mask'].dtype)
+                ], dim=1)
 
         # Safety check: ensure input doesn't exceed model's max positions
         if inputs['input_ids'].size(1) > max_positions - max_length:
