@@ -72,11 +72,10 @@ def test_bn_statistics_tracking():
             _ = sbn(x)
 
         # Check LayerNorm parameters (LayerNorm doesn't have running statistics)
-        ln_key = f'ln_{precision}bit'
-        ln_layer = sbn.ln_layers[ln_key]
+        precision_key = str(precision)
 
-        weight_norm = ln_layer.weight.norm().item()
-        bias_norm = ln_layer.bias.norm().item()
+        weight_norm = sbn.weights[precision_key].norm().item()
+        bias_norm = sbn.biases[precision_key].norm().item()
 
         print(f"     Weight norm: {weight_norm:.4f}")
         print(f"     Bias norm: {bias_norm:.4f}")
@@ -88,12 +87,11 @@ def test_bn_statistics_tracking():
     params_by_precision = {}
     for precision in precisions:
         sbn.set_precision(precision)
-        ln_key = f'ln_{precision}bit'
-        ln_layer = sbn.ln_layers[ln_key]
+        precision_key = str(precision)
 
         params_by_precision[precision] = {
-            'weight': ln_layer.weight.clone(),
-            'bias': ln_layer.bias.clone()
+            'weight': sbn.weights[precision_key].clone(),
+            'bias': sbn.biases[precision_key].clone()
         }
 
     # Compare parameters to verify they're separate
@@ -180,11 +178,11 @@ def test_bn_gradient_flow():
         }
 
         # Check LayerNorm gradients
-        ln_key = f'ln_{precision}bit'
-        if model.sbn1.ln_layers[ln_key].weight is not None:
-            grad_norms['sbn1_weight'] = model.sbn1.ln_layers[ln_key].weight.grad.norm().item()
-        if model.sbn2.ln_layers[ln_key].weight is not None:
-            grad_norms['sbn2_weight'] = model.sbn2.ln_layers[ln_key].weight.grad.norm().item()
+        precision_key = str(precision)
+        if model.sbn1.weights[precision_key].grad is not None:
+            grad_norms['sbn1_weight'] = model.sbn1.weights[precision_key].grad.norm().item()
+        if model.sbn2.weights[precision_key].grad is not None:
+            grad_norms['sbn2_weight'] = model.sbn2.weights[precision_key].grad.norm().item()
 
         gradient_norms[precision] = grad_norms
 
@@ -243,10 +241,8 @@ def test_bn_mode_switching():
         results[precision]['output_diff'] = output_diff
 
         # Check LayerNorm training mode (LayerNorm doesn't have running stats)
-        ln_key = f'ln_{precision}bit'
-        ln_layer = sbn.ln_layers[ln_key]
-
-        results[precision]['in_eval_mode'] = ln_layer.training == False
+        # SwitchableLayerNorm itself tracks training mode
+        results[precision]['in_eval_mode'] = not sbn.training
         results[precision]['has_elementwise_affine'] = ln_layer.elementwise_affine
 
         print(f"\n   {precision}-bit precision:")

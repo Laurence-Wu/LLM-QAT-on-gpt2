@@ -37,6 +37,70 @@ class SwitchableLayerNorm(nn.Module):
         # Default to highest precision
         self.current_precision = max(self.precision_levels)
 
+        # Create compatibility layer for models_sp.py which expects ln_layers
+        self._create_ln_layers_compatibility()
+
+    def _create_ln_layers_compatibility(self):
+        """Create a compatibility layer that mimics ln_layers structure."""
+        class LayerNormCompat:
+            def __init__(self, parent, key):
+                self.parent = parent
+                self.key = key
+
+            @property
+            def weight(self):
+                class WeightWrapper:
+                    def __init__(self, param):
+                        self._param = param
+
+                    @property
+                    def data(self):
+                        return self._param.data
+
+                    @data.setter
+                    def data(self, value):
+                        self._param.data = value
+
+                    @property
+                    def requires_grad(self):
+                        return self._param.requires_grad
+
+                    @requires_grad.setter
+                    def requires_grad(self, value):
+                        self._param.requires_grad = value
+
+                return WeightWrapper(self.parent.weights[self.key])
+
+            @property
+            def bias(self):
+                class BiasWrapper:
+                    def __init__(self, param):
+                        self._param = param
+
+                    @property
+                    def data(self):
+                        return self._param.data
+
+                    @data.setter
+                    def data(self, value):
+                        self._param.data = value
+
+                    @property
+                    def requires_grad(self):
+                        return self._param.requires_grad
+
+                    @requires_grad.setter
+                    def requires_grad(self, value):
+                        self._param.requires_grad = value
+
+                return BiasWrapper(self.parent.biases[self.key])
+
+        # Create ln_layers dict-like object
+        self.ln_layers = {}
+        for precision in self.precision_levels:
+            key = str(precision)
+            self.ln_layers[key] = LayerNormCompat(self, key)
+
     def set_precision(self, precision: int) -> int:
         if precision not in self.precision_levels:
             raise ValueError(f"Precision {precision} not supported. Available: {self.precision_levels}")

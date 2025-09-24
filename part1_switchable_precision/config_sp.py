@@ -54,8 +54,8 @@ class TrainingConfig:
     """Training configuration for Switchable Precision."""
     def __init__(self):
         # Dataset
-        self.train_split = 'train[:5000]'
-        self.val_split = 'validation[:1000]'
+        self.train_split = 'train[:20000]'
+        self.val_split = 'validation[:5000]'
         self.batch_size = 32
         self.max_seq_length = 256
         self.doc_stride = 128
@@ -68,7 +68,7 @@ class TrainingConfig:
         self.max_grad_norm = 1.0
 
         # Training schedule
-        self.num_iterations = 1000
+        self.num_iterations = 700
         self.gradient_accumulation_steps = 8
 
         # Evaluation
