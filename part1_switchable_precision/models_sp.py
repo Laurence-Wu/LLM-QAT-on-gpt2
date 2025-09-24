@@ -551,12 +551,15 @@ class SPLMHeadModel(nn.Module):
 
 
     def generate(self, input_ids, max_length=100, temperature=1.0,
-                 do_sample=True, top_k=50, top_p=0.95, eos_token_id=None):
+                 do_sample=True, top_k=50, top_p=0.95, eos_token_id=None, attention_mask=None):
         """Generate text using the model."""
         self.eval()
         with torch.no_grad():
+            # If attention mask is provided, use it throughout generation
+            current_attention_mask = attention_mask
+
             for _ in range(max_length - input_ids.shape[1]):
-                outputs = self.forward(input_ids)
+                outputs = self.forward(input_ids, attention_mask=current_attention_mask)
                 logits = outputs if not isinstance(outputs, dict) else outputs['logits']
                 next_token_logits = logits[:, -1, :] / temperature
 
