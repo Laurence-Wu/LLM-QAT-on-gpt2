@@ -296,7 +296,8 @@ class ZeroShotEvaluator:
                 max_length=total_length,
                 temperature=gen_cfg['temperature'],
                 do_sample=gen_cfg['do_sample'],
-                eos_token_id=self.tokenizer.eos_token_id
+                eos_token_id=self.tokenizer.eos_token_id,
+                attention_mask=inputs.get('attention_mask', None)
             )
 
         generated = self.tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)

@@ -586,6 +586,14 @@ class SPLMHeadModel(nn.Module):
 
                 input_ids = torch.cat([input_ids, next_tokens], dim=1)
 
+                # Update attention mask if provided
+                if current_attention_mask is not None:
+                    # Add attention for the new token (always attend to generated tokens)
+                    new_attention = torch.ones((current_attention_mask.shape[0], 1),
+                                              dtype=current_attention_mask.dtype,
+                                              device=current_attention_mask.device)
+                    current_attention_mask = torch.cat([current_attention_mask, new_attention], dim=1)
+
                 if eos_token_id is not None and (next_tokens == eos_token_id).all():
                     break
 
