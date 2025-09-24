@@ -14,12 +14,17 @@ from typing import Dict, List, Tuple, Optional
 import matplotlib.pyplot as plt
 from collections import defaultdict
 
-# Add parent directory to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add parent directory (part1_switchable_precision) to path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
 
-from test.fix_model_initialization import create_properly_initialized_model
-from test.dataset_utils import get_calibration_texts
-from test.utils import get_configured_bit_widths, get_student_precisions
+# Add test directory to path
+test_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, test_dir)
+
+from fix_model_initialization import create_properly_initialized_model
+from dataset_utils import get_calibration_texts
+from utils import get_configured_bit_widths, get_student_precisions
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
 import gc
 

@@ -6,10 +6,17 @@ This helps ensure we access the correct properties in calibration fixes.
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Add parent directory (part1_switchable_precision) to path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
+
+# Add test directory to path
+test_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, test_dir)
 
 import torch
-from test.fix_model_initialization import create_properly_initialized_model
+from fix_model_initialization import create_properly_initialized_model
 
 
 def examine_model_structure():

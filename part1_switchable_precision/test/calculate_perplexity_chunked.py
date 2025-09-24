@@ -165,7 +165,12 @@ def compare_perplexity_methods(model, tokenizer, device):
 
     # Method 2: Original (with truncation)
     print("\n2. Original Method (with truncation):")
-    from test.dataset_utils import calculate_perplexity_properly
+    # Add test directory to path if not already added
+    test_dir = os.path.dirname(os.path.abspath(__file__))
+    if test_dir not in sys.path:
+        sys.path.insert(0, test_dir)
+
+    from dataset_utils import calculate_perplexity_properly
 
     original_results = calculate_perplexity_properly(
         model=model,

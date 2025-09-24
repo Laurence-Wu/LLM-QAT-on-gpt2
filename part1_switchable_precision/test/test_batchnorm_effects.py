@@ -12,12 +12,17 @@ import torch.nn.functional as F
 import numpy as np
 from typing import Dict, List, Tuple, Optional
 
-# Add parent directory to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add parent directory (part1_switchable_precision) to path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
 
-from ..switchable_batchnorm import SwitchableLayerNorm
-from .fix_model_initialization import create_properly_initialized_model
-from .utils import get_configured_bit_widths
+# Add test directory to path
+test_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, test_dir)
+
+from switchable_batchnorm import SwitchableLayerNorm
+from fix_model_initialization import create_properly_initialized_model
+from utils import get_configured_bit_widths
 from transformers import GPT2Tokenizer
 
 
@@ -32,7 +37,7 @@ def test_bn_statistics_tracking():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # Get configured bit widths
-    from part1_switchable_precision.config_sp import ModelConfig
+    from config_sp import ModelConfig
     precisions = get_configured_bit_widths(config=ModelConfig())
 
     # Create switchable batch norm layer
@@ -121,7 +126,7 @@ def test_bn_gradient_flow():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # Get configured bit widths
-    from part1_switchable_precision.config_sp import ModelConfig
+    from config_sp import ModelConfig
     precisions = get_configured_bit_widths(config=ModelConfig())
 
     # Create a model with switchable BN
@@ -209,7 +214,7 @@ def test_bn_mode_switching():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # Get configured bit widths
-    from part1_switchable_precision.config_sp import ModelConfig
+    from config_sp import ModelConfig
     precisions = get_configured_bit_widths(config=ModelConfig())
 
     sbn = SwitchableLayerNorm(256, precisions).to(device)
@@ -267,7 +272,7 @@ def test_bn_with_small_batch():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # Get configured bit widths
-    from part1_switchable_precision.config_sp import ModelConfig
+    from config_sp import ModelConfig
     precisions = get_configured_bit_widths(config=ModelConfig())
     batch_sizes = [1, 2, 4, 8, 16, 32]
 
@@ -412,7 +417,7 @@ def test_layernorm_vs_batchnorm():
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # Get configured bit widths
-    from part1_switchable_precision.config_sp import ModelConfig
+    from config_sp import ModelConfig
     precisions = get_configured_bit_widths(config=ModelConfig())
 
     # Create both types of normalization

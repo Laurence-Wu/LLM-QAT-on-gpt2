@@ -19,43 +19,48 @@ import gc
 import argparse
 from typing import Dict, List, Optional
 
-# Add parent directory to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add parent directory (part1_switchable_precision) to path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
+
+# Add test directory to path
+test_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, test_dir)
 
 # Import base utilities
-from test.fix_model_initialization import create_properly_initialized_model
-from test.dataset_utils import calculate_perplexity_properly, get_calibration_texts
-from test.calculate_perplexity_chunked import calculate_perplexity_chunked
+from fix_model_initialization import create_properly_initialized_model
+from dataset_utils import calculate_perplexity_properly, get_calibration_texts
+from calculate_perplexity_chunked import calculate_perplexity_chunked
 
 # Import new test modules
-from test.test_precision_mismatch import (
+from test_precision_mismatch import (
     detect_precision_mismatch,
     test_precision_consistency,
     test_layer_precision_analysis,
     test_quantization_saturation
 )
-from test.test_batchnorm_effects import (
+from test_batchnorm_effects import (
     test_bn_statistics_tracking,
     test_bn_gradient_flow,
     test_bn_mode_switching,
     test_bn_with_small_batch,
     test_bn_precision_switching_consistency
 )
-from test.test_training_dynamics import (
+from test_training_dynamics import (
     test_multi_batch_training,
     test_switchable_precision_training,
     test_distillation_effectiveness,
     test_gradient_accumulation_effects,
     test_batch_norm_training_dynamics
 )
-from test.test_distillation_random_sampling import (
+from test_distillation_random_sampling import (
     test_single_precision_per_batch,
     test_teacher_cache_effectiveness,
     test_distillation_loss_computation,
     test_random_sampling_convergence,
     run_all_distillation_tests
 )
-from test.analyze_quantization_cliff import (
+from analyze_quantization_cliff import (
     analyze_quantization_utilization,
     analyze_vocabulary_discrimination,
     suggest_solutions
@@ -67,7 +72,7 @@ def verify_calibration_scales(sp_model, precision):
     Verify that calibration scales are appropriate for weights vs inputs.
     Returns True if scales look correct, False otherwise.
     """
-    from test.utils import get_quantizer_type
+    from utils import get_quantizer_type
 
     bits_key = f'{precision}bit'
     weight_scales = []
