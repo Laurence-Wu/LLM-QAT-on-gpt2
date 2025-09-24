@@ -626,12 +626,4 @@ def train_sp(model, train_loader, val_loader, config, model_config):
 
     print("\nTraining complete.")
 
-    # Save statistics
-    timestamp = time.strftime('%Y%m%d_%H%M%S')
-    stats.save(
-        f'sp_training_stats_{timestamp}.json',
-        model_config=model_config,
-        training_config=config
-    )
-
     return model, stats.to_dict()
