@@ -496,7 +496,7 @@ class SPLMHeadModel(nn.Module):
         Returns:
             Tuple[bool, Dict]: (is_consistent, details)
         """
-        return self.transformer.verify_precision_consistency()
+        # return self.transformer.verify_precision_consistency()
 
         # Handle LM head weight freezing/unfreezing
         # IMPORTANT: lm_head.weight is tied to transformer.wte.weight
