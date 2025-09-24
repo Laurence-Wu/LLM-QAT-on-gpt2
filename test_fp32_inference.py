@@ -4,6 +4,7 @@ Test script to verify FP32 model inference and compare with standard GPT-2.
 """
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import sys
 import os
@@ -71,46 +72,117 @@ def test_text_generation(model, tokenizer, prompt="The weather today is"):
     return generated_text
 
 
-def compute_perplexity(model, tokenizer, text):
-    """Compute perplexity on a given text."""
+def compute_perplexity_sliding_window(model, tokenizer, text, stride=512, max_length=1024):
+    """Compute perplexity using sliding window approach (proper method)."""
     model.eval()
-    encodings = tokenizer(text, return_tensors='pt')
+
+    # Tokenize the entire text
+    encodings = tokenizer(text, return_tensors='pt', truncation=True, max_length=max_length)
     input_ids = encodings.input_ids
 
     if torch.cuda.is_available():
         model = model.cuda()
         input_ids = input_ids.cuda()
 
+    seq_len = input_ids.size(1)
+    if seq_len < 2:
+        return float('inf')
+
+    # Calculate perplexity with sliding window
+    nlls = []
+    prev_end_loc = 0
+
+    for begin_loc in range(0, seq_len, stride):
+        end_loc = min(begin_loc + max_length, seq_len)
+        trg_len = end_loc - prev_end_loc  # How many tokens we're predicting
+
+        input_ids_chunk = input_ids[:, begin_loc:end_loc]
+
+        with torch.no_grad():
+            outputs = model(input_ids_chunk)
+
+            # Handle different output formats
+            if isinstance(outputs, dict):
+                logits = outputs.get('logits', None)
+            elif hasattr(outputs, 'logits'):
+                logits = outputs.logits
+            else:
+                logits = outputs
+
+            if logits is None:
+                return float('inf')
+
+            # Compute negative log likelihood
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = input_ids_chunk[..., 1:].contiguous()
+
+            # Only compute loss on the new tokens (not the context)
+            if prev_end_loc > 0:
+                shift_logits = shift_logits[:, -trg_len:, :]
+                shift_labels = shift_labels[:, -trg_len:]
+
+            loss_fct = nn.CrossEntropyLoss(reduction='none')
+            token_losses = loss_fct(
+                shift_logits.view(-1, shift_logits.size(-1)),
+                shift_labels.view(-1)
+            )
+
+            nlls.append(token_losses)
+
+        prev_end_loc = end_loc
+        if end_loc == seq_len:
+            break
+
+    if len(nlls) == 0:
+        return float('inf')
+
+    # Average negative log likelihood across all tokens
+    mean_nll = torch.cat(nlls).mean()
+    perplexity = torch.exp(mean_nll).item()
+
+    return perplexity
+
+
+def compute_perplexity_simple(model, tokenizer, text):
+    """Compute perplexity on text (simple method without sliding window)."""
+    model.eval()
+
+    # Tokenize with truncation for longer texts
+    encodings = tokenizer(text, return_tensors='pt', truncation=True, max_length=512)
+    input_ids = encodings.input_ids
+
+    if torch.cuda.is_available():
+        model = model.cuda()
+        input_ids = input_ids.cuda()
+
+    if input_ids.size(1) < 2:
+        return float('inf')
+
     with torch.no_grad():
-        outputs = model(input_ids, labels=input_ids)
+        outputs = model(input_ids)
 
         # Handle different output formats
         if isinstance(outputs, dict):
-            loss = outputs.get('loss', None)
             logits = outputs.get('logits', None)
-        elif hasattr(outputs, 'loss'):
-            loss = outputs.loss
-            logits = outputs.logits if hasattr(outputs, 'logits') else None
+        elif hasattr(outputs, 'logits'):
+            logits = outputs.logits
         else:
-            # Assume outputs is just logits tensor
-            loss = None
             logits = outputs
 
-        if loss is None and logits is not None:
-            # Compute loss manually
-            if isinstance(logits, torch.Tensor):
-                shift_logits = logits[..., :-1, :].contiguous()
-                shift_labels = input_ids[..., 1:].contiguous()
-                loss = F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-            else:
-                print(f"ERROR: Unexpected logits type: {type(logits)}")
-                return float('inf')
-
-        if loss is not None:
-            perplexity = torch.exp(loss).item()
-        else:
-            print("ERROR: Could not compute loss")
+        if logits is None:
             return float('inf')
+
+        # Compute loss manually
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = input_ids[..., 1:].contiguous()
+
+        loss_fct = nn.CrossEntropyLoss()
+        loss = loss_fct(
+            shift_logits.view(-1, shift_logits.size(-1)),
+            shift_labels.view(-1)
+        )
+
+        perplexity = torch.exp(loss).item()
 
     return perplexity
 
@@ -184,28 +256,59 @@ def test_fp32_model(checkpoint_path):
     pretrained_model = GPT2LMHeadModel.from_pretrained('gpt2')
     pretrained_model.eval()
 
-    # Test sentences
-    test_sentences = [
-        "The capital of France is",
-        "Machine learning is",
-        "The weather today is",
-        "Once upon a time",
-        "The quick brown fox jumps over the lazy dog."
+    # Test with longer, more meaningful texts for proper perplexity
+    test_texts = [
+        # Short text (for quick test)
+        "The quick brown fox jumps over the lazy dog. " * 5,
+
+        # Longer coherent text
+        """Artificial intelligence and machine learning have revolutionized many industries.
+        From healthcare to finance, these technologies are transforming how we work and live.
+        Deep learning models can now understand language, recognize images, and even generate
+        creative content. The future holds even more exciting possibilities as researchers
+        continue to push the boundaries of what's possible with AI.""",
     ]
 
-    print("\nPerplexity Comparison:")
+    print("\nPerplexity Comparison (on longer texts):")
     print("-"*50)
-    for sentence in test_sentences:
-        sp_ppl = compute_perplexity(sp_model, tokenizer, sentence)
-        pretrained_ppl = compute_perplexity(pretrained_model, tokenizer, sentence)
 
-        print(f"\n'{sentence[:30]}...'")
+    for i, text in enumerate(test_texts):
+        print(f"\nText {i+1} ({len(tokenizer.encode(text))} tokens):")
+
+        # Use simple perplexity for shorter texts
+        sp_ppl = compute_perplexity_simple(sp_model, tokenizer, text)
+        pretrained_ppl = compute_perplexity_simple(pretrained_model, tokenizer, text)
+
         print(f"  SP Model (FP32):     {sp_ppl:.2f}")
         print(f"  Pretrained GPT-2:    {pretrained_ppl:.2f}")
-        print(f"  Ratio (SP/Pretrained): {sp_ppl/pretrained_ppl:.2f}x")
 
-        if sp_ppl > pretrained_ppl * 100:
-            print("  ⚠️ WARNING: SP model perplexity is >100x worse than pretrained!")
+        if pretrained_ppl > 0:
+            ratio = sp_ppl / pretrained_ppl
+            print(f"  Ratio (SP/Pretrained): {ratio:.2f}x")
+
+            if ratio > 10:
+                print("  ❌ WARNING: SP model perplexity is >10x worse than pretrained!")
+            elif ratio > 3:
+                print("  ⚠️ WARNING: SP model perplexity is >3x worse than pretrained!")
+
+    # Also test on a standard benchmark paragraph
+    print("\n" + "="*70)
+    print("  WIKITEXT-2 STYLE PERPLEXITY TEST")
+    print("="*70)
+
+    wikitext_sample = """The city of Paris is the capital and most populous city of France.
+    With an estimated population of 2,165,423 residents in 2019 in an area of more than 105 square kilometres,
+    Paris is the fifth-most populated city in the European Union. Since the 17th century, Paris has been one of
+    Europe's major centres of finance, diplomacy, commerce, fashion, science and arts."""
+
+    print(f"\nWikiText-style paragraph ({len(tokenizer.encode(wikitext_sample))} tokens):")
+    sp_wiki_ppl = compute_perplexity_simple(sp_model, tokenizer, wikitext_sample)
+    pretrained_wiki_ppl = compute_perplexity_simple(pretrained_model, tokenizer, wikitext_sample)
+
+    print(f"  SP Model (FP32):     {sp_wiki_ppl:.2f}")
+    print(f"  Pretrained GPT-2:    {pretrained_wiki_ppl:.2f}")
+    if pretrained_wiki_ppl > 0:
+        print(f"  Ratio (SP/Pretrained): {sp_wiki_ppl/pretrained_wiki_ppl:.2f}x")
 
     print("\n" + "="*70)
     print("  TEXT GENERATION TEST")
@@ -284,14 +387,24 @@ def test_fp32_model(checkpoint_path):
     print("  DIAGNOSIS SUMMARY")
     print("="*70)
 
-    if sp_ppl > pretrained_ppl * 100:
-        print("❌ SP model is severely underperforming compared to pretrained GPT-2")
-        print("   Possible causes:")
-        print("   1. Model was not properly initialized from pretrained weights")
-        print("   2. Training corrupted the weights")
-        print("   3. Architecture mismatch with standard GPT-2")
-    else:
-        print("✅ SP model performance is reasonable compared to pretrained GPT-2")
+    # Use the WikiText perplexity for final assessment
+    if 'sp_wiki_ppl' in locals() and 'pretrained_wiki_ppl' in locals():
+        ratio = sp_wiki_ppl / pretrained_wiki_ppl if pretrained_wiki_ppl > 0 else float('inf')
+
+        if ratio > 10:
+            print("❌ SP model is severely underperforming compared to pretrained GPT-2")
+            print(f"   Perplexity ratio: {ratio:.2f}x worse")
+            print("   Possible causes:")
+            print("   1. Model was not properly initialized from pretrained weights")
+            print("   2. Training corrupted the weights")
+            print("   3. Architecture mismatch with standard GPT-2")
+        elif ratio > 3:
+            print("⚠️ SP model is moderately underperforming")
+            print(f"   Perplexity ratio: {ratio:.2f}x worse")
+            print("   This suggests partial weight corruption or training issues")
+        else:
+            print("✅ SP model performance is reasonable compared to pretrained GPT-2")
+            print(f"   Perplexity ratio: {ratio:.2f}x")
 
 
 def main():
