@@ -433,6 +433,9 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
     if batch is None:
         batch = get_next_batch(train_iter, train_loader)
 
+    # Use the current batch for all gradient accumulation steps
+    current_batch = batch
+
     # Process gradient accumulation steps with the same batch
     for bit_step in range(config.gradient_accumulation_steps):
         # CRITICAL: Randomly sample ONE precision for this batch
@@ -470,7 +473,7 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
         scheduler.step()
 
         # Clean up
-        del batch, loss
+        del loss
 
     # Print precision distribution for this step (for debugging)
     if iteration % 100 == 0:
