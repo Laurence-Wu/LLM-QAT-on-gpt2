@@ -37,8 +37,20 @@ def test_text_generation(model, tokenizer, prompt="The weather today is"):
         generated = input_ids
         for _ in range(20):
             outputs = model(generated)
-            logits = outputs.logits if hasattr(outputs, 'logits') else outputs
-            next_token_logits = logits[0, -1, :]
+
+            # Handle different output formats
+            if isinstance(outputs, dict):
+                logits = outputs.get('logits', outputs)
+            elif hasattr(outputs, 'logits'):
+                logits = outputs.logits
+            else:
+                logits = outputs
+
+            if isinstance(logits, torch.Tensor):
+                next_token_logits = logits[0, -1, :]
+            else:
+                print(f"ERROR: Unexpected output type: {type(logits)}")
+                break
 
             # Apply temperature and top-k sampling
             next_token_logits = next_token_logits / 0.8  # temperature
@@ -71,16 +83,34 @@ def compute_perplexity(model, tokenizer, text):
 
     with torch.no_grad():
         outputs = model(input_ids, labels=input_ids)
-        loss = outputs.loss if hasattr(outputs, 'loss') else None
 
-        if loss is None:
+        # Handle different output formats
+        if isinstance(outputs, dict):
+            loss = outputs.get('loss', None)
+            logits = outputs.get('logits', None)
+        elif hasattr(outputs, 'loss'):
+            loss = outputs.loss
+            logits = outputs.logits if hasattr(outputs, 'logits') else None
+        else:
+            # Assume outputs is just logits tensor
+            loss = None
+            logits = outputs
+
+        if loss is None and logits is not None:
             # Compute loss manually
-            logits = outputs.logits if hasattr(outputs, 'logits') else outputs
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = input_ids[..., 1:].contiguous()
-            loss = F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            if isinstance(logits, torch.Tensor):
+                shift_logits = logits[..., :-1, :].contiguous()
+                shift_labels = input_ids[..., 1:].contiguous()
+                loss = F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            else:
+                print(f"ERROR: Unexpected logits type: {type(logits)}")
+                return float('inf')
 
-        perplexity = torch.exp(loss).item()
+        if loss is not None:
+            perplexity = torch.exp(loss).item()
+        else:
+            print("ERROR: Could not compute loss")
+            return float('inf')
 
     return perplexity
 
@@ -202,18 +232,27 @@ def test_fp32_model(checkpoint_path):
 
     with torch.no_grad():
         sp_output = sp_model(input_ids)
-        sp_logits = sp_output.logits if hasattr(sp_output, 'logits') else sp_output
+        # Handle different output formats
+        if isinstance(sp_output, dict):
+            sp_logits = sp_output.get('logits', sp_output)
+        elif hasattr(sp_output, 'logits'):
+            sp_logits = sp_output.logits
+        else:
+            sp_logits = sp_output
 
         pretrained_output = pretrained_model(input_ids)
         pretrained_logits = pretrained_output.logits
 
         # Compare statistics
         print(f"\nSP Model logits:")
-        print(f"  Shape: {sp_logits.shape}")
-        print(f"  Mean: {sp_logits.mean().item():.4f}")
-        print(f"  Std: {sp_logits.std().item():.4f}")
-        print(f"  Min: {sp_logits.min().item():.4f}")
-        print(f"  Max: {sp_logits.max().item():.4f}")
+        if isinstance(sp_logits, torch.Tensor):
+            print(f"  Shape: {sp_logits.shape}")
+            print(f"  Mean: {sp_logits.mean().item():.4f}")
+            print(f"  Std: {sp_logits.std().item():.4f}")
+            print(f"  Min: {sp_logits.min().item():.4f}")
+            print(f"  Max: {sp_logits.max().item():.4f}")
+        else:
+            print(f"  ERROR: Unexpected type: {type(sp_logits)}")
 
         print(f"\nPretrained GPT-2 logits:")
         print(f"  Shape: {pretrained_logits.shape}")
@@ -223,17 +262,18 @@ def test_fp32_model(checkpoint_path):
         print(f"  Max: {pretrained_logits.max().item():.4f}")
 
         # Check top-5 predictions
-        sp_probs = F.softmax(sp_logits[0, -1, :], dim=-1)
+        if isinstance(sp_logits, torch.Tensor):
+            sp_probs = F.softmax(sp_logits[0, -1, :], dim=-1)
+            sp_top5 = torch.topk(sp_probs, 5)
+
+            print(f"\nTop-5 predictions for next token:")
+            print("SP Model:")
+            for i, (prob, idx) in enumerate(zip(sp_top5.values, sp_top5.indices)):
+                token = tokenizer.decode([idx.item()])
+                print(f"  {i+1}. '{token}' ({prob.item():.4f})")
+
         pretrained_probs = F.softmax(pretrained_logits[0, -1, :], dim=-1)
-
-        sp_top5 = torch.topk(sp_probs, 5)
         pretrained_top5 = torch.topk(pretrained_probs, 5)
-
-        print(f"\nTop-5 predictions for next token:")
-        print("SP Model:")
-        for i, (prob, idx) in enumerate(zip(sp_top5.values, sp_top5.indices)):
-            token = tokenizer.decode([idx.item()])
-            print(f"  {i+1}. '{token}' ({prob.item():.4f})")
 
         print("\nPretrained GPT-2:")
         for i, (prob, idx) in enumerate(zip(pretrained_top5.values, pretrained_top5.indices)):
