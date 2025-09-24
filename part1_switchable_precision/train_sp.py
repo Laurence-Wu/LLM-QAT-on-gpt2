@@ -469,8 +469,7 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
         # Update learning rate
         scheduler.step()
 
-        # Clean up
-        del batch, loss
+        del loss
 
     # Print precision distribution for this step (for debugging)
     if iteration % 100 == 0:
