@@ -234,7 +234,8 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
     model.eval()  # Set to evaluation mode
     print(f"Model moved to {device}")
     print(f"Model device check: {next(model.parameters()).device}")
-    return model
+    # Return both model and the bit width from checkpoint
+    return model, checkpoint_bit_width if 'checkpoint_bit_width' in locals() else None
 
 
 def load_tokenizer():
@@ -279,8 +280,8 @@ def main():
     eval_config = load_evaluation_config(args.eval_config)
     print(f"Loaded evaluation config from: {args.eval_config}")
 
-    # Load model from checkpoint
-    model = load_switchable_model(args.model_path, config_path=args.config_path, use_pretrained=False)
+    # Load model from checkpoint and get bit width
+    model, checkpoint_bit_width = load_switchable_model(args.model_path, config_path=args.config_path, use_pretrained=False)
     tokenizer = load_tokenizer()
 
     # Initialize all evaluation components with config
@@ -293,20 +294,16 @@ def main():
     # No calibration needed - using calibration parameters from checkpoint
     print("\nUsing calibration parameters from checkpoint (no recalibration needed)")
 
-    # Get current model's bit configuration
-    try:
-        current_bits = model.transformer.current_bits
-    except AttributeError:
-        # Use config default if attribute doesn't exist
-        current_bits = eval_config['model']['default_precision']
-        print(f"Warning: Could not get current_bits from model, using config default: {current_bits}")
+    # Get current model's bit configuration from checkpoint or model
+    if checkpoint_bit_width:
+        current_bits = checkpoint_bit_width
+    else:
+        try:
+            current_bits = model.transformer.current_bits
+        except AttributeError:
+            current_bits = 32  # Default to FP32
+            print(f"Warning: Could not determine bit width, defaulting to {current_bits}-bit")
     print(f"Current model precision: {current_bits}-bit")
-
-    # Map current bit-width to configuration name from config
-    bit_to_config = {int(k): v for k, v in eval_config['model']['bit_to_config_mapping'].items()}
-
-    config_name = bit_to_config.get(current_bits, f'INT{current_bits}')
-    print(f"Configuration to evaluate: {config_name}")
 
     # Get evaluation settings from config
     output_dir = eval_config['output']['directory']
@@ -315,100 +312,76 @@ def main():
     print("Running SP Model Evaluation")
     print("="*70)
     print(f"Model: GPT-2 ({evaluator.model_params:.1f}M parameters)")
-    print(f"Current precision: {current_bits}-bit ({config_name})")
+    print(f"Current precision: {current_bits}-bit")
     print(f"Output directory: {output_dir}")
     print(f"Max zero-shot samples: {eval_config['zero_shot']['max_samples']}")
     print(f"Max few-shot samples: {eval_config['few_shot']['max_samples']}")
     print(f"Max perplexity samples: {eval_config['perplexity']['max_samples']}")
     print("="*70)
 
-    results = {}
+    # Initialize results dictionary
+    results = {
+        'bit_width': current_bits,
+        'model_size_gb': evaluator.calculate_model_size({'W': current_bits}),
+        'compression_ratio': 32 / current_bits
+    }
 
-    # Run comprehensive evaluation for the current model configuration
     print(f"\n{'='*60}")
-    print(f"Evaluating current model configuration: {config_name}")
+    print(f"Evaluating {current_bits}-bit model")
     print('='*60)
+    print(f"Model size: {results['model_size_gb']:.3f} GB")
+    print(f"Compression ratio: {results['compression_ratio']:.2f}x")
 
-    if config_name not in BitConfigurations.STANDARD_CONFIGS:
-        # Create config based on current bits if not in standard configs
-        config = {
-            'W': current_bits,
-            'A': current_bits,
-            'KV': current_bits,
-            'name': f'{current_bits}-{current_bits}-{current_bits}',
-            'description': f'{current_bits}-bit quantization'
+    # 1. Zero-shot evaluation (6 benchmarks)
+    print("\n1. Zero-shot common sense evaluation...")
+    try:
+        zero_shot_results = zero_shot_evaluator.evaluate_all_tasks()
+        results['zero_shot'] = zero_shot_results
+        print(f"   BoolQ: {zero_shot_results.get('BoolQ', 0):.1f}%")
+        print(f"   HellaSwag: {zero_shot_results.get('HellaSwag', 0):.1f}%")
+        print(f"   WinoGrande: {zero_shot_results.get('WinoGrande', 0):.1f}%")
+        print(f"   ARC-e: {zero_shot_results.get('ARC-e', 0):.1f}%")
+        print(f"   ARC-c: {zero_shot_results.get('ARC-c', 0):.1f}%")
+        print(f"   OBQA: {zero_shot_results.get('OBQA', 0):.1f}%")
+        print(f"   Average: {zero_shot_results.get('Average', 0):.1f}%")
+    except Exception as e:
+        print(f"   Warning: Zero-shot evaluation failed: {e}")
+        results['zero_shot'] = {'Average': 0.0}
+
+    # 2. Perplexity evaluation with sliding window
+    print("\n2. Perplexity evaluation (sliding window)...")
+    try:
+        perplexity_results = perplexity_evaluator.evaluate_all_datasets()
+        results['perplexity'] = perplexity_results
+        print(f"   WikiText2: {perplexity_results['WikiText2']:.1f}")
+        print(f"   C4: {perplexity_results['C4']:.1f}")
+    except Exception as e:
+        print(f"   Warning: Perplexity evaluation failed: {e}")
+        results['perplexity'] = {'WikiText2': float('inf'), 'C4': float('inf')}
+
+    # 3. Few-shot evaluation (5-shot)
+    print("\n3. Few-shot evaluation (5-shot)...")
+    try:
+        mmlu_scores = few_shot_evaluator.evaluate_mmlu(num_shots=5)
+        triviaqa_score = few_shot_evaluator.evaluate_triviaqa(num_shots=5)
+
+        results['few_shot'] = {
+            'MMLU': mmlu_scores,
+            'TriviaQA': triviaqa_score
         }
-    else:
-        config = BitConfigurations.STANDARD_CONFIGS[config_name]
-
-    # No need to apply config - model is already at current precision
-
-        results[config_name] = {
-            'config_name': config['name'],
-            'bits': f"{config['W']}-{config['A']}-{config['KV']}",
-            'model_size_gb': evaluator.calculate_model_size(config),
-            'description': config.get('description', '')
+        print(f"   MMLU by category:")
+        print(f"     - Humanities: {mmlu_scores['Humanities']:.1f}%")
+        print(f"     - STEM: {mmlu_scores['STEM']:.1f}%")
+        print(f"     - Social Sciences: {mmlu_scores['Social Sciences']:.1f}%")
+        print(f"     - Other: {mmlu_scores['Other']:.1f}%")
+        print(f"     - Average: {mmlu_scores['Average']:.1f}%")
+        print(f"   TriviaQA: {triviaqa_score:.1f}%")
+    except Exception as e:
+        print(f"   Warning: Few-shot evaluation failed: {e}")
+        results['few_shot'] = {
+            'MMLU': {'Average': 0.0},
+            'TriviaQA': 0.0
         }
-
-        print(f"Configuration: {config['name']} ({config['description']})")
-        print(f"Model size: {results[config_name]['model_size_gb']} GB")
-        print(f"Applying bit configuration W={config['W']}, A={config['A']}, KV={config['KV']}")
-
-        # 1. Zero-shot evaluation (6 benchmarks)
-        print("\n1. Zero-shot common sense evaluation...")
-        try:
-            zero_shot_results = zero_shot_evaluator.evaluate_all_tasks(config)
-            results[config_name]['zero_shot'] = zero_shot_results
-            print(f"   BoolQ: {zero_shot_results.get('BoolQ', 0):.1f}%")
-            print(f"   HellaSwag: {zero_shot_results.get('HellaSwag', 0):.1f}%")
-            print(f"   WinoGrande: {zero_shot_results.get('WinoGrande', 0):.1f}%")
-            print(f"   ARC-e: {zero_shot_results.get('ARC-e', 0):.1f}%")
-            print(f"   ARC-c: {zero_shot_results.get('ARC-c', 0):.1f}%")
-            print(f"   OBQA: {zero_shot_results.get('OBQA', 0):.1f}%")
-            print(f"   Average: {zero_shot_results.get('Average', 0):.1f}%")
-        except Exception as e:
-            print(f"   Warning: Zero-shot evaluation failed: {e}")
-            results[config_name]['zero_shot'] = {'Average': 0.0}
-
-        # 2. Perplexity evaluation with sliding window
-        print("\n2. Perplexity evaluation (sliding window)...")
-        try:
-            perplexity_results = perplexity_evaluator.evaluate_all_datasets(config)
-            results[config_name]['perplexity'] = perplexity_results
-            print(f"   WikiText2: {perplexity_results['WikiText2']:.1f}")
-            print(f"   C4: {perplexity_results['C4']:.1f}")
-        except Exception as e:
-            print(f"   Warning: Perplexity evaluation failed: {e}")
-            results[config_name]['perplexity'] = {'WikiText2': float('inf'), 'C4': float('inf')}
-
-        # 3. Few-shot evaluation (5-shot)
-        print("\n3. Few-shot evaluation (5-shot)...")
-        try:
-            mmlu_scores = few_shot_evaluator.evaluate_mmlu(config, num_shots=5)
-            triviaqa_score = few_shot_evaluator.evaluate_triviaqa(config, num_shots=5)
-
-            results[config_name]['few_shot'] = {
-                'MMLU': mmlu_scores,
-                'TriviaQA': triviaqa_score
-            }
-            print(f"   MMLU by category:")
-            print(f"     - Humanities: {mmlu_scores['Humanities']:.1f}%")
-            print(f"     - STEM: {mmlu_scores['STEM']:.1f}%")
-            print(f"     - Social Sciences: {mmlu_scores['Social Sciences']:.1f}%")
-            print(f"     - Other: {mmlu_scores['Other']:.1f}%")
-            print(f"     - Average: {mmlu_scores['Average']:.1f}%")
-            print(f"   TriviaQA: {triviaqa_score:.1f}%")
-        except Exception as e:
-            print(f"   Warning: Few-shot evaluation failed: {e}")
-            results[config_name]['few_shot'] = {
-                'MMLU': {'Average': 0.0},
-                'TriviaQA': 0.0
-            }
-
-        # Calculate compression ratio
-        compression = 32 / config['W']  # Simple compression based on weight bits
-        results[config_name]['compression_ratio'] = compression
-        print(f"\n   Compression ratio: {compression:.2f}x")
 
     # Save results
     output_path = Path(output_dir)
@@ -425,26 +398,24 @@ def main():
 
     print("\nSummary of Results:")
     print("="*70)
-    if config_name in results:
-        result = results[config_name]
-        print(f"\n{config_name} ({result['bits']}):")
-        print(f"  Model size: {result['model_size_gb']} GB")
-        print(f"  Compression: {result['compression_ratio']:.1f}x")
+    print(f"\n{results['bit_width']}-bit Model:")
+    print(f"  Model size: {results['model_size_gb']:.3f} GB")
+    print(f"  Compression: {results['compression_ratio']:.1f}x")
 
-        if 'zero_shot' in result and result['zero_shot']:
-            print(f"  Zero-shot avg: {result['zero_shot'].get('Average', 0):.1f}%")
+    if 'zero_shot' in results and results['zero_shot']:
+        print(f"  Zero-shot avg: {results['zero_shot'].get('Average', 0):.1f}%")
 
-        if 'perplexity' in result and result['perplexity']:
-            if 'WikiText2' in result['perplexity']:
-                print(f"  WikiText2 PPL: {result['perplexity']['WikiText2']:.1f}")
-            if 'C4' in result['perplexity']:
-                print(f"  C4 PPL: {result['perplexity']['C4']:.1f}")
+    if 'perplexity' in results and results['perplexity']:
+        if 'WikiText2' in results['perplexity']:
+            print(f"  WikiText2 PPL: {results['perplexity']['WikiText2']:.1f}")
+        if 'C4' in results['perplexity']:
+            print(f"  C4 PPL: {results['perplexity']['C4']:.1f}")
 
-        if 'few_shot' in result and result['few_shot']:
-            if 'MMLU' in result['few_shot']:
-                print(f"  MMLU avg: {result['few_shot']['MMLU'].get('Average', 0):.1f}%")
-            if 'TriviaQA' in result['few_shot']:
-                print(f"  TriviaQA: {result['few_shot']['TriviaQA']:.1f}%")
+    if 'few_shot' in results and results['few_shot']:
+        if 'MMLU' in results['few_shot']:
+            print(f"  MMLU avg: {results['few_shot']['MMLU'].get('Average', 0):.1f}%")
+        if 'TriviaQA' in results['few_shot']:
+            print(f"  TriviaQA: {results['few_shot']['TriviaQA']:.1f}%")
 
     print("\n" + "="*70)
 
