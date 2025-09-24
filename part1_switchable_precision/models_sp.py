@@ -11,15 +11,8 @@ from typing import Optional, Dict, List, Tuple
 from transformers import GPT2Config
 from torch.utils.checkpoint import checkpoint
 
-# Import quantization and LoRA modules
-try:
-    from .quantization import LearnableFakeQuantize
-    from .lora import SPLinearWithLoRA
-    from .switchable_batchnorm import SwitchableLayerNorm
-except ImportError:
-    from quantization import LearnableFakeQuantize
-    from lora import SPLinearWithLoRA
-    from switchable_batchnorm import SwitchableLayerNorm
+from lora import SPLinearWithLoRA
+from switchable_batchnorm import SwitchableLayerNorm
 
 
 class SPAttention(nn.Module):
