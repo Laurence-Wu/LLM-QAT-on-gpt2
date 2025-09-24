@@ -242,53 +242,38 @@ class ZeroShotEvaluator:
         return 0.0
 
     def _generate_answer(self, prompt: str, max_length: int) -> str:
-        """Generate answer using the model - max_length from config"""
-        # Get model's max position from config
-        try:
-            max_positions = self.model.config.n_positions
-        except AttributeError:
-            max_positions = 256
-            print(f"Warning: Could not get n_positions, using {max_positions}")
-        # Leave room for generation
-        max_input_length = max_positions - max_length - 1
+        """Generate answer using the model with strict 256-token limit"""
+        # Force max context to 256 for compatibility with training
+        MAX_CONTEXT = 256
 
-        # Get training sequence length from model config
-        try:
-            training_seq_len = self.model.config.n_positions
-        except AttributeError as e:
-            raise ValueError(f"Cannot get n_positions from model config: {e}")
+        # Reserve space for generation
+        max_generation = min(max_length, 50)  # Cap generation length
+        max_prompt_length = MAX_CONTEXT - max_generation
 
-        # Tokenize with padding to match training sequence length
-        inputs = self.tokenizer(prompt, return_tensors='pt', truncation=True,
-                               max_length=min(max_input_length, training_seq_len),
-                               padding='max_length')
+        # Tokenize and truncate prompt to fit within context
+        inputs = self.tokenizer(
+            prompt,
+            return_tensors='pt',
+            truncation=True,
+            max_length=max_prompt_length,
+            padding=False  # Don't pad, let model handle variable length
+        )
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-        # Ensure input matches training sequence length
-        if inputs['input_ids'].size(1) < training_seq_len:
-            pad_length = training_seq_len - inputs['input_ids'].size(1)
-            pad_token_id = self.tokenizer.pad_token_id
-            inputs['input_ids'] = torch.cat([
-                inputs['input_ids'],
-                torch.full((1, pad_length), pad_token_id, device=self.device)
-            ], dim=1)
+        # Validate input length
+        actual_length = inputs['input_ids'].size(1)
+        if actual_length > max_prompt_length:
+            print(f"WARNING: Input truncated from {actual_length} to {max_prompt_length}")
+            inputs['input_ids'] = inputs['input_ids'][:, :max_prompt_length]
             if 'attention_mask' in inputs:
-                inputs['attention_mask'] = torch.cat([
-                    inputs['attention_mask'],
-                    torch.zeros((1, pad_length), device=self.device, dtype=inputs['attention_mask'].dtype)
-                ], dim=1)
+                inputs['attention_mask'] = inputs['attention_mask'][:, :max_prompt_length]
 
-        # Safety check: ensure input doesn't exceed model's max positions
-        if inputs['input_ids'].size(1) > max_positions:
-            print(f"WARNING: Input size {inputs['input_ids'].size(1)} exceeds max positions {max_positions}")
-            inputs['input_ids'] = inputs['input_ids'][:, :max_positions]
-            if 'attention_mask' in inputs:
-                inputs['attention_mask'] = inputs['attention_mask'][:, :max_positions]
-
+        # Generate with remaining space
         with torch.no_grad():
-            # SPLMHeadModel's generate expects max_length (total), not max_new_tokens
             current_length = inputs['input_ids'].size(1)
-            total_length = min(current_length + max_length, max_positions)
+            remaining_space = MAX_CONTEXT - current_length
+            actual_max_gen = min(max_generation, remaining_space)
+            total_length = current_length + actual_max_gen
 
             gen_cfg = self.config['generation']
             outputs = self.model.generate(

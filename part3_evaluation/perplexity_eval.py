@@ -72,15 +72,12 @@ class PerplexityEvaluator:
         if not texts:
             return float('inf')
 
-        # Get model's actual context length (256 for our model)
-        try:
-            model_max_length = self.model.config.n_positions
-        except AttributeError:
-            model_max_length = 256
-            print(f"Warning: Could not get n_positions, using {model_max_length}")
-        max_length = min(max_length, model_max_length)
+        # Force max length to 256 for compatibility with training
+        MAX_CONTEXT = 256
+        model_max_length = MAX_CONTEXT  # Always use 256
+        max_length = min(max_length, MAX_CONTEXT)  # Cap at 256
 
-        print(f"Model max position: {model_max_length}, using max_length: {max_length}")
+        print(f"Using fixed max_length: {max_length} (model trained with 256)")
 
         # Smaller stride for better coverage
         stride = min(stride, max_length // 2)
@@ -120,14 +117,14 @@ class PerplexityEvaluator:
                 if end_loc - begin_loc < 10:
                     break
 
-                # Extract window and ensure it doesn't exceed model's max positions
-                window_size = min(end_loc - begin_loc, model_max_length)
+                # Extract window and ensure it doesn't exceed 256 tokens
+                window_size = min(end_loc - begin_loc, MAX_CONTEXT)
                 input_ids = encodings.input_ids[:, begin_loc:begin_loc + window_size].to(self.device)
 
-                # Critical: Ensure input size doesn't exceed model's position embeddings
-                if input_ids.size(1) > model_max_length:
-                    print(f"WARNING: Truncating input from {input_ids.size(1)} to {model_max_length}")
-                    input_ids = input_ids[:, :model_max_length]
+                # Critical: Hard enforce 256 token limit
+                if input_ids.size(1) > MAX_CONTEXT:
+                    print(f"WARNING: Truncating input from {input_ids.size(1)} to {MAX_CONTEXT}")
+                    input_ids = input_ids[:, :MAX_CONTEXT]
 
                 # Check for invalid token IDs (exceeding vocabulary size)
                 try:

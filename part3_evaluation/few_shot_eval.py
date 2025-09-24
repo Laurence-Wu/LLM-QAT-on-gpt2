@@ -246,58 +246,49 @@ class FewShotEvaluator:
         return prompt
 
     def _generate_answer(self, prompt: str, max_length: int = None) -> str:
-        """Generate answer using the model"""
+        """Generate answer using the model with smart truncation for 256 token limit"""
         if max_length is None:
             max_length = self.config['generation']['max_length']
 
-        # Get model's max position from config
-        try:
-            max_positions = self.model.config.n_positions
-        except AttributeError:
-            max_positions = 256
-            print(f"Warning: Could not get n_positions, using {max_positions}")
-        # Leave room for generation
-        max_input_length = max(max_positions - max_length - 1, 10)  # Ensure at least 10 tokens
+        # Force max context to 256 for compatibility
+        MAX_CONTEXT = 256
+        max_generation = min(max_length, 50)  # Cap generation length
+        max_prompt_length = MAX_CONTEXT - max_generation
 
-        # Get training sequence length from model config
-        try:
-            training_seq_len = self.model.config.n_positions
-        except AttributeError as e:
-            raise ValueError(f"Cannot get n_positions from model config: {e}")
+        # First try to fit the prompt as-is
+        full_tokens = self.tokenizer.encode(prompt, truncation=False)
 
-        # Tokenize with padding to match training sequence length
-        inputs = self.tokenizer(prompt, return_tensors='pt', truncation=True,
-                               max_length=min(max_input_length, training_seq_len),
-                               padding='max_length')
+        if len(full_tokens) <= max_prompt_length:
+            # Fits entirely, use as-is
+            prompt_to_use = prompt
+        else:
+            # Need smart truncation - try to keep complete examples
+            prompt_to_use = self._smart_truncate_for_few_shot(prompt, full_tokens, max_prompt_length)
+
+        # Tokenize the final prompt
+        inputs = self.tokenizer(
+            prompt_to_use,
+            return_tensors='pt',
+            truncation=True,
+            max_length=max_prompt_length,
+            padding=False  # Don't pad
+        )
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-        # Ensure input matches training sequence length
-        if inputs['input_ids'].size(1) < training_seq_len:
-            pad_length = training_seq_len - inputs['input_ids'].size(1)
-            pad_token_id = self.tokenizer.pad_token_id
-            inputs['input_ids'] = torch.cat([
-                inputs['input_ids'],
-                torch.full((1, pad_length), pad_token_id, device=self.device)
-            ], dim=1)
+        # Validate length
+        actual_length = inputs['input_ids'].size(1)
+        if actual_length > max_prompt_length:
+            print(f"WARNING: Had to truncate from {actual_length} to {max_prompt_length}")
+            inputs['input_ids'] = inputs['input_ids'][:, :max_prompt_length]
             if 'attention_mask' in inputs:
-                inputs['attention_mask'] = torch.cat([
-                    inputs['attention_mask'],
-                    torch.zeros((1, pad_length), device=self.device, dtype=inputs['attention_mask'].dtype)
-                ], dim=1)
+                inputs['attention_mask'] = inputs['attention_mask'][:, :max_prompt_length]
 
-        # Safety check: ensure input doesn't exceed model's max positions
-        if inputs['input_ids'].size(1) > max_positions - max_length:
-            print(f"WARNING: Truncating input from {inputs['input_ids'].size(1)} to {max_positions - max_length}")
-            inputs['input_ids'] = inputs['input_ids'][:, :max_positions - max_length]
-            if 'attention_mask' in inputs:
-                inputs['attention_mask'] = inputs['attention_mask'][:, :max_positions - max_length]
-
+        # Generate with remaining space
         with torch.no_grad():
-            # SPLMHeadModel's generate expects max_length (total), not max_new_tokens
             current_length = inputs['input_ids'].size(1)
-            remaining_length = max_positions - current_length
-            actual_max_new = min(max_length, remaining_length)
-            total_length = current_length + actual_max_new
+            remaining_space = MAX_CONTEXT - current_length
+            actual_max_gen = min(max_generation, remaining_space)
+            total_length = current_length + actual_max_gen
 
             gen_cfg = self.config['generation']
             outputs = self.model.generate(
@@ -311,6 +302,55 @@ class FewShotEvaluator:
 
         generated = self.tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
         return generated.strip()
+
+    def _smart_truncate_for_few_shot(self, prompt: str, tokens: list, max_length: int) -> str:
+        """Smart truncation that tries to preserve complete few-shot examples"""
+        # Look for example boundaries (Q:, A:, Question:, Answer:, etc.)
+        # Priority: Keep the actual question and at least one example
+
+        # Find the last question marker
+        prompt_lines = prompt.split('\n')
+        last_q_idx = -1
+        for i in range(len(prompt_lines) - 1, -1, -1):
+            if any(marker in prompt_lines[i] for marker in ['Q:', 'Question:']):
+                last_q_idx = i
+                break
+
+        if last_q_idx > 0:
+            # Keep the question and work backwards to fit examples
+            question_part = '\n'.join(prompt_lines[last_q_idx:])
+            examples_part = '\n'.join(prompt_lines[:last_q_idx])
+
+            # Tokenize question part
+            question_tokens = self.tokenizer.encode(question_part, truncation=False)
+            remaining_space = max_length - len(question_tokens) - 10  # Leave some buffer
+
+            if remaining_space > 50:  # If we have decent space for examples
+                # Try to fit at least one complete example
+                example_lines = examples_part.split('\n\n')  # Examples often separated by double newline
+                truncated_examples = []
+
+                # Work backwards through examples
+                for example in reversed(example_lines):
+                    example_tokens = self.tokenizer.encode(example, truncation=False)
+                    if len(example_tokens) <= remaining_space:
+                        truncated_examples.insert(0, example)
+                        remaining_space -= len(example_tokens)
+                    elif not truncated_examples:
+                        # If we haven't added any examples yet, add a truncated version
+                        truncated_example = self.tokenizer.decode(
+                            self.tokenizer.encode(example, truncation=True, max_length=remaining_space),
+                            skip_special_tokens=True
+                        )
+                        truncated_examples.append(truncated_example)
+                        break
+
+                if truncated_examples:
+                    return '\n\n'.join(truncated_examples) + '\n' + question_part
+
+        # Fallback: simple truncation from the end (keeps the question)
+        truncated_tokens = self.tokenizer.encode(prompt, truncation=True, max_length=max_length)
+        return self.tokenizer.decode(truncated_tokens, skip_special_tokens=True)
 
     def _extract_answer_choice(self, text: str) -> str:
         """Extract answer choice (A, B, C, D) from generated text"""
