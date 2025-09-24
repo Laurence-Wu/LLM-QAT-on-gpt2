@@ -68,7 +68,7 @@ class TrainingConfig:
         self.max_grad_norm = 1.0
 
         # Training schedule
-        self.num_iterations = 5
+        self.num_iterations = 500
         self.gradient_accumulation_steps = 8
 
         # Evaluation
@@ -88,7 +88,3 @@ class TrainingConfig:
         self.distill_warmup_steps = 100  # Steps before starting distillation
         self.feature_layers = None  # Which layers to match (None = all)
         self.cache_size = 32  # Teacher cache size
-
-
-        # Evaluation
-        self.current_bit_width = 32
