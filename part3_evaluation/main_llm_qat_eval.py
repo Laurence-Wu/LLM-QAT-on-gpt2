@@ -258,7 +258,9 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
             # Diagnostic: Quick inference test
             print("\n🔍 Running quick inference test...")
             with torch.no_grad():
-                test_input = torch.randint(0, model.config.vocab_size, (1, 10)).cuda()
+                # Use max_seq_length from training_config to match calibrated quantizers
+                test_seq_length = training_config.get('max_seq_length', 256) if training_config else 256
+                test_input = torch.randint(0, model.config.vocab_size, (1, test_seq_length)).cuda()
                 test_output = model(test_input)
                 test_logits = test_output.logits if hasattr(test_output, 'logits') else test_output
 
