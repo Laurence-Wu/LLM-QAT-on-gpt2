@@ -420,7 +420,7 @@ def compute_loss_single_precision(model, batch, precision, teacher_bits, distill
 # ============================================================================
 
 def train_step(model, train_iter, train_loader, optimizer, scaler,
-               available_precisions, distill_mgr, config, iteration, stats_tracker,calib_mgr,scheduler):
+               available_precisions, distill_mgr, config, iteration, stats_tracker,calib_mgr,scheduler, batch=None):
 
     optimizer.zero_grad(set_to_none=True)
     total_loss = 0
@@ -429,11 +429,12 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
     model.train()
     torch.set_grad_enabled(True)
 
-    # Process gradient accumulation steps
-    for bit_step in range(config.gradient_accumulation_steps):
-        # Get batch
+    # Get batch if not provided (first call) - reuse same batch for all gradient accumulation steps
+    if batch is None:
         batch = get_next_batch(train_iter, train_loader)
 
+    # Process gradient accumulation steps with the same batch
+    for bit_step in range(config.gradient_accumulation_steps):
         # CRITICAL: Randomly sample ONE precision for this batch
         # Over many iterations, all precisions will be trained
         teacher_bit = max(available_precisions)
@@ -455,7 +456,7 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
         # Compute loss for the selected precision only
         loss = compute_loss_single_precision(
             model, batch, precision,
-            teacher_bits=32,  # 32-bit is always the teacher
+            teacher_bits=teacher_bit,
             distill_mgr=distill_mgr,
             config=config,
             iteration=iteration + bit_step
@@ -482,7 +483,10 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
     scaler.step(optimizer)
     scaler.update()
 
-    return total_loss
+    # Get next batch for next iteration
+    next_batch = get_next_batch(train_iter, train_loader)
+
+    return total_loss, next_batch
 
 
 # ============================================================================
@@ -566,11 +570,14 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     for bits in student_bits:
         calib_mgr.ensure_calibrated(bits)
 
+    # Initialize with None so first iteration gets a new batch
+    current_batch = None
+
     for iteration in progress_bar:
         # Execute training steps (cycles all the bit widths) with random precision sampling
-        total_loss = train_step(
+        total_loss, current_batch = train_step(
             model, train_iter, train_loader, optimizer, scaler,
-            available_precisions, distill_mgr, config, iteration, stats, calib_mgr,scheduler
+            available_precisions, distill_mgr, config, iteration, stats, calib_mgr, scheduler, current_batch
         )
 
         # Update distillation manager
