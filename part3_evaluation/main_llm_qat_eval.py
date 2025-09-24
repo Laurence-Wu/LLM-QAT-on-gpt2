@@ -68,8 +68,8 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
     if model_path and os.path.exists(model_path):
         print(f"Loading model from {model_path}")
 
-        # Load checkpoint
-        checkpoint = torch.load(model_path, map_location='cuda')
+        # Load checkpoint (PyTorch 2.6 requires weights_only=False for custom objects)
+        checkpoint = torch.load(model_path, map_location='cuda', weights_only=False)
 
         # Get the bit width this checkpoint was saved at
         # Get bit_width from checkpoint - required field

@@ -193,21 +193,13 @@ def test_fp32_model(checkpoint_path):
     print("  FP32 MODEL INFERENCE TEST")
     print("="*70)
 
-    # Load checkpoint (PyTorch 2.6 requires weights_only=False for custom objects)
+    # Load checkpoint
     checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
-    if not isinstance(checkpoint, dict):
-        print("ERROR: Invalid checkpoint format")
-        return
-
     model_config = checkpoint['model_config']
     bit_width = checkpoint.get('bit_width', None)
-
     print(f"Checkpoint bit width: {bit_width}")
 
-    if bit_width != 32:
-        print(f"WARNING: This checkpoint was saved at {bit_width}-bit, not 32-bit FP32!")
-
-    # Create config
+    # Create config with minimal setup
     config = GPT2Config(
         vocab_size=model_config.get('vocab_size', 50257),
         n_positions=model_config.get('n_positions', 1024),
@@ -216,32 +208,20 @@ def test_fp32_model(checkpoint_path):
         n_head=model_config.get('n_head', 12)
     )
 
-    # Add SP configs
-    config.bit_widths = model_config.get('bit_widths', [6, 8, 16, 32])
-    config.lora_rank_per_bit = model_config.get('lora_rank_per_bit', {})
-    config.lora_alpha_per_bit = model_config.get('lora_alpha_per_bit', {})
-    config.activation_bits_per_bit = model_config.get('activation_bits_per_bit', {})
-    config.quantizer_per_bit = model_config.get('quantizer_per_bit', {})
-
-    # Convert string keys to int
-    for attr in ['lora_rank_per_bit', 'lora_alpha_per_bit']:
-        if hasattr(config, attr) and isinstance(getattr(config, attr), dict):
+    # Copy SP-specific configs
+    for attr in ['bit_widths', 'lora_rank_per_bit', 'lora_alpha_per_bit',
+                 'activation_bits_per_bit', 'quantizer_per_bit']:
+        setattr(config, attr, model_config.get(attr, {}))
+        # Convert string keys to int for LoRA dicts
+        if 'lora' in attr and isinstance(getattr(config, attr), dict):
             setattr(config, attr, {int(k) if isinstance(k, str) else k: v
                                   for k, v in getattr(config, attr).items()})
 
-    # Create and load model
-    print("\nCreating SP model...")
+    # Create model and load weights
+    print("\nLoading SP model...")
     sp_model = SPLMHeadModel(config)
-
-    # CRITICAL: Set to FP32 mode BEFORE loading
-    sp_model.set_precision(32)
-    print("Model set to 32-bit FP32 mode")
-
-    # Load weights
-    state_dict = checkpoint['model_state_dict']
-    missing_keys, unexpected_keys = sp_model.load_state_dict(state_dict, strict=True)
-    print(f"Loaded model weights (missing: {len(missing_keys)}, unexpected: {len(unexpected_keys)})")
-
+    sp_model.set_precision(32)  # Force FP32 mode
+    sp_model.load_state_dict(checkpoint['model_state_dict'], strict=True)
     sp_model.eval()
 
     # Load tokenizer

@@ -7,15 +7,7 @@ import torch.nn as nn
 
 
 def convert_to_int8(model):
-    """
-    Convert quantization-aware trained model weights to INT8 format.
-
-    Args:
-        model: Quantization-aware trained model with FP32 weights
-
-    Returns:
-        Dictionary containing INT8 weights and quantization parameters
-    """
+    """Convert QAT model weights to INT8 format."""
     model.eval()
     int8_state_dict = {}
 
@@ -33,15 +25,13 @@ def convert_to_int8(model):
                 else:
                     continue
 
-                # Handle both regular and SP quantized layers
+                # Get quantizer
                 if hasattr(module, 'quantize_weight'):
                     weight_quantizer = module.quantize_weight
                 elif hasattr(module, 'quantizers_weight'):
-                    # For SPLinearWithLoRA, get current bit-width quantizer
-                    current_bits = module.current_bits if hasattr(module, 'current_bits') else 8
+                    current_bits = getattr(module, 'current_bits', 8)
                     weight_quantizer = module.quantizers_weight[f'{current_bits}bit']
                 else:
-                    # Skip if no quantizer found
                     continue
 
                 if weight_quantizer.symmetric:
@@ -89,19 +79,7 @@ def convert_to_int8(model):
 
 
 def save_int8_checkpoint(model, filepath, model_config=None, training_config=None, target_bits=None):
-    """
-    Save model in INT8 format with metadata.
-
-    Args:
-        model: Quantization-aware trained model
-        filepath: Path to save INT8 checkpoint
-        model_config: Optional model configuration
-        training_config: Optional training configuration
-        target_bits: Specific bit width to save (for SP models)
-
-    Returns:
-        Saved checkpoint dictionary
-    """
+    """Save model in INT8 format."""
     # Set model to specific precision if specified (for SP models)
     if target_bits is not None and hasattr(model, 'set_precision'):
         model.set_precision(target_bits)
@@ -145,44 +123,11 @@ def save_int8_checkpoint(model, filepath, model_config=None, training_config=Non
         }
     }
 
-    # Add configurations if provided
-    if model_config is not None:
-        # Create comprehensive model configuration dictionary
-        model_config_dict = model_config.__dict__.copy()
-
-        # Ensure critical quantization configurations are included
-        critical_configs = [
-            'lora_rank_per_bit', 'lora_alpha_per_bit',
-            'activation_bits_per_bit', 'kv_cache_bits_per_bit',
-            'bit_widths', 'switch_strategy', 'switch_interval', 'curriculum_schedule'
-        ]
-
-        for config_key in critical_configs:
-            if hasattr(model_config, config_key):
-                model_config_dict[config_key] = getattr(model_config, config_key)
-
-        # Get configured bit widths from model config
-        configured_bit_widths = getattr(model_config, 'bit_widths', None)
-
-        # Verify lora_rank_per_bit and lora_alpha_per_bit are present
-        if 'lora_rank_per_bit' not in model_config_dict or model_config_dict['lora_rank_per_bit'] is None:
-            print("Warning: 'lora_rank_per_bit' configuration is missing or None!")
-            # Use defaults based on configured bit widths
-            if configured_bit_widths:
-                model_config_dict['lora_rank_per_bit'] = {bits: (32 if bits <= 6 else 16 if bits <= 8 else 8 if bits <= 16 else 0)
-                                                          for bits in configured_bit_widths}
-
-        if 'lora_alpha_per_bit' not in model_config_dict or model_config_dict['lora_alpha_per_bit'] is None:
-            print("Warning: 'lora_alpha_per_bit' configuration is missing or None!")
-            # Use defaults based on configured bit widths
-            if configured_bit_widths:
-                model_config_dict['lora_alpha_per_bit'] = {bits: (64 if bits <= 6 else 32 if bits <= 8 else 16 if bits <= 16 else 0)
-                                                           for bits in configured_bit_widths}
-
-        checkpoint['model_config'] = model_config_dict
-        checkpoint['bit_widths'] = configured_bit_widths  # Use actual configured bit widths
-
-    if training_config is not None:
+    # Add configs
+    if model_config:
+        checkpoint['model_config'] = model_config.__dict__
+        checkpoint['bit_widths'] = getattr(model_config, 'bit_widths', None)
+    if training_config:
         checkpoint['training_config'] = training_config.__dict__
 
     # Save checkpoint
@@ -204,31 +149,14 @@ def save_int8_checkpoint(model, filepath, model_config=None, training_config=Non
 
 
 def save_sp_checkpoints(model, base_filename, model_config, training_config=None):
-    """
-    Save Switchable Precision model checkpoints for all configured bit widths.
+    """Save SP model checkpoints for all configured bit widths."""
+    import os, time, traceback
 
-    Args:
-        model: SP model with multiple bit-width support
-        base_filename: Base filename (without extension) for checkpoints
-        model_config: Model configuration with bit_widths
-        training_config: Optional training configuration
-
-    Returns:
-        Dictionary of saved checkpoint paths
-    """
-    import os
-    import time
-    import traceback
-
-    # Get configured bit widths from model config
     bit_widths = getattr(model_config, 'bit_widths', [6, 8, 16, 32])
     saved_checkpoints = {}
     timestamp = time.strftime('%Y%m%d_%H%M%S')
 
-    print(f"\n{'='*60}")
-    print(f"Saving SP Model Checkpoints")
-    print(f"{'='*60}")
-    print(f"Configured bit widths: {bit_widths}")
+    print(f"\nSaving SP checkpoints for bit widths: {bit_widths}")
 
     for bits in bit_widths:
         if bits == 32:
@@ -236,107 +164,48 @@ def save_sp_checkpoints(model, base_filename, model_config, training_config=None
             print(f"\nSkipping 32-bit model (not needed for quantized deployment)")
             continue
 
-        print(f"\n{'='*40}")
-        print(f"Processing {bits}-bit model...")
-
-        # Set precision and get state dict
+        print(f"\nProcessing {bits}-bit model...")
         model.set_precision(bits)
         state_dict = model.state_dict()
-
-        # Debug: Print state dict size
-        state_dict_size = sum(p.numel() * p.element_size() for p in state_dict.values())
-        print(f"State dict size: {state_dict_size / (1024*1024):.2f} MB")
-        print(f"Number of parameters: {sum(p.numel() for p in state_dict.values()):,}")
-
-        # Save model
         filename = f"{base_filename}_{bits}bit_FP32_{timestamp}.pth"
-        print(f"Saving to: {filename}")
 
         checkpoint = {
             'model_state_dict': state_dict,
             'model_config': model_config.__dict__,
             'training_config': training_config.__dict__ if training_config else None,
-            'bit_width': bits,  # Save as integer
-            'timestamp': timestamp,
-            'checkpoint_version': '1.1',  # Version tracking
-            'pytorch_version': torch.__version__,
-            'save_complete': False  # Flag to verify complete save
+            'bit_width': bits,  # Integer for Part 3 compatibility
+            'timestamp': timestamp
         }
 
-        # Save with error handling and verification
-        max_retries = 3
-        retry_count = 0
-        save_successful = False
-
-        while retry_count < max_retries and not save_successful:
+        # Save with retry logic
+        for attempt in range(3):
             try:
-                # Clear any GPU cache before saving
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
-                # Save checkpoint with pickle protocol 4 for better compatibility
                 torch.save(checkpoint, filename, pickle_protocol=4)
+                time.sleep(0.5)  # Ensure write completion
 
-                # Small delay to ensure write completion
-                time.sleep(0.5)
-
-                # Verify saved file
-                file_size = os.path.getsize(filename)
-                print(f"File saved, size: {file_size / (1024*1024):.2f} MB")
-
-                # Try to reload to verify integrity
-                print("Verifying checkpoint integrity...")
-                # Use weights_only=False for verification since we store torch.__version__
+                # Verify save
                 test_load = torch.load(filename, map_location='cpu', weights_only=False)
-                save_successful = True
+                assert test_load['bit_width'] == bits
 
-                # Check critical fields
-                assert 'model_state_dict' in test_load, "Missing model_state_dict"
-                assert 'bit_width' in test_load, "Missing bit_width"
-                assert test_load['bit_width'] == bits, f"Bit width mismatch: {test_load['bit_width']} vs {bits}"
-
-                # Update save_complete flag
-                checkpoint['save_complete'] = True
-                torch.save(checkpoint, filename, pickle_protocol=4)
-
-                print(f"✅ Verification passed for {bits}-bit model")
+                file_size = os.path.getsize(filename) / (1024*1024)
+                print(f"✅ Saved {bits}-bit model: {filename} ({file_size:.1f} MB)")
                 saved_checkpoints[bits] = filename
-
+                break
             except Exception as e:
-                retry_count += 1
-                if retry_count < max_retries:
-                    print(f"⚠️ Attempt {retry_count} failed: {str(e)}")
-                    print(f"Retrying... ({retry_count}/{max_retries})")
-                    # Try to remove potentially corrupted file
+                if attempt < 2:
+                    print(f"Retry {attempt+1}: {str(e)}")
                     if os.path.exists(filename):
-                        try:
-                            os.remove(filename)
-                        except:
-                            pass
-                    # Wait before retry
+                        try: os.remove(filename)
+                        except: pass
                     time.sleep(1.0)
                 else:
-                    print(f"❌ ERROR saving {bits}-bit model after {max_retries} attempts: {str(e)}")
-                    traceback.print_exc()
-                    # Try to remove corrupted file
+                    print(f"❌ Failed to save {bits}-bit model: {str(e)}")
                     if os.path.exists(filename):
-                        try:
-                            os.remove(filename)
-                            print(f"Removed corrupted file: {filename}")
-                        except:
-                            print(f"WARNING: Could not remove corrupted file: {filename}")
-                    break
+                        try: os.remove(filename)
+                        except: pass
 
-        if not save_successful:
-            continue
-
-    print(f"\n{'='*60}")
-    if saved_checkpoints:
-        print(f"Successfully saved {len(saved_checkpoints)} checkpoint(s)")
-        for bits, path in saved_checkpoints.items():
-            print(f"  {bits}-bit: {path}")
-    else:
-        print("WARNING: No checkpoints were saved successfully!")
-    print(f"{'='*60}\n")
-
+    print(f"\nSaved {len(saved_checkpoints)}/{len([b for b in bit_widths if b != 32])} checkpoints")
     return saved_checkpoints
