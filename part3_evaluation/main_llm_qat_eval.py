@@ -202,10 +202,6 @@ class CalibrationManager:
         torch.cuda.empty_cache()
 
 
-def fix_state_dict_shapes(state_dict):
-    """Let PyTorch handle shape mismatches with strict=False."""
-    return state_dict
-
 
 def validate_model_config(config):
     """Validate that all required model configuration parameters are present."""
@@ -354,9 +350,6 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
         if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
             # Load state dict with size mismatch handling for attention bias
             state_dict = checkpoint['model_state_dict']
-
-            # Fix quantizer shape mismatches only
-            state_dict = fix_state_dict_shapes(state_dict)
 
             # Don't resize matrices - model should be created with correct dimensions
 

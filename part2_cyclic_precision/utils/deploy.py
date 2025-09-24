@@ -203,28 +203,6 @@ def save_int8_checkpoint(model, filepath, model_config=None, training_config=Non
     return checkpoint
 
 
-def fix_quantizer_shapes(state_dict):
-    """Fix shape mismatches for quantizer parameters.
-
-    Converts scalar tensors torch.Size([]) to torch.Size([1]) for compatibility.
-    """
-    import torch
-
-    fixed_dict = {}
-    for key, value in state_dict.items():
-        # Check if this is a quantizer parameter that needs fixing
-        if any(param in key for param in ['scale', 'zero_point', 'running_min', 'running_max']):
-            if torch.is_tensor(value) and value.dim() == 0:  # Scalar tensor
-                # Convert to size [1] tensor
-                fixed_dict[key] = value.unsqueeze(0)
-            else:
-                fixed_dict[key] = value
-        else:
-            fixed_dict[key] = value
-
-    return fixed_dict
-
-
 def save_sp_checkpoints(model, base_filename, model_config, training_config=None):
     """
     Save Switchable Precision model checkpoints for all configured bit widths.
@@ -258,9 +236,8 @@ def save_sp_checkpoints(model, base_filename, model_config, training_config=None
             model.set_precision(32)
             fp32_filename = f"{base_filename}_32bit_fp32_{timestamp}.pth"
 
-            # Get state dict and fix shape mismatches
+            # Get state dict
             state_dict = model.state_dict()
-            state_dict = fix_quantizer_shapes(state_dict)
 
             # Save full FP32 checkpoint
             torch.save({

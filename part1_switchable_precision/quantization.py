@@ -39,6 +39,22 @@ class LearnableFakeQuantize(nn.Module):
         self.temp_min = None
         self.temp_max = None
 
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        """Override to resize buffers to match checkpoint shapes."""
+        # Resize our buffers to match the shapes in the checkpoint
+        for buffer_name in ['scale', 'zero_point', 'running_min', 'running_max']:
+            key = prefix + buffer_name
+            if key in state_dict:
+                # Get the buffer and resize it to match loaded shape
+                buffer = getattr(self, buffer_name, None)
+                if buffer is not None:
+                    buffer.resize_as_(state_dict[key])
+
+        # Call parent implementation to actually load the values
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
+                                      missing_keys, unexpected_keys, error_msgs)
+
     def set_num_bits(self, value):
         """Update num_bits and recalculate quantization ranges."""
         old_bits = self.num_bits
