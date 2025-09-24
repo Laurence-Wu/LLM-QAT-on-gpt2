@@ -284,7 +284,7 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
         raise ValueError("No model path provided! Please specify --model_path with a trained checkpoint file.")
 
     # Force model to CUDA
-    device = torch.device('cuda:0')
+    device = torch.device('cuda')
     model = model.to(device)
     model.eval()  # Set to evaluation mode
     print(f"\n✅ Model moved to {device}")

@@ -13,7 +13,7 @@ class LLMQATEvaluation:
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA is not available. This evaluation requires CUDA.")
 
-        self.device = torch.device('cuda:0')
+        self.device = torch.device('cuda')
         self.model = model.to(self.device)
         self.tokenizer = tokenizer
         self.model_size = model_size
