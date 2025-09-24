@@ -438,10 +438,10 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
         # Over many iterations, all precisions will be trained
         teacher_bit = max(available_precisions)
         student_bits = [b for b in available_precisions if b != teacher_bit]
-        if bit_step % len(available_precisions) == 0:
-            precision = random.choice(student_bits)
+        if bit_step == 0:
+            precision = teacher_bit  # Run teacher first to cache outputs
         else:
-            precision = teacher_bit
+            precision = random.choice(student_bits)
         precisions_used.append(precision)
 
         if calib_mgr and iteration > 0 and precision < 32:
@@ -561,8 +561,7 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     progress_bar = tqdm(range(config.num_iterations), desc="SP Training")
 
     # All available precisions for random sampling (including teacher)
-
-    available_precisions = [model_config.bit_widths]
+    available_precisions = model_config.bit_widths  # [6, 8, 16, 32]
 
     for bits in student_bits:
         calib_mgr.ensure_calibrated(bits)
