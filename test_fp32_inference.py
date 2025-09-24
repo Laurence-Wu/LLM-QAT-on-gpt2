@@ -193,8 +193,8 @@ def test_fp32_model(checkpoint_path):
     print("  FP32 MODEL INFERENCE TEST")
     print("="*70)
 
-    # Load checkpoint
-    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    # Load checkpoint (PyTorch 2.6 requires weights_only=False for custom objects)
+    checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
     if not isinstance(checkpoint, dict):
         print("ERROR: Invalid checkpoint format")
         return
