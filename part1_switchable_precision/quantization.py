@@ -144,6 +144,14 @@ class LearnableFakeQuantize(nn.Module):
                         self.temp_min = torch.minimum(self.temp_min, min_val)
                         self.temp_max = torch.maximum(self.temp_max, max_val)
                 # If all values are zero, keep existing temp_min/temp_max or use defaults
+                elif self.num_batches_collected == 0:
+                    # Initialize with default values for all-zero input
+                    # Use log2(eps) as both min and max
+                    log_eps = torch.log2(torch.tensor(self.eps))
+                    shape = list(x.shape)
+                    shape[self.channel_dim] = 1
+                    self.temp_min = torch.full(shape, log_eps, device=x.device)
+                    self.temp_max = torch.full(shape, log_eps, device=x.device)
             else:
                 dims_to_reduce = list(range(x.dim()))
                 dims_to_reduce.remove(self.channel_dim)
