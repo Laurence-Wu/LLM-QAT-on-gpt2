@@ -184,6 +184,9 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
         # Create SPLMHeadModel instead of SwitchableQATGPT2
         model = SPLMHeadModel(config)
 
+        # Move model to GPU immediately after creation
+        model = model.cuda()
+
         # Don't load pretrained weights - we'll load from checkpoint directly
         # This avoids resizing issues
 
