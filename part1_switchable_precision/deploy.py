@@ -231,6 +231,7 @@ def save_sp_checkpoints(model, base_filename, model_config, training_config=None
 
     for bits in bit_widths:
         if bits == 32:
+            continue 
             # Save FP32 teacher model
             print(f"\nSaving 32-bit FP32 teacher model...")
             model.set_precision(32)
@@ -252,20 +253,21 @@ def save_sp_checkpoints(model, base_filename, model_config, training_config=None
             print(f"✓ Saved 32-bit FP32 teacher to: {fp32_filename}")
 
         else:
-            # Save INT8 student models
-            print(f"\nSaving {bits}-bit INT8 student model...")
-            int8_filename = f"{base_filename}_{bits}bit_FP32_{timestamp}.pth"
+            if bits == 8:
+                # Save INT8 student models
+                print(f"\nSaving {bits}-bit INT8 student model...")
+                int8_filename = f"{base_filename}_{bits}bit_FP32_{timestamp}.pth"
 
-            torch.save({
-                'model_state_dict': state_dict,
-                'model_config': model_config.__dict__,
-                'training_config': training_config.__dict__ if training_config else None,
-                'bit_width': f"{bits}bit",
-                'timestamp': timestamp
-            }, fp32_filename)
+                torch.save({
+                    'model_state_dict': state_dict,
+                    'model_config': model_config.__dict__,
+                    'training_config': training_config.__dict__ if training_config else None,
+                    'bit_width': f"{bits}bit",
+                    'timestamp': timestamp
+                }, fp32_filename)
 
-            saved_checkpoints[bits] = int8_filename
-            print(f"✓ Saved {bits}-bit INT8 student to: {int8_filename}")
+                saved_checkpoints[bits] = int8_filename
+                print(f"✓ Saved {bits}-bit INT8 student to: {int8_filename}")
 
     print(f"\n{'='*60}")
     print(f"All checkpoints saved successfully!")
