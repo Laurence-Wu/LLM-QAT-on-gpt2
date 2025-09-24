@@ -201,25 +201,20 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
 
             # Don't resize matrices - model should be created with correct dimensions
 
-            # First try with strict=True to ensure all weights are loaded correctly
-            print("\nAttempting to load state dict with strict=True for complete weight loading...")
-            try:
-                missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=True)
+            # Use strict=True to ensure all weights are loaded correctly
+            print("\nLoading state dict with strict=True to ensure complete weight loading...")
+            missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=True)
+
+            if not missing_keys and not unexpected_keys:
                 print("✅ SUCCESS: All weights loaded perfectly with strict=True!")
                 print("   No missing or unexpected keys - model is fully loaded.")
-            except RuntimeError as e:
-                print(f"⚠️ WARNING: Cannot load with strict=True due to: {str(e)[:200]}")
-                print("   Falling back to strict=False - this may cause underperformance!")
-
-                # Load with strict=False as fallback
-                missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
-
+            else:
+                # This should not happen with strict=True, but keep for safety
                 if missing_keys:
                     print(f"\n❌ CRITICAL: Missing {len(missing_keys)} keys in checkpoint!")
                     print("   These weights will use random initialization, causing poor performance:")
-                    # Show ALL missing keys for critical debugging
                     for i, key in enumerate(missing_keys):
-                        if i < 50:  # Show first 50
+                        if i < 50:
                             print(f"     - {key}")
                     if len(missing_keys) > 50:
                         print(f"     ... and {len(missing_keys) - 50} more missing keys")
@@ -228,7 +223,7 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
                     print(f"\n⚠️ Warning: {len(unexpected_keys)} unexpected keys in checkpoint")
                     print("   These keys exist in checkpoint but not in model:")
                     for i, key in enumerate(unexpected_keys):
-                        if i < 20:  # Show first 20
+                        if i < 20:
                             print(f"     - {key}")
                     if len(unexpected_keys) > 20:
                         print(f"     ... and {len(unexpected_keys) - 20} more")

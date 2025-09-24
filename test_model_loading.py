@@ -137,28 +137,29 @@ def test_model_creation(checkpoint_path):
         print(f"Setting model to {checkpoint_bit_width}-bit precision BEFORE loading weights")
         model.set_precision(checkpoint_bit_width)
 
-    # Load weights with strict=True to catch errors
+    # Load weights with strict=True to catch ALL errors
     state_dict = checkpoint['model_state_dict']
 
-    print("\nLoading state dict with strict=True...")
-    try:
-        missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=True)
-        print("SUCCESS: All weights loaded successfully with strict=True!")
-    except RuntimeError as e:
-        print(f"ERROR with strict=True: {e}")
-        print("\nTrying with strict=False to see what's missing...")
-        missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+    print("\nLoading state dict with strict=True (will fail if ANY weights are missing)...")
+    missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=True)
 
+    if not missing_keys and not unexpected_keys:
+        print("SUCCESS: All weights loaded perfectly with strict=True!")
+        print("  ✅ No missing keys")
+        print("  ✅ No unexpected keys")
+        print("  ✅ Model is fully loaded with all correct weights")
+    else:
+        # This shouldn't happen with strict=True, but keep for completeness
         if missing_keys:
-            print(f"\nMissing {len(missing_keys)} keys:")
-            for key in missing_keys[:20]:  # Show first 20
+            print(f"\nERROR: Missing {len(missing_keys)} keys:")
+            for key in missing_keys[:50]:
                 print(f"  - {key}")
-            if len(missing_keys) > 20:
-                print(f"  ... and {len(missing_keys) - 20} more")
+            if len(missing_keys) > 50:
+                print(f"  ... and {len(missing_keys) - 50} more")
 
         if unexpected_keys:
-            print(f"\nUnexpected {len(unexpected_keys)} keys:")
-            for key in unexpected_keys[:20]:  # Show first 20
+            print(f"\nERROR: Unexpected {len(unexpected_keys)} keys:")
+            for key in unexpected_keys[:20]:
                 print(f"  - {key}")
             if len(unexpected_keys) > 20:
                 print(f"  ... and {len(unexpected_keys) - 20} more")
