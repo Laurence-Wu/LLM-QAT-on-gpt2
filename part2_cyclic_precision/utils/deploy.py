@@ -240,7 +240,6 @@ def save_sp_checkpoints(model, base_filename, model_config, training_config=None
     """
     import os
     import time
-    import json
 
     # Get configured bit widths from model config
     bit_widths = getattr(model_config, 'bit_widths', [6, 8, 16, 32])
@@ -251,35 +250,6 @@ def save_sp_checkpoints(model, base_filename, model_config, training_config=None
     print(f"Saving SP Model Checkpoints")
     print(f"{'='*60}")
     print(f"Configured bit widths: {bit_widths}")
-
-    # First, save complete configuration to JSON
-    json_filename = f"{base_filename}_config_{timestamp}.json"
-    config_data = {
-        'model_config': {},
-        'training_config': {},
-        'timestamp': timestamp
-    }
-
-    # Save ALL model config attributes
-    for attr_name in dir(model_config):
-        if not attr_name.startswith('_'):
-            attr_value = getattr(model_config, attr_name)
-            # Skip methods
-            if not callable(attr_value):
-                config_data['model_config'][attr_name] = attr_value
-
-    # Save ALL training config attributes if provided
-    if training_config:
-        for attr_name in dir(training_config):
-            if not attr_name.startswith('_'):
-                attr_value = getattr(training_config, attr_name)
-                if not callable(attr_value):
-                    config_data['training_config'][attr_name] = attr_value
-
-    # Write JSON config
-    with open(json_filename, 'w') as f:
-        json.dump(config_data, f, indent=2)
-    print(f"✓ Saved complete configuration to: {json_filename}")
 
     for bits in bit_widths:
         if bits == 32:
@@ -298,8 +268,7 @@ def save_sp_checkpoints(model, base_filename, model_config, training_config=None
                 'model_config': model_config.__dict__,
                 'training_config': training_config.__dict__ if training_config else None,
                 'bit_width': 32,
-                'timestamp': timestamp,
-                'config_json_path': json_filename  # Reference to complete config
+                'timestamp': timestamp
             }, fp32_filename)
 
             saved_checkpoints[32] = fp32_filename

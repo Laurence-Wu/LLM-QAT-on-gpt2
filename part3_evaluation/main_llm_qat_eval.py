@@ -245,72 +245,20 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
     if model_path and os.path.exists(model_path):
         print(f"Loading model from {model_path}")
 
-        # Determine JSON config path
-        json_path = config_path  # Use provided config path if available
-
-        if not json_path and model_path.endswith('.pth'):
-            # Try to auto-detect matching JSON file
-            dir_path = os.path.dirname(model_path) if os.path.dirname(model_path) else '.'
-            base_name = os.path.basename(model_path)
-            timestamp = base_name.split('_')[-1].replace('.pth', '')
-
-            # Try multiple patterns
-            possible_jsons = [
-                os.path.join(dir_path, f"sp_gpt2_config_{timestamp}.json"),  # New format
-                os.path.join(dir_path, f"qat_training_stats_{timestamp}.json"),  # Old format
-                f"sp_gpt2_config_{timestamp}.json",
-                f"qat_training_stats_{timestamp}.json"
-            ]
-
-            for possible_json in possible_jsons:
-                if os.path.exists(possible_json):
-                    json_path = possible_json
-                    print(f"Auto-detected matching JSON config: {json_path}")
-                    break
-
-        # Load checkpoint first
+        # Load checkpoint
         checkpoint = torch.load(model_path, map_location='cuda')
 
-        # Try to get config from JSON file first (most complete), then fall back to checkpoint
-        model_config = None
-        training_config = None
-
-        # Priority 1: User-specified config path
-        if config_path and os.path.exists(config_path):
-            print(f"Using user-specified config from: {config_path}")
-            try:
-                with open(config_path, 'r') as f:
-                    json_data = json.load(f)
-                    model_config = json_data.get('model_config', {})
-                    training_config = json_data.get('training_config', {})
-                    print(f"✓ Loaded configuration from specified JSON file")
-            except Exception as e:
-                print(f"Warning: Could not load specified JSON config: {e}")
-
-        # Priority 2: Auto-detected JSON config
-        elif json_path and os.path.exists(json_path):
-            print(f"Using auto-detected config from: {json_path}")
-            try:
-                with open(json_path, 'r') as f:
-                    json_data = json.load(f)
-                    model_config = json_data.get('model_config', {})
-                    training_config = json_data.get('training_config', {})
-                    print(f"✓ Loaded configuration from auto-detected JSON file")
-            except Exception as e:
-                print(f"Warning: Could not load auto-detected JSON config: {e}")
-
-        # Priority 3: Config embedded in checkpoint
-        if not model_config and isinstance(checkpoint, dict):
+        # Config embedded in checkpoint
+        if isinstance(checkpoint, dict):
             if 'model_config' in checkpoint:
                 model_config = checkpoint.get('model_config', {})
                 training_config = checkpoint.get('training_config', {})
                 print("Using configuration embedded in checkpoint")
+            else:
+                raise ValueError("Checkpoint missing model_config")
+        else:
+            raise ValueError("Invalid checkpoint format - not a dictionary")
 
-        if not model_config:
-            raise ValueError("No model configuration found! Please provide a valid checkpoint with model_config or specify --config_path.\n"
-                           "The checkpoint must be saved with complete configuration using the updated training script.")
-
-        # STRICT CONFIG USAGE - Use exactly what's in the config, no defaults
         print("\n" + "="*50)
         print("USING STRICT CONFIGURATION FROM CHECKPOINT/JSON")
         print("="*50)
@@ -322,11 +270,7 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
         n_layer = model_config['n_layer']
         n_embd = model_config['n_embd']
         n_head = model_config['n_head']
-        quantization_bits = model_config.get('quantization_bits')  # Optional field
-
-        # Validate required fields
-        if n_layer is None or n_embd is None or n_head is None:
-            raise ValueError(f"Missing required model config fields. Got: n_layer={n_layer}, n_embd={n_embd}, n_head={n_head}")
+        quantization_bits = model_config.get('quantization_bits')
 
         # Bit widths MUST be specified in config
         bit_widths = model_config['bit_widths']  # Will raise KeyError if missing
@@ -350,10 +294,6 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
             if training_config and 'max_seq_length' in training_config:
                 actual_n_positions = training_config['max_seq_length']
                 print(f"Using max_seq_length from training config: {actual_n_positions}")
-            else:
-                # Default to GPT-2 standard
-                actual_n_positions = 1024
-                print("WARNING: Could not determine n_positions, using GPT-2 standard 1024")
 
         # Build config with values from the loaded configuration (NO DEFAULTS)
         config = GPT2Config(
@@ -364,8 +304,8 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
             n_head=n_head,  # Required
             layer_norm_epsilon=model_config['layer_norm_epsilon'],  # Required
             embd_pdrop=model_config['embd_pdrop'],  # Required
-            lora_rank=model_config.get('lora_rank', None),  # Optional for SP models
-            lora_alpha=model_config.get('lora_alpha', None)  # Optional for SP models
+            lora_rank=model_config['lora_rank'],  # Optional for SP models
+            lora_alpha=model_config['lora_alpha']  # Optional for SP models
         )
 
         print(f"\nLoaded Model Configuration:")
@@ -503,13 +443,6 @@ def main():
     # Load evaluation configuration (NO DEFAULTS)
     eval_config = load_evaluation_config(args.eval_config)
     print(f"Loaded evaluation config from: {args.eval_config}")
-
-    # Check CUDA requirement from config
-    if eval_config['model']['require_cuda']:
-        if not torch.cuda.is_available():
-            print("ERROR: CUDA is required (per evaluation config) but not available!")
-            print("Please ensure you have a CUDA-capable GPU and PyTorch with CUDA support installed.")
-            sys.exit(1)
 
     # Load model from checkpoint
     model = load_switchable_model(args.model_path, config_path=args.config_path, use_pretrained=False)
