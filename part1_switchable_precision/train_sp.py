@@ -421,14 +421,10 @@ def compute_loss_single_precision(model, batch, precision, teacher_bits, distill
 
 def train_step(model, train_iter, train_loader, optimizer, scaler,
                available_precisions, distill_mgr, config, iteration, stats_tracker,calib_mgr,scheduler):
-    """
-    Execute a single training step with random precision sampling.
-    Each batch in the gradient accumulation uses a randomly selected precision.
-    The optimizer steps after all gradient accumulation steps, regardless of which precisions were used.
-    """
+
     optimizer.zero_grad(set_to_none=True)
     total_loss = 0
-    precisions_used = [max(config.bit_widths[0])]
+    precisions_used = []
     # Ensure training mode
     model.train()
     torch.set_grad_enabled(True)
@@ -440,7 +436,12 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
 
         # CRITICAL: Randomly sample ONE precision for this batch
         # Over many iterations, all precisions will be trained
-        precision = random.choice(available_precisions)
+        teacher_bit = max(available_precisions)
+        student_bits = [b for b in available_precisions if b != teacher_bit]
+        if bit_step % len(available_precisions) == 0:
+            precision = random.choice(student_bits)
+        else:
+            precision = teacher_bit
         precisions_used.append(precision)
 
         if calib_mgr and iteration > 0 and precision < 32:
@@ -560,11 +561,9 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     progress_bar = tqdm(range(config.num_iterations), desc="SP Training")
 
     # All available precisions for random sampling (including teacher)
-    config.teacher_bits = max(model_config.bit_widths)
-    available_precisions = [b for b in model_config.bit_widths if b != config.teacher_bits]
 
-    # Ensure all student precisions are calibrated
-    student_bits = [b for b in available_precisions if b < 32]
+    available_precisions = [model_config.bit_widths]
+
     for bits in student_bits:
         calib_mgr.ensure_calibrated(bits)
 
