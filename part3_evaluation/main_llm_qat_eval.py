@@ -442,7 +442,7 @@ def main():
     parser.add_argument('--config_path', type=str,
                        help='Path to training config JSON file (optional, will auto-detect if not provided)')
     parser.add_argument('--eval_config', type=str,
-                       default='part3_evaluation/evaluation_config.json',
+                       default='evaluation_config.json',
                        help='Path to evaluation configuration JSON file')
     args = parser.parse_args()
 
