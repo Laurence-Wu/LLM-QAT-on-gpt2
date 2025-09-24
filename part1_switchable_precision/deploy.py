@@ -260,7 +260,7 @@ def save_sp_checkpoints(model, base_filename, model_config, training_config=None
                     'model_state_dict': state_dict,
                     'model_config': model_config.__dict__,
                     'training_config': training_config.__dict__ if training_config else None,
-                    'bit_width': f"{bits}bit",
+                    'bit_width': f"{bits}",
                     'timestamp': timestamp
                 }, int_filename)
 
