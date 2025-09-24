@@ -108,6 +108,9 @@ class SPLinearWithLoRA(nn.Module):
         self.register_buffer('weight_quantized', torch.empty(out_features, in_features))
         self.register_buffer('input_quantized', None)
 
+        # Calibration mode flag - when True, LoRA is disabled during forward pass
+        self.calibration_mode = False
+
     def set_precision(self, bits) -> int:
         if bits >= 32:
             self.current_bits = 32
@@ -166,8 +169,12 @@ class SPLinearWithLoRA(nn.Module):
 
         # Base computation with quantized values
         base_output = F.linear(x_quantized, weight_quantized, self.linear.bias)
-        lora_output = active_lora(x)
 
+        # Skip LoRA during calibration mode
+        if self.calibration_mode:
+            return base_output
+
+        lora_output = active_lora(x)
         return base_output + lora_output
 
     def get_all_parameters(self):

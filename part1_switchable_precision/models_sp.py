@@ -258,7 +258,7 @@ class SPModel(nn.Module):
         # Handle weight freezing/unfreezing based on precision
         # 32-bit teacher: Unfreeze all base weights (but not embeddings)
         # Other precisions: Keep base weights frozen, only train LoRA
-        
+
         for block in self.h:
             block.set_precision(bits)
 
@@ -266,6 +266,18 @@ class SPModel(nn.Module):
         self.ln_f.set_precision(bits)
 
         return self.current_bit_width
+
+    def disable_lora_for_calibration(self):
+        """Disable LoRA during calibration by setting calibration_mode=True on all SPLinearWithLoRA layers."""
+        for module in self.modules():
+            if module.__class__.__name__ == 'SPLinearWithLoRA':
+                module.calibration_mode = True
+
+    def enable_lora_after_calibration(self):
+        """Re-enable LoRA after calibration by setting calibration_mode=False on all SPLinearWithLoRA layers."""
+        for module in self.modules():
+            if module.__class__.__name__ == 'SPLinearWithLoRA':
+                module.calibration_mode = False
 
     def verify_precision_consistency(self) -> Tuple[bool, Dict]:
         """Verify all components are at the same precision.

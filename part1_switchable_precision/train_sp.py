@@ -52,7 +52,7 @@ class CalibrationManager:
 
     def _calibrate_precision(self, bits, num_batches):
         """Internal calibration logic with separate weight and input calibration."""
-        self.model.train()
+        
         bits_key = f'{bits}bit'
 
         # CRITICAL: Skip 32-bit as it doesn't need calibration
@@ -112,6 +112,9 @@ class CalibrationManager:
 
         print(f"    Started calibration for {input_started} input quantizers")
 
+        # Disable LoRA during calibration forward passes
+        self.model.disable_lora_for_calibration()
+
         # Collect statistics via forward passes
         train_iter = iter(self.train_loader)
         with torch.no_grad():
@@ -124,6 +127,9 @@ class CalibrationManager:
                 except StopIteration:
                     print(f"    Only {i} batches available")
                     break
+
+        # Re-enable LoRA after calibration
+        self.model.enable_lora_after_calibration()
 
         # Finish input quantizer calibration
         input_calibrated = 0
