@@ -316,6 +316,123 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
     return model, checkpoint_bit_width
 
 
+def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
+    """Recalibrate quantizers using evaluation data - based on training calibration logic"""
+
+    print("\n" + "="*60)
+    print("CALIBRATING MODEL FOR EVALUATION DATA")
+    print("="*60)
+
+    # Get the bit-width the model is currently at (following .claude rule: no hasattr)
+    current_bits = None
+    for module in model.modules():
+        try:
+            current_bits = module.current_bits
+            break
+        except AttributeError:
+            continue
+
+    if current_bits is None or current_bits >= 32:
+        print(f"No calibration needed (current_bits: {current_bits})")
+        return
+
+    bits_key = f'{current_bits}bit'
+    print(f"Calibrating for {current_bits}-bit precision")
+
+    # Step 1: Weight quantizers already calibrated from training
+    print(f"\nStep 1: Weight quantizers (keeping training calibration)")
+
+    # Step 2: Recalibrate INPUT quantizers with evaluation data
+    print(f"\nStep 2: Recalibrating input quantizers for evaluation data...")
+
+    # Start input quantizer calibration
+    input_started = 0
+    for name, module in model.named_modules():
+        try:
+            if bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].start_calibration()
+                input_started += 1
+        except AttributeError:
+            continue
+    print(f"  Started calibration for {input_started} input quantizers")
+
+    # Disable LoRA during calibration (following training logic)
+    try:
+        model.disable_lora_for_calibration()
+    except AttributeError:
+        print("  Model does not have disable_lora_for_calibration method")
+
+    # Use provided texts or raise error
+    if eval_texts is None:
+        raise ValueError("eval_texts cannot be None - must provide calibration data")
+
+    # Prepare evaluation samples
+    model.eval()
+    samples_processed = 0
+    device = next(model.parameters()).device
+
+    with torch.no_grad():
+        for i in range(min(num_batches, len(eval_texts))):
+            text = eval_texts[i]
+
+            # Tokenize with actual evaluation settings (variable length, no padding to 256!)
+            inputs = tokenizer(
+                text,
+                return_tensors='pt',
+                truncation=True,
+                max_length=256,  # Cap at 256 but don't pad
+                padding=False
+            )
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+
+            # Forward pass to collect statistics
+            try:
+                _ = model(inputs['input_ids'])
+                samples_processed += 1
+                seq_len = inputs['input_ids'].shape[1]
+                print(f"  Processed sample {i+1}: length={seq_len} tokens")
+            except Exception as e:
+                print(f"  Warning on sample {i}: {e}")
+
+    # Re-enable LoRA after calibration
+    try:
+        model.enable_lora_after_calibration()
+    except AttributeError:
+        print("  Model does not have enable_lora_after_calibration method")
+
+    # Finish input quantizer calibration
+    input_calibrated = 0
+    for name, module in model.named_modules():
+        try:
+            if bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].finish_calibration(debug=False)
+                input_calibrated += 1
+        except AttributeError:
+            continue
+
+    print(f"  ✓ Calibrated {input_calibrated} input quantizers with {samples_processed} samples")
+
+    # Verify calibration stats shape
+    print("\n  Checking new calibration stats shapes:")
+    checked = 0
+    for name, module in model.named_modules():
+        try:
+            if bits_key in module.quantizers_input:
+                quantizer = module.quantizers_input[bits_key]
+                scale_shape = quantizer.scale.shape
+                zp_shape = quantizer.zero_point.shape
+                print(f"    {name}: scale={scale_shape}, zero_point={zp_shape}")
+                checked += 1
+                if checked >= 3:  # Just show first 3
+                    break
+        except AttributeError:
+            continue
+
+    print("\n" + "="*60)
+    print("CALIBRATION COMPLETE")
+    print("="*60 + "\n")
+
+
 def load_tokenizer():
     """Load GPT-2 tokenizer"""
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
@@ -362,15 +479,79 @@ def main():
     model, checkpoint_bit_width = load_switchable_model(args.model_path, config_path=args.config_path, use_pretrained=False)
     tokenizer = load_tokenizer()
 
+    # Recalibrate quantizers for evaluation data if needed
+    if checkpoint_bit_width and checkpoint_bit_width < 32:
+        print(f"\nModel loaded at {checkpoint_bit_width}-bit precision")
+        print("Preparing calibration data from evaluation datasets...")
+
+        from datasets import load_dataset
+        calibration_texts = []
+
+        # Collect samples from WikiText-2
+        try:
+            print("  Loading WikiText-2 validation samples...")
+            wikitext = load_dataset('wikitext', 'wikitext-2-raw-v1', split='validation')
+            wikitext_samples = 0
+            for item in wikitext:
+                text = item['text'].strip()
+                if len(text) > 20:  # Skip very short texts
+                    calibration_texts.append(text)
+                    wikitext_samples += 1
+                    if wikitext_samples >= 50:
+                        break
+            print(f"    Added {wikitext_samples} WikiText-2 samples")
+        except Exception as e:
+            print(f"    Error loading WikiText-2: {e}")
+
+        # Collect samples from C4
+        try:
+            print("  Loading C4 validation samples...")
+            c4_dataset = load_dataset('c4', 'en', split='validation', streaming=True)
+            c4_samples = 0
+            for item in c4_dataset:
+                text = item['text'].strip()
+                if len(text) > 20:
+                    calibration_texts.append(text)
+                    c4_samples += 1
+                    if c4_samples >= 50:
+                        break
+            print(f"    Added {c4_samples} C4 samples")
+        except Exception as e:
+            print(f"    Error loading C4: {e}")
+
+        # Collect samples from BoolQ
+        try:
+            print("  Loading BoolQ validation samples...")
+            boolq = load_dataset('boolq', split='validation')
+            boolq_samples = 0
+            for i in range(min(50, len(boolq))):
+                sample = boolq[i]
+                # Format as it would appear in evaluation
+                text = f"Passage: {sample['passage']}\nQuestion: {sample['question']}\nAnswer:"
+                calibration_texts.append(text)
+                boolq_samples += 1
+            print(f"    Added {boolq_samples} BoolQ samples")
+        except Exception as e:
+            print(f"    Error loading BoolQ: {e}")
+
+        if not calibration_texts:
+            raise RuntimeError("Failed to load any calibration data from datasets")
+
+        print(f"\n  Total calibration samples collected: {len(calibration_texts)}")
+
+        # Run calibration
+        num_calib_batches = min(100, len(calibration_texts))
+        print(f"  Running calibration with {num_calib_batches} samples...")
+        calibrate_for_evaluation(model, tokenizer, eval_texts=calibration_texts, num_batches=num_calib_batches)
+    else:
+        print(f"\nNo calibration needed (bit width: {checkpoint_bit_width})")
+
     # Initialize all evaluation components with config
     device = eval_config['device']
     evaluator = LLMQATEvaluation(model, tokenizer)
     zero_shot_evaluator = ZeroShotEvaluator(model, tokenizer, device=device, config=eval_config['zero_shot'])
     few_shot_evaluator = FewShotEvaluator(model, tokenizer, device=device, config=eval_config['few_shot'])
     perplexity_evaluator = PerplexityEvaluator(model, tokenizer, device=device, config=eval_config['perplexity'])
-
-    # No calibration needed - using calibration parameters from checkpoint
-    print("\nUsing calibration parameters from checkpoint (no recalibration needed)")
 
     # Get current model's bit configuration from checkpoint or model
     if checkpoint_bit_width:
