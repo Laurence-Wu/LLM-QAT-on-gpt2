@@ -409,7 +409,7 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
             temp_min_cpu = quantizer.temp_min.cpu()
             temp_max_cpu = quantizer.temp_max.cpu()
 
-            # Compute scale and zero_point on CPU
+            # Compute scale and zero_point on CPU based on quantizer type
             if quantizer.quantizer_type == 'minmax':
                 if quantizer.symmetric:
                     max_val = torch.max(torch.abs(temp_min_cpu), torch.abs(temp_max_cpu))
@@ -419,9 +419,31 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
                     scale = (temp_max_cpu - temp_min_cpu) / (2 ** quantizer.num_bits - 1)
                     zero_point = temp_min_cpu
 
-            # Store calibration parameters on CPU
-            quantizer.scale = scale.cpu()
-            quantizer.zero_point = zero_point.cpu()
+                # Store calibration parameters (already on CPU)
+                quantizer.scale = scale
+                quantizer.zero_point = zero_point
+
+            elif quantizer.quantizer_type == 'log':
+                # Handle log quantization
+                eps = 1e-8
+                log_min = torch.log(torch.abs(temp_min_cpu) + eps)
+                log_max = torch.log(torch.abs(temp_max_cpu) + eps)
+
+                # For log quantization: scale stores log_range, zero_point stores log_min
+                quantizer.scale = (log_max - log_min)  # log_range
+                quantizer.zero_point = log_min  # log_min
+
+            else:
+                # Default fallback for unknown quantizer types
+                print(f"    Warning: Unknown quantizer type '{quantizer.quantizer_type}' for {name}")
+                # Use default minmax as fallback
+                max_val = torch.max(torch.abs(temp_min_cpu), torch.abs(temp_max_cpu))
+                scale = max_val / (2 ** (quantizer.num_bits - 1) - 1)
+                zero_point = torch.zeros_like(scale)
+                quantizer.scale = scale
+                quantizer.zero_point = zero_point
+
+            # Store min/max statistics
             quantizer.running_min = temp_min_cpu
             quantizer.running_max = temp_max_cpu
 

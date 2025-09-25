@@ -143,17 +143,31 @@ class INT16InferenceTester:
                 temp_min = quantizer.temp_min.cpu()
                 temp_max = quantizer.temp_max.cpu()
 
-                if quantizer.symmetric:
+                # Handle different quantizer types
+                if quantizer.quantizer_type == 'minmax':
+                    if quantizer.symmetric:
+                        max_val = torch.max(torch.abs(temp_min), torch.abs(temp_max))
+                        scale = max_val / (2 ** (quantizer.num_bits - 1) - 1)
+                        zero_point = torch.zeros_like(scale)
+                    else:
+                        scale = (temp_max - temp_min) / (2 ** quantizer.num_bits - 1)
+                        zero_point = temp_min
+                elif quantizer.quantizer_type == 'log':
+                    # Handle log quantization
+                    eps = 1e-8
+                    log_min = torch.log(torch.abs(temp_min) + eps)
+                    log_max = torch.log(torch.abs(temp_max) + eps)
+                    scale = (log_max - log_min)  # log_range
+                    zero_point = log_min  # log_min
+                else:
+                    # Default fallback
                     max_val = torch.max(torch.abs(temp_min), torch.abs(temp_max))
                     scale = max_val / (2 ** (quantizer.num_bits - 1) - 1)
                     zero_point = torch.zeros_like(scale)
-                else:
-                    scale = (temp_max - temp_min) / (2 ** quantizer.num_bits - 1)
-                    zero_point = temp_min
 
-                # Store on CPU
-                quantizer.scale = scale.cpu()
-                quantizer.zero_point = zero_point.cpu()
+                # Store on CPU (already on CPU)
+                quantizer.scale = scale
+                quantizer.zero_point = zero_point
                 quantizer.calibrated = True
                 quantizer.temp_min = None
                 quantizer.temp_max = None
