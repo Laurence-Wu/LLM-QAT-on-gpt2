@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
-from transformers import GPT2Tokenizer, GPT2Model
+from transformers import GPT2Tokenizer, GPT2Model, GPT2Config
 import numpy as np
 from tqdm import tqdm
 import time
@@ -117,59 +117,72 @@ def evaluate(model: CPTModel, dataloader: DataLoader, device: str, precision: in
 
 
 def load_pretrained_weights(model: CPTModel, device: str):
-    """Load pretrained GPT-2 weights into CPT model."""
+    """Load pretrained GPT-2 weights into CPT model and return GPT-2 config."""
     print("Loading pretrained GPT-2 weights...")
 
-    # Load GPT-2 model
+    # Load GPT-2 model and config
     gpt2 = GPT2Model.from_pretrained('gpt2')
+    gpt2_config = GPT2Config.from_pretrained('gpt2')
     gpt2_state = gpt2.state_dict()
+    d_model = gpt2_config.n_embd
 
-    # Map weights to CPT model
-    model_state = model.state_dict()
-    loaded_keys = []
+    # Direct weight mapping
+    weight_mapping = {
+        # Embeddings
+        'wte.weight': 'wte.weight',
+        'wpe.weight': 'wpe.weight',
+        # Final layer norm
+        'ln_f.weight': 'ln_f.weight',
+        'ln_f.bias': 'ln_f.bias'
+    }
 
-    # Load embeddings
-    if 'wte.weight' in gpt2_state:
-        model.wte.weight.data = gpt2_state['wte.weight'].to(device)
-        loaded_keys.append('wte.weight')
-    if 'wpe.weight' in gpt2_state:
-        model.wpe.weight.data = gpt2_state['wpe.weight'].to(device)
-        loaded_keys.append('wpe.weight')
-
-    # Load transformer blocks
+    # Add transformer block mappings
     for i in range(len(model.h)):
-        # Attention weights
-        if f'h.{i}.attn.c_attn.weight' in gpt2_state:
-            # Split concatenated QKV weights
-            qkv_weight = gpt2_state[f'h.{i}.attn.c_attn.weight'].to(device)
-            d_model = model.config['model'].n_embd
+        # Layer norms
+        weight_mapping.update({
+            f'h.{i}.ln_1.weight': f'h.{i}.ln_1.weight',
+            f'h.{i}.ln_1.bias': f'h.{i}.ln_1.bias',
+            f'h.{i}.ln_2.weight': f'h.{i}.ln_2.weight',
+            f'h.{i}.ln_2.bias': f'h.{i}.ln_2.bias',
+            # Output projection
+            f'h.{i}.attn.c_proj.weight': f'h.{i}.attn.out_proj.linear.weight',
+            # MLP weights
+            f'h.{i}.mlp.c_fc.weight': f'h.{i}.mlp.fc_in.linear.weight',
+            f'h.{i}.mlp.c_proj.weight': f'h.{i}.mlp.fc_out.linear.weight'
+        })
+
+    # Load weights
+    loaded_count = 0
+    for src_key, dst_key in weight_mapping.items():
+        if src_key in gpt2_state:
+            # Get source and destination tensors
+            src_tensor = gpt2_state[src_key].to(device)
+            dst_attrs = dst_key.split('.')
+
+            # Navigate to the destination
+            target = model
+            for attr in dst_attrs[:-1]:
+                if attr.isdigit():
+                    target = target[int(attr)]
+                else:
+                    target = getattr(target, attr)
+
+            # Set the weight
+            setattr(target, dst_attrs[-1], nn.Parameter(src_tensor))
+            loaded_count += 1
+
+    # Handle QKV weights separately (need splitting)
+    for i in range(len(model.h)):
+        qkv_key = f'h.{i}.attn.c_attn.weight'
+        if qkv_key in gpt2_state:
+            qkv_weight = gpt2_state[qkv_key].to(device)
             model.h[i].attn.q_proj.linear.weight.data = qkv_weight[:d_model, :]
             model.h[i].attn.k_proj.linear.weight.data = qkv_weight[d_model:2*d_model, :]
             model.h[i].attn.v_proj.linear.weight.data = qkv_weight[2*d_model:, :]
+            loaded_count += 3
 
-        if f'h.{i}.attn.c_proj.weight' in gpt2_state:
-            model.h[i].attn.out_proj.linear.weight.data = gpt2_state[f'h.{i}.attn.c_proj.weight'].to(device)
-
-        # MLP weights
-        if f'h.{i}.mlp.c_fc.weight' in gpt2_state:
-            model.h[i].mlp['fc_in'].linear.weight.data = gpt2_state[f'h.{i}.mlp.c_fc.weight'].to(device)
-        if f'h.{i}.mlp.c_proj.weight' in gpt2_state:
-            model.h[i].mlp['fc_out'].linear.weight.data = gpt2_state[f'h.{i}.mlp.c_proj.weight'].to(device)
-
-        # Layer norms (convert to Range LayerNorm parameters)
-        if f'h.{i}.ln_1.weight' in gpt2_state:
-            model.h[i].ln_1.weight.data = gpt2_state[f'h.{i}.ln_1.weight'].to(device)
-            model.h[i].ln_1.bias.data = gpt2_state[f'h.{i}.ln_1.bias'].to(device)
-        if f'h.{i}.ln_2.weight' in gpt2_state:
-            model.h[i].ln_2.weight.data = gpt2_state[f'h.{i}.ln_2.weight'].to(device)
-            model.h[i].ln_2.bias.data = gpt2_state[f'h.{i}.ln_2.bias'].to(device)
-
-    # Final layer norm
-    if 'ln_f.weight' in gpt2_state:
-        model.ln_f.weight.data = gpt2_state['ln_f.weight'].to(device)
-        model.ln_f.bias.data = gpt2_state['ln_f.bias'].to(device)
-
-    print(f"Loaded {len(loaded_keys)} weight matrices from GPT-2")
+    print(f"Loaded {loaded_count} weight tensors from GPT-2")
+    return gpt2_config
 
 
 def main(args):
@@ -223,7 +236,10 @@ def main(args):
 
     # Load pretrained weights if specified
     if args.load_pretrained:
-        load_pretrained_weights(model, device)
+        gpt2_config = load_pretrained_weights(model, device)
+        # Optionally update model config with GPT-2 config values
+        # This ensures compatibility with pretrained weights
+        print(f"GPT-2 config: hidden_size={gpt2_config.n_embd}, num_layers={gpt2_config.n_layer}, num_heads={gpt2_config.n_head}")
 
     # Create cyclic precision scheduler
     precision_scheduler = CyclicPrecisionScheduler(

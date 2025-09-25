@@ -33,298 +33,113 @@ from part3_evaluation.few_shot_eval import FewShotEvaluator
 from part3_evaluation.perplexity_eval import PerplexityEvaluator
 
 
-
-
-
-def validate_model_config(config):
-    """Validate that all required model configuration parameters are present."""
-    required_params = [
-        'vocab_size', 'n_positions', 'n_embd', 'n_layer', 'n_head',
-        'layer_norm_epsilon', 'embd_pdrop', 'bit_widths',
-        'lora_rank_per_bit', 'lora_alpha_per_bit',
-        'activation_bits_per_bit', 'quantizer_per_bit'
-    ]
-
-    missing = [key for key in required_params if key not in config]
-    if missing:
-        raise ValueError(f"Missing required configuration parameters: {missing}\n"
-                        f"Please ensure your checkpoint was saved with complete configuration.")
-
-    print(f"✅ Configuration validation passed: {len(required_params)} required parameters found")
-
-
 def load_switchable_model(model_path: str = None, config_path: str = None, use_pretrained: bool = True):
     """Load switchable precision model with proper configuration"""
 
-    # Force CUDA availability check
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is not available. This evaluation requires CUDA.")
 
     print(f"CUDA device: {torch.cuda.get_device_name(0)}")
-    print(f"CUDA memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
-
-    # Initialize checkpoint_bit_width to None (will be set if found in checkpoint)
     checkpoint_bit_width = None
 
     if model_path and os.path.exists(model_path):
         print(f"Loading model from {model_path}")
 
-        # Load checkpoint (PyTorch 2.6 requires weights_only=False for custom objects)
+        # Load checkpoint
         checkpoint = torch.load(model_path, map_location='cuda', weights_only=False)
 
-        # Get the bit width this checkpoint was saved at
-        # Get bit_width from checkpoint - required field
-        if 'bit_width' not in checkpoint:
-            raise ValueError(f"bit_width not found in checkpoint. Available keys: {list(checkpoint.keys())}")
-        checkpoint_bit_width = checkpoint['bit_width']
+        # Get checkpoint configuration
+        checkpoint_bit_width = checkpoint.get('bit_width')
         if checkpoint_bit_width:
             print(f"Checkpoint was saved at {checkpoint_bit_width}-bit precision")
 
-        # Config embedded in checkpoint
-        if isinstance(checkpoint, dict):
-            if 'model_config' in checkpoint:
-                model_config = checkpoint.get('model_config', {})
-                training_config = checkpoint.get('training_config', {})
-                print("Using configuration embedded in checkpoint")
-            else:
-                raise ValueError("Checkpoint missing model_config")
-        else:
-            raise ValueError("Invalid checkpoint format - not a dictionary")
+        # Extract configs
+        model_config = checkpoint.get('model_config', {})
+        training_config = checkpoint.get('training_config', {})
 
-        print("\n" + "="*50)
-        print("USING STRICT CONFIGURATION FROM CHECKPOINT/JSON")
-        print("="*50)
-
-        # Validate configuration has all required parameters
-        validate_model_config(model_config)
-
-        # Extract required values from model_config (NO DEFAULTS)
+        # Extract key parameters
         n_layer = model_config['n_layer']
         n_embd = model_config['n_embd']
         n_head = model_config['n_head']
-        quantization_bits = model_config.get('quantization_bits')
+        bit_widths = model_config['bit_widths']
 
-        # Bit widths MUST be specified in config
-        bit_widths = model_config['bit_widths']  # Will raise KeyError if missing
-        print(f"Using bit widths from config: {bit_widths}")
-
-        # Get n_positions from actual weights in checkpoint (most reliable)
+        # Get n_positions from weights or config
         actual_n_positions = None
         if 'model_state_dict' in checkpoint:
-            # Check transformer.wpe.weight first (SP model format)
             if 'transformer.wpe.weight' in checkpoint['model_state_dict']:
                 wpe_shape = checkpoint['model_state_dict']['transformer.wpe.weight'].shape
                 actual_n_positions = wpe_shape[0]
-                print(f"Detected n_positions from transformer.wpe.weight shape: {actual_n_positions}")
             elif 'wpe.weight' in checkpoint['model_state_dict']:
                 wpe_shape = checkpoint['model_state_dict']['wpe.weight'].shape
                 actual_n_positions = wpe_shape[0]
-                print(f"Detected n_positions from wpe.weight shape: {actual_n_positions}")
 
-        # Fallback to config if needed
-        if actual_n_positions is None:
-            if training_config and 'max_seq_length' in training_config:
-                actual_n_positions = training_config['max_seq_length']
-                print(f"Using max_seq_length from training config: {actual_n_positions}")
+        if actual_n_positions is None and training_config:
+            actual_n_positions = training_config.get('max_seq_length', 1024)
 
-        # Build config with values from the loaded configuration (NO DEFAULTS)
+        # Build GPT2Config
         config = GPT2Config(
-            vocab_size=model_config['vocab_size'],  # Required
-            n_positions=actual_n_positions,  # Detected from weights
-            n_embd=n_embd,  # Required
-            n_layer=n_layer,  # Required
-            n_head=n_head,  # Required
-            layer_norm_epsilon=model_config['layer_norm_epsilon'],  # Required
-            embd_pdrop=model_config['embd_pdrop'],  # Required
-            lora_rank=model_config['lora_rank'],  # Optional for SP models
-            lora_alpha=model_config['lora_alpha']  # Optional for SP models
+            vocab_size=model_config.get('vocab_size', 50257),
+            n_positions=actual_n_positions or 1024,
+            n_embd=n_embd,
+            n_layer=n_layer,
+            n_head=n_head,
+            layer_norm_epsilon=model_config.get('layer_norm_epsilon', 1e-5),
+            embd_pdrop=model_config.get('embd_pdrop', 0.0),
+            lora_rank=model_config.get('lora_rank', 0),
+            lora_alpha=model_config.get('lora_alpha', 0)
         )
 
-        print(f"\nLoaded Model Configuration:")
+        print(f"\nModel Configuration:")
         print(f"  - n_layer: {config.n_layer}")
         print(f"  - n_embd: {config.n_embd}")
-        print(f"  - n_head: {config.n_head}")
         print(f"  - n_positions: {config.n_positions}")
-        print(f"  - vocab_size: {config.vocab_size}")
-        print(f"  - quantization_bits (training): {quantization_bits}")
-        print(f"  - bit_widths (switchable): {bit_widths}")
+        print(f"  - bit_widths: {bit_widths}")
 
-        if training_config:
-            print(f"\nTraining Configuration:")
-            print(f"  - batch_size: {training_config.get('batch_size')}")
-            print(f"  - max_seq_length: {training_config.get('max_seq_length')}")
-            print(f"  - learning_rate: {training_config.get('learning_rate')}")
-            print(f"  - num_iterations: {training_config.get('num_iterations')}")
-
-        print(f"Creating model with bit-widths: {bit_widths}")
-        # Add SP-specific configurations to config
+        # Add SP-specific configurations
         config.bit_widths = bit_widths
+        config.lora_rank_per_bit = model_config.get('lora_rank_per_bit', {})
+        config.lora_alpha_per_bit = model_config.get('lora_alpha_per_bit', {})
+        config.activation_bits_per_bit = model_config.get('activation_bits_per_bit', {})
+        config.quantizer_per_bit = model_config.get('quantizer_per_bit', {})
 
-        # Get SP-specific configurations from model_config (NO DEFAULTS)
-        config.lora_rank_per_bit = model_config['lora_rank_per_bit']  # Required for SP
-        config.lora_alpha_per_bit = model_config['lora_alpha_per_bit']  # Required for SP
-        config.activation_bits_per_bit = model_config['activation_bits_per_bit']  # Required for SP
-        config.quantizer_per_bit = model_config['quantizer_per_bit']  # Required for SP
+        # Convert string keys to int for dictionaries
+        for attr_name in ['lora_rank_per_bit', 'lora_alpha_per_bit', 'activation_bits_per_bit', 'quantizer_per_bit']:
+            attr_val = getattr(config, attr_name)
+            if isinstance(attr_val, dict):
+                setattr(config, attr_name, {int(k) if isinstance(k, str) else k: v for k, v in attr_val.items()})
 
-        # Convert string keys to int if necessary (JSON serialization converts int keys to strings)
-        if isinstance(config.lora_rank_per_bit, dict):
-            config.lora_rank_per_bit = {int(k) if isinstance(k, str) else k: v
-                                       for k, v in config.lora_rank_per_bit.items()}
-        if isinstance(config.lora_alpha_per_bit, dict):
-            config.lora_alpha_per_bit = {int(k) if isinstance(k, str) else k: v
-                                        for k, v in config.lora_alpha_per_bit.items()}
-        if isinstance(config.activation_bits_per_bit, dict):
-            config.activation_bits_per_bit = {int(k) if isinstance(k, str) else k: v
-                                             for k, v in config.activation_bits_per_bit.items()}
-        if isinstance(config.quantizer_per_bit, dict) and config.quantizer_per_bit is not None:
-            config.quantizer_per_bit = {int(k) if isinstance(k, str) else k: v
-                                       for k, v in config.quantizer_per_bit.items()}
-
-        # Print what we're using to help debug
-        print(f"LoRA rank per bit: {config.lora_rank_per_bit}")
-        print(f"LoRA alpha per bit: {config.lora_alpha_per_bit}")
-        print(f"Activation bits per bit: {config.activation_bits_per_bit}")
-
-        # Create SPLMHeadModel instead of SwitchableQATGPT2
+        # Create model and load weights
         model = SPLMHeadModel(config)
-
-        # Move model to GPU immediately after creation
         model = model.cuda()
 
-        # Don't load pretrained weights - we'll load from checkpoint directly
-        # This avoids resizing issues
+        if 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'], strict=True)
+            print("✅ Model weights loaded successfully")
 
-        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-            # Load state dict with size mismatch handling for attention bias
-            state_dict = checkpoint['model_state_dict']
+        # Set model to checkpoint bit width
+        if checkpoint_bit_width:
+            model.set_precision(checkpoint_bit_width)
+            print(f"✅ Model set to {checkpoint_bit_width}-bit precision")
 
-            # Don't resize matrices - model should be created with correct dimensions
-
-            # Use strict=True to ensure all weights are loaded correctly
-            print("\nLoading state dict with strict=True to ensure complete weight loading...")
-            missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=True)
-
-            if not missing_keys and not unexpected_keys:
-                print("✅ SUCCESS: All weights loaded perfectly with strict=True!")
-                print("   No missing or unexpected keys - model is fully loaded.")
-            else:
-                # This should not happen with strict=True, but keep for safety
-                if missing_keys:
-                    print(f"\n❌ CRITICAL: Missing {len(missing_keys)} keys in checkpoint!")
-                    print("   These weights will use random initialization, causing poor performance:")
-                    for i, key in enumerate(missing_keys):
-                        if i < 50:
-                            print(f"     - {key}")
-                    if len(missing_keys) > 50:
-                        print(f"     ... and {len(missing_keys) - 50} more missing keys")
-
-                if unexpected_keys:
-                    print(f"\n⚠️ Warning: {len(unexpected_keys)} unexpected keys in checkpoint")
-                    print("   These keys exist in checkpoint but not in model:")
-                    for i, key in enumerate(unexpected_keys):
-                        if i < 20:
-                            print(f"     - {key}")
-                    if len(unexpected_keys) > 20:
-                        print(f"     ... and {len(unexpected_keys) - 20} more")
-
-            print("\n🔍 Performing weight verification...")
-            # Check if critical weights are loaded
-            critical_modules = ['transformer.wte.weight', 'transformer.wpe.weight', 'lm_head.weight']
-            for module_name in critical_modules:
-                if module_name in state_dict:
-                    print(f"   ✓ {module_name} found in checkpoint")
-                else:
-                    print(f"   ✗ {module_name} MISSING from checkpoint!")
-
-            # Set model to the bit width from checkpoint
-            if checkpoint_bit_width:
-                model.set_precision(checkpoint_bit_width)
-                print(f"\n✅ Model set to {checkpoint_bit_width}-bit precision from checkpoint")
-
-            # Diagnostic: Check quantizer calibration status
-            print("\n🔍 Checking quantizer calibration status...")
-            calibrated_count = 0
-            uncalibrated_count = 0
-            for name, module in model.named_modules():
-                try:
-                    quantizers = module.quantizers_weight
-                    for bit_key, quantizer in quantizers.items():
-                        try:
-                            if quantizer.calibrated:
-                                calibrated_count += 1
-                            else:
-                                uncalibrated_count += 1
-                                print(f"   ⚠️ Uncalibrated: {name}.quantizers_weight.{bit_key}")
-                        except AttributeError:
-                            # Quantizer doesn't have calibrated attribute - skip
-                            pass
-                except AttributeError:
-                    # Module doesn't have quantizers_weight - skip
-                    pass
-
-            print(f"   Quantizer status: {calibrated_count} calibrated, {uncalibrated_count} uncalibrated")
-            if uncalibrated_count > 0:
-                print(f"   ❌ WARNING: {uncalibrated_count} quantizers are not calibrated!")
-
-            # Diagnostic: Quick inference test
-            print("\n🔍 Running quick inference test...")
-            with torch.no_grad():
-                # Use max_seq_length from training_config to match calibrated quantizers
-                if not training_config:
-                    raise ValueError("Training config is required but not found in checkpoint")
-                if 'max_seq_length' not in training_config:
-                    raise ValueError(f"max_seq_length not found in training_config. Available keys: {list(training_config.keys())}")
-                test_seq_length = training_config['max_seq_length']
-                test_input = torch.randint(0, model.config.vocab_size, (1, test_seq_length)).cuda()
-                test_output = model(test_input)
-                try:
-                    test_logits = test_output.logits
-                except AttributeError:
-                    test_logits = test_output
-
-                # Check output statistics
-                mean_val = test_logits.mean().item()
-                std_val = test_logits.std().item()
-                min_val = test_logits.min().item()
-                max_val = test_logits.max().item()
-
-                print(f"   Output stats: mean={mean_val:.4f}, std={std_val:.4f}, "
-                      f"min={min_val:.4f}, max={max_val:.4f}")
-
-                # Check for issues
-                if torch.isnan(test_logits).any():
-                    print("   ❌ ERROR: Output contains NaN values!")
-                if torch.isinf(test_logits).any():
-                    print("   ❌ ERROR: Output contains Inf values!")
-                if (test_logits == 0).all():
-                    print("   ❌ ERROR: Output is all zeros!")
-                if std_val < 1e-6:
-                    print("   ⚠️ WARNING: Very low output variance - model may be broken!")
-
-        elif not isinstance(checkpoint, dict):
-            model = checkpoint
     else:
         raise ValueError("No model path provided! Please specify --model_path with a trained checkpoint file.")
 
-    # Force model to CUDA
+    # Set to evaluation mode
+    model.eval()
     device = torch.device('cuda')
-    model = model.to(device)
-    model.eval()  # Set to evaluation mode
-    print(f"\n✅ Model moved to {device}")
-    print(f"   Device check: {next(model.parameters()).device}")
+    print(f"✅ Model ready on {device}")
 
-    # Return both model and the bit width from checkpoint
     return model, checkpoint_bit_width
 
 
 def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
-    """Calibrate input quantizers, store statistics on CPU, apply during forward"""
+    """Calibrate input quantizers for evaluation"""
 
     print("\n" + "="*60)
     print("CALIBRATING INPUT QUANTIZERS FOR EVALUATION")
     print("="*60)
 
-    # Get the bit-width the model is currently at
+    # Get current bit width
     current_bits = None
     for module in model.modules():
         try:
@@ -338,21 +153,14 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
         return model
 
     bits_key = f'{current_bits}bit'
-    print(f"Calibrating input quantizers for {current_bits}-bit precision")
+    print(f"Calibrating for {current_bits}-bit precision")
 
-    # Step 1: Prepare input quantizers for calibration (weights remain unchanged)
-    print(f"\nStep 1: Configuring input quantizers for per-tensor calibration...")
-
+    # Prepare input quantizers for calibration
     input_quantizers = []
-
     for name, module in model.named_modules():
-        # Only handle input quantizers - weights remain unchanged from training
         if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
             quantizer = module.quantizers_input[bits_key]
-            # Switch to per-tensor mode for variable-length sequences
             quantizer.per_channel = False
-            quantizer.channel_dim = None
-            # Enable calibration mode for inputs
             quantizer.calibrated = False
             quantizer.collecting_stats = True
             quantizer.num_batches_collected = 0
@@ -360,66 +168,45 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
             quantizer.temp_max = None
             input_quantizers.append((name, quantizer))
 
-    print(f"  Found {len(input_quantizers)} input quantizers to calibrate")
-    print(f"  Note: Weight quantizers preserved from training")
+    print(f"Found {len(input_quantizers)} input quantizers to calibrate")
 
-    # Step 2: Load calibration data if not provided
-    print(f"\nStep 2: Loading calibration data...")
+    # Load calibration data if not provided
     if eval_texts is None:
-        from datasets import load_dataset
         dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split='validation')
         eval_texts = [item['text'] for item in dataset if item['text'].strip()][:num_batches]
-        print(f"  Loaded {len(eval_texts)} texts from WikiText-2")
 
-    # Step 3: Collect statistics through forward passes (on GPU)
-    print(f"\nStep 3: Collecting calibration statistics...")
+    # Collect statistics
     model.eval()
     device = next(model.parameters()).device
 
     with torch.no_grad():
-        for i, text in enumerate(eval_texts):
+        for text in eval_texts:
             if not text.strip():
                 continue
 
-            # Tokenize with evaluation settings
             inputs = tokenizer(
                 text,
                 return_tensors='pt',
                 truncation=True,
-                max_length=256,  # Match evaluation max length
+                max_length=256,
                 padding=False
             )
             inputs = {k: v.to(device) for k, v in inputs.items()}
 
-            # Forward pass to collect statistics
             try:
                 _ = model(inputs['input_ids'])
-            except Exception as e:
-                print(f"  Warning during calibration batch {i}: {e}")
+            except Exception:
                 continue
 
-    # Debug: Check if statistics were actually collected
-    print("\nDebug: Checking collected statistics...")
-    for i, (name, quantizer) in enumerate(input_quantizers[:3]):
-        print(f"  {name}:")
-        if quantizer.temp_min is not None:
-            print(f"    temp_min shape: {quantizer.temp_min.shape}, values: {quantizer.temp_min.flatten()[:5]}")
-            print(f"    temp_max shape: {quantizer.temp_max.shape}, values: {quantizer.temp_max.flatten()[:5]}")
-        else:
-            print(f"    WARNING: No statistics collected!")
-
-    # Step 4: Compute quantization parameters and move to CPU
-    print(f"\nStep 4: Computing and storing quantization parameters on CPU...")
-
+    # Compute quantization parameters
     for name, quantizer in input_quantizers:
         quantizer.collecting_stats = False
 
         if quantizer.temp_min is not None and quantizer.temp_max is not None:
-            # Move statistics to CPU for computation
             temp_min_cpu = quantizer.temp_min.cpu()
             temp_max_cpu = quantizer.temp_max.cpu()
 
-            # Compute scale and zero_point on CPU based on quantizer type
+            # Compute scale and zero_point
             if quantizer.quantizer_type == 'minmax':
                 if quantizer.symmetric:
                     max_val = torch.max(torch.abs(temp_min_cpu), torch.abs(temp_max_cpu))
@@ -428,173 +215,45 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
                 else:
                     scale = (temp_max_cpu - temp_min_cpu) / (2 ** quantizer.num_bits - 1)
                     zero_point = temp_min_cpu
-
-                # Store calibration parameters (already on CPU)
-                quantizer.scale = scale
-                quantizer.zero_point = zero_point
-
             elif quantizer.quantizer_type == 'log':
-                # Handle log quantization
                 eps = 1e-8
                 log_min = torch.log(torch.abs(temp_min_cpu) + eps)
                 log_max = torch.log(torch.abs(temp_max_cpu) + eps)
-
-                # For log quantization: scale stores log_range, zero_point stores log_min
-                quantizer.scale = (log_max - log_min)  # log_range
-                quantizer.zero_point = log_min  # log_min
-
+                scale = (log_max - log_min)
+                zero_point = log_min
             else:
-                # Default fallback for unknown quantizer types
-                print(f"    Warning: Unknown quantizer type '{quantizer.quantizer_type}' for {name}")
-                # Use default minmax as fallback
+                # Default minmax
                 max_val = torch.max(torch.abs(temp_min_cpu), torch.abs(temp_max_cpu))
                 scale = max_val / (2 ** (quantizer.num_bits - 1) - 1)
                 zero_point = torch.zeros_like(scale)
-                quantizer.scale = scale
-                quantizer.zero_point = zero_point
 
-            # Store min/max statistics
+            quantizer.scale = scale
+            quantizer.zero_point = zero_point
             quantizer.running_min = temp_min_cpu
             quantizer.running_max = temp_max_cpu
-
-            # Mark as calibrated
             quantizer.calibrated = True
-
-            # Clear temporary statistics to free memory
             quantizer.temp_min = None
             quantizer.temp_max = None
 
-    # Debug: Verify computed scale/zero_point values
-    print("\nDebug: Checking computed quantization parameters...")
-    for i, (name, quantizer) in enumerate(input_quantizers[:3]):
-        print(f"  {name}:")
-        print(f"    calibrated: {quantizer.calibrated}")
-        print(f"    quantizer_type: {quantizer.quantizer_type}")
-        print(f"    num_bits: {quantizer.num_bits}")
-        print(f"    per_channel: {quantizer.per_channel}")
-        if hasattr(quantizer, 'scale'):
-            print(f"    scale shape: {quantizer.scale.shape}, device: {quantizer.scale.device}")
-            print(f"      values: {quantizer.scale.flatten()[:5]}")
-        else:
-            print(f"    scale: None")
-        if hasattr(quantizer, 'zero_point'):
-            print(f"    zero_point shape: {quantizer.zero_point.shape}, device: {quantizer.zero_point.device}")
-            print(f"      values: {quantizer.zero_point.flatten()[:5]}")
-        else:
-            print(f"    zero_point: None")
-
-    # Step 5: Check if device transfer is needed
-    print(f"\nStep 5: Checking if device transfer is needed...")
-
-    # Do a simple test
-    test_input = torch.randn(1, 10, device=device)
-    for name, quantizer in input_quantizers[:1]:
-        print(f"  Testing {name}:")
-        print(f"    Input device: {test_input.device}")
-        print(f"    Scale device: {quantizer.scale.device if hasattr(quantizer, 'scale') else 'None'}")
-        if hasattr(quantizer, 'scale'):
-            print(f"    Devices match: {quantizer.scale.device == test_input.device}")
-            if quantizer.scale.device != test_input.device:
-                print("  ⚠ Device mismatch detected - patching needed")
-            else:
-                print("  ✓ No patching needed - devices match")
-
-    # Original patching code
-    print(f"\nPatching quantizers for CPU-to-device transfer...")
-
+    # Patch quantizers for device transfer
     def create_patched_forward(original_forward):
         def patched_forward(self, x):
-            # Move scale and zero_point to input device if needed
             if self.calibrated:
                 if self.scale.device != x.device:
                     self.scale = self.scale.to(x.device)
                 if self.zero_point.device != x.device:
                     self.zero_point = self.zero_point.to(x.device)
-            # Call original forward with properly placed parameters
             return original_forward(x)
         return patched_forward
 
-    # Apply the patch to all calibrated input quantizers
+    import types
     for name, quantizer in input_quantizers:
         if quantizer.calibrated:
-            # Bind the method to the instance
-            import types
             original_forward = quantizer.forward
             patched_forward = create_patched_forward(original_forward)
             quantizer.forward = types.MethodType(patched_forward, quantizer)
 
-    # Step 6: Verify with test forward pass
-    print(f"\nStep 6: Verifying quantization with CPU-stored calibration...")
-    model.eval()
-
-    with torch.no_grad():
-        test_text = eval_texts[0] if eval_texts else "This is a test."
-        test_inputs = tokenizer(
-            test_text,
-            return_tensors='pt',
-            truncation=True,
-            max_length=64
-        ).to(device)
-
-        print(f"  Test input shape: {test_inputs['input_ids'].shape}")
-
-        # Hook to capture quantizer outputs
-        quantizer_outputs = {}
-        def capture_quantizer_output(name):
-            def hook(module, input, output):
-                quantizer_outputs[name] = {
-                    'input_mean': input[0].mean().item() if isinstance(input, tuple) else input.mean().item(),
-                    'input_std': input[0].std().item() if isinstance(input, tuple) else input.std().item(),
-                    'output_mean': output.mean().item(),
-                    'output_std': output.std().item(),
-                    'input_shape': input[0].shape if isinstance(input, tuple) else input.shape,
-                    'output_shape': output.shape
-                }
-            return hook
-
-        # Register hooks on first few quantizers
-        hooks = []
-        for i, (name, quantizer) in enumerate(input_quantizers[:3]):
-            hook = quantizer.register_forward_hook(capture_quantizer_output(name))
-            hooks.append(hook)
-
-        try:
-            outputs = model(test_inputs['input_ids'])
-            print("  ✓ Forward pass successful")
-
-            # Check output statistics
-            if hasattr(outputs, 'logits'):
-                logits = outputs.logits
-            else:
-                logits = outputs
-            print(f"  Output logits shape: {logits.shape}")
-            print(f"  Logits statistics - mean: {logits.mean().item():.4f}, std: {logits.std().item():.4f}")
-
-            # Check if quantizers were actually called
-            if quantizer_outputs:
-                print("  Quantizer activity detected:")
-                for name, stats in list(quantizer_outputs.items())[:3]:
-                    print(f"    {name}:")
-                    print(f"      input: mean={stats['input_mean']:.4f}, std={stats['input_std']:.4f}, shape={stats['input_shape']}")
-                    print(f"      output: mean={stats['output_mean']:.4f}, std={stats['output_std']:.4f}, shape={stats['output_shape']}")
-            else:
-                print("  ⚠ WARNING: No quantizer activity detected!")
-
-        except Exception as e:
-            print(f"  ⚠ Warning: Test forward pass failed: {e}")
-        finally:
-            # Remove hooks
-            for hook in hooks:
-                hook.remove()
-
-    print(f"\n✓ Input calibration completed")
-    print(f"  - Calibrated {len(input_quantizers)} input quantizers")
-    print(f"  - Using per-tensor quantization for variable-length sequences")
-    print(f"  - Calibration statistics stored on CPU")
-    print(f"  - Weight quantizers preserved from training")
-
-    print("\n" + "="*60)
-    print("INPUT CALIBRATION COMPLETE")
+    print(f"✓ Calibration completed for {len(input_quantizers)} quantizers")
     print("="*60 + "\n")
 
     return model
@@ -607,189 +266,105 @@ def load_tokenizer():
     return tokenizer
 
 
-# Removed EvaluationMetrics class - using specialized evaluators instead
-
-
 def load_evaluation_config(config_path):
-    """Load evaluation configuration from JSON file. NO DEFAULTS ALLOWED."""
+    """Load evaluation configuration from JSON file"""
     if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Evaluation config required but not found: {config_path}\n"
-                              f"Please ensure evaluation_config.json exists at: {config_path}")
+        raise FileNotFoundError(f"Evaluation config not found: {config_path}")
     with open(config_path, 'r') as f:
-        config = json.load(f)
-
-    # Validate required sections
-    required_sections = ['device', 'calibration', 'zero_shot', 'few_shot', 'perplexity', 'output', 'model']
-    missing = [s for s in required_sections if s not in config]
-    if missing:
-        raise ValueError(f"Missing required config sections: {missing}")
-
-    return config
+        return json.load(f)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='LLM-QAT Paper Evaluation Suite with Standard Methods')
+    parser = argparse.ArgumentParser(description='LLM-QAT Paper Evaluation Suite')
     parser.add_argument('--model_path', type=str, required=True,
                        help='Path to trained model checkpoint (.pth file)')
     parser.add_argument('--config_path', type=str,
-                       help='Path to training config JSON file (optional, will auto-detect if not provided)')
+                       help='Path to training config JSON file')
     parser.add_argument('--eval_config', type=str,
                        default='evaluation_config.json',
                        help='Path to evaluation configuration JSON file')
     args = parser.parse_args()
 
-    # Load evaluation configuration (NO DEFAULTS)
+    # Load configurations
     eval_config = load_evaluation_config(args.eval_config)
     print(f"Loaded evaluation config from: {args.eval_config}")
 
-    # Load model from checkpoint and get bit width
+    # Load model and tokenizer
     model, checkpoint_bit_width = load_switchable_model(args.model_path, config_path=args.config_path, use_pretrained=False)
     tokenizer = load_tokenizer()
 
-    # Recalibrate quantizers for evaluation data if needed
+    # Calibrate if needed
     if checkpoint_bit_width and checkpoint_bit_width < 32:
         print(f"\nModel loaded at {checkpoint_bit_width}-bit precision")
-        print("Preparing calibration data from evaluation datasets...")
+        print("Preparing calibration...")
 
-        from datasets import load_dataset
+        # Collect calibration samples
         calibration_texts = []
 
-        # Collect samples from WikiText-2
+        # WikiText-2 samples
         try:
-            print("  Loading WikiText-2 validation samples...")
             wikitext = load_dataset('wikitext', 'wikitext-2-raw-v1', split='validation')
-            wikitext_samples = 0
             for item in wikitext:
-                text = item['text'].strip()
-                if len(text) > 20:  # Skip very short texts
-                    calibration_texts.append(text)
-                    wikitext_samples += 1
-                    if wikitext_samples >= 50:
-                        break
-            print(f"    Added {wikitext_samples} WikiText-2 samples")
-        except Exception as e:
-            print(f"    Error loading WikiText-2: {e}")
-
-        # Collect samples from OpenWebText
-        try:
-            print("  Loading OpenWebText samples...")
-            openwebtext_dataset = load_dataset('Skylion007/openwebtext', split='train[:100]')
-            openwebtext_samples = 0
-            for item in openwebtext_dataset:
                 text = item['text'].strip()
                 if len(text) > 20:
                     calibration_texts.append(text)
-                    openwebtext_samples += 1
-                    if openwebtext_samples >= 50:
+                    if len(calibration_texts) >= 50:
                         break
-            print(f"    Added {openwebtext_samples} OpenWebText samples")
         except Exception as e:
-            print(f"    Error loading OpenWebText: {e}")
+            print(f"Warning: Could not load WikiText-2: {e}")
 
-        # Collect samples from BoolQ
-        try:
-            print("  Loading BoolQ validation samples...")
-            boolq = load_dataset('boolq', split='validation')
-            boolq_samples = 0
-            for i in range(min(50, len(boolq))):
-                sample = boolq[i]
-                # Format as it would appear in evaluation
-                text = f"Passage: {sample['passage']}\nQuestion: {sample['question']}\nAnswer:"
-                calibration_texts.append(text)
-                boolq_samples += 1
-            print(f"    Added {boolq_samples} BoolQ samples")
-        except Exception as e:
-            print(f"    Error loading BoolQ: {e}")
-
-        if not calibration_texts:
-            raise RuntimeError("Failed to load any calibration data from datasets")
-
-        print(f"\n  Total calibration samples collected: {len(calibration_texts)}")
-
-        # Run calibration
-        num_calib_batches = min(100, len(calibration_texts))
-        print(f"  Running calibration with {num_calib_batches} samples...")
-        calibrate_for_evaluation(model, tokenizer, eval_texts=calibration_texts, num_batches=num_calib_batches)
+        if calibration_texts:
+            calibrate_for_evaluation(model, tokenizer, eval_texts=calibration_texts[:100])
     else:
-        print(f"\nNo calibration needed (bit width: {checkpoint_bit_width})")
+        print(f"No calibration needed (bit width: {checkpoint_bit_width})")
 
-    # Initialize all evaluation components with config
-    device = eval_config['device']
+    # Initialize evaluators
+    device = eval_config.get('device', 'cuda')
     evaluator = LLMQATEvaluation(model, tokenizer)
-    zero_shot_evaluator = ZeroShotEvaluator(model, tokenizer, device=device, config=eval_config['zero_shot'])
-    few_shot_evaluator = FewShotEvaluator(model, tokenizer, device=device, config=eval_config['few_shot'])
-    perplexity_evaluator = PerplexityEvaluator(model, tokenizer, device=device, config=eval_config['perplexity'])
+    zero_shot_evaluator = ZeroShotEvaluator(model, tokenizer, device=device, config=eval_config.get('zero_shot', {}))
+    few_shot_evaluator = FewShotEvaluator(model, tokenizer, device=device, config=eval_config.get('few_shot', {}))
+    perplexity_evaluator = PerplexityEvaluator(model, tokenizer, device=device, config=eval_config.get('perplexity', {}))
 
-    # Get current model's bit configuration from checkpoint or model
-    if checkpoint_bit_width:
-        current_bits = checkpoint_bit_width
-    else:
-        try:
-            current_bits = model.transformer.current_bits
-        except AttributeError:
-            current_bits = 32  # Default to FP32
-            print(f"Warning: Could not determine bit width, defaulting to {current_bits}-bit")
-    print(f"Current model precision: {current_bits}-bit")
+    # Get current bit configuration
+    current_bits = checkpoint_bit_width or 32
+    print(f"\n{'='*70}")
+    print(f"Running Evaluation at {current_bits}-bit precision")
+    print(f"{'='*70}")
 
-    # Get evaluation settings from config
-    output_dir = eval_config['output']['directory']
-
-    print("="*70)
-    print("Running SP Model Evaluation")
-    print("="*70)
-    print(f"Model: GPT-2 ({evaluator.model_params:.1f}M parameters)")
-    print(f"Current precision: {current_bits}-bit")
-    print(f"Output directory: {output_dir}")
-    print(f"Max zero-shot samples: {eval_config['zero_shot']['max_samples']}")
-    print(f"Max few-shot samples: {eval_config['few_shot']['max_samples']}")
-    print(f"Max perplexity samples: {eval_config['perplexity']['max_samples']}")
-    print("="*70)
-
-    # Initialize results dictionary
+    # Initialize results
     results = {
         'bit_width': current_bits,
         'model_size_gb': evaluator.calculate_model_size({'W': current_bits}),
         'compression_ratio': 32 / current_bits
     }
 
-    print(f"\n{'='*60}")
-    print(f"Evaluating {current_bits}-bit model")
-    print('='*60)
-    print(f"Model size: {results['model_size_gb']:.3f} GB")
-    print(f"Compression ratio: {results['compression_ratio']:.2f}x")
-
-    # Create simple bit config for evaluators
     bit_config = {'W': current_bits, 'A': current_bits, 'KV': current_bits}
 
-        # 2. Perplexity evaluation with sliding window
-    print("\n2. Perplexity evaluation (sliding window)...")
+    # 1. Perplexity evaluation
+    print("\n1. Perplexity evaluation...")
     try:
         perplexity_results = perplexity_evaluator.evaluate_all_datasets(bit_config)
         results['perplexity'] = perplexity_results
-        print(f"   WikiText2: {perplexity_results['WikiText2']:.1f}")
-        print(f"   OpenWebText: {perplexity_results.get('OpenWebText', float('inf')):.1f}")
+        for dataset, ppl in perplexity_results.items():
+            print(f"   {dataset}: {ppl:.1f}")
     except Exception as e:
         print(f"   Warning: Perplexity evaluation failed: {e}")
-        results['perplexity'] = {'WikiText2': float('inf'), 'OpenWebText': float('inf')}
+        results['perplexity'] = {}
 
-    # 1. Zero-shot evaluation (6 benchmarks)
-    print("\n1. Zero-shot common sense evaluation...")
+    # 2. Zero-shot evaluation
+    print("\n2. Zero-shot evaluation...")
     try:
         zero_shot_results = zero_shot_evaluator.evaluate_all_tasks(bit_config)
         results['zero_shot'] = zero_shot_results
-        print(f"   BoolQ: {zero_shot_results.get('BoolQ', 0):.1f}%")
-        print(f"   HellaSwag: {zero_shot_results.get('HellaSwag', 0):.1f}%")
-        print(f"   WinoGrande: {zero_shot_results.get('WinoGrande', 0):.1f}%")
-        print(f"   ARC-e: {zero_shot_results.get('ARC-e', 0):.1f}%")
-        print(f"   ARC-c: {zero_shot_results.get('ARC-c', 0):.1f}%")
-        print(f"   OBQA: {zero_shot_results.get('OBQA', 0):.1f}%")
+        for task, score in zero_shot_results.items():
+            if task != 'Average':
+                print(f"   {task}: {score:.1f}%")
         print(f"   Average: {zero_shot_results.get('Average', 0):.1f}%")
     except Exception as e:
         print(f"   Warning: Zero-shot evaluation failed: {e}")
-        results['zero_shot'] = {'Average': 0.0}
+        results['zero_shot'] = {}
 
-
-    # 3. Few-shot evaluation (5-shot)
+    # 3. Few-shot evaluation
     print("\n3. Few-shot evaluation (5-shot)...")
     try:
         mmlu_scores = few_shot_evaluator.evaluate_mmlu(bit_config, num_shots=5)
@@ -799,55 +374,43 @@ def main():
             'MMLU': mmlu_scores,
             'TriviaQA': triviaqa_score
         }
-        print(f"   MMLU by category:")
-        print(f"     - Humanities: {mmlu_scores['Humanities']:.1f}%")
-        print(f"     - STEM: {mmlu_scores['STEM']:.1f}%")
-        print(f"     - Social Sciences: {mmlu_scores['Social Sciences']:.1f}%")
-        print(f"     - Other: {mmlu_scores['Other']:.1f}%")
-        print(f"     - Average: {mmlu_scores['Average']:.1f}%")
+
+        print(f"   MMLU Average: {mmlu_scores.get('Average', 0):.1f}%")
         print(f"   TriviaQA: {triviaqa_score:.1f}%")
     except Exception as e:
         print(f"   Warning: Few-shot evaluation failed: {e}")
-        results['few_shot'] = {
-            'MMLU': {'Average': 0.0},
-            'TriviaQA': 0.0
-        }
+        results['few_shot'] = {}
 
     # Save results
-    output_path = Path(output_dir)
-    output_path.mkdir(exist_ok=True, parents=True)
+    output_dir = Path(eval_config.get('output', {}).get('directory', 'results'))
+    output_dir.mkdir(exist_ok=True, parents=True)
 
-    results_filename = eval_config['output']['results_filename']
-    with open(output_path / results_filename, 'w') as f:
+    results_file = output_dir / f"results_{current_bits}bit.json"
+    with open(results_file, 'w') as f:
         json.dump(results, f, indent=2)
 
     print(f"\n{'='*70}")
-    print(f"Evaluation complete!")
-    print(f"Results saved to {output_path}")
+    print("Evaluation Complete!")
+    print(f"Results saved to {results_file}")
     print(f"{'='*70}")
 
-    print("\nSummary of Results:")
-    print("="*70)
-    print(f"\n{results['bit_width']}-bit Model:")
-    print(f"  Model size: {results['model_size_gb']:.3f} GB")
+    # Print summary
+    print("\nSummary:")
+    print(f"  Model: {current_bits}-bit")
+    print(f"  Size: {results['model_size_gb']:.3f} GB")
     print(f"  Compression: {results['compression_ratio']:.1f}x")
 
-    if 'zero_shot' in results and results['zero_shot']:
-        print(f"  Zero-shot avg: {results['zero_shot'].get('Average', 0):.1f}%")
-
-    if 'perplexity' in results and results['perplexity']:
+    if results.get('perplexity'):
         if 'WikiText2' in results['perplexity']:
             print(f"  WikiText2 PPL: {results['perplexity']['WikiText2']:.1f}")
-        if 'OpenWebText' in results['perplexity']:
-            print(f"  OpenWebText PPL: {results['perplexity']['OpenWebText']:.1f}")
 
-    if 'few_shot' in results and results['few_shot']:
+    if results.get('zero_shot'):
+        if 'Average' in results['zero_shot']:
+            print(f"  Zero-shot Avg: {results['zero_shot']['Average']:.1f}%")
+
+    if results.get('few_shot'):
         if 'MMLU' in results['few_shot']:
-            print(f"  MMLU avg: {results['few_shot']['MMLU'].get('Average', 0):.1f}%")
-        if 'TriviaQA' in results['few_shot']:
-            print(f"  TriviaQA: {results['few_shot']['TriviaQA']:.1f}%")
-
-    print("\n" + "="*70)
+            print(f"  MMLU Avg: {results['few_shot']['MMLU'].get('Average', 0):.1f}%")
 
 
 if __name__ == "__main__":
