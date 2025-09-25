@@ -93,7 +93,7 @@ class ResultTableGenerator:
     def generate_table_2_perplexity(self) -> str:
         """
         Generate Table 2: Perplexity results
-        Columns: Method | #Bits | C4↓ | WikiText2↓
+        Columns: Method | #Bits | OpenWebText↓ | WikiText2↓
         """
         rows = []
 
@@ -105,7 +105,7 @@ class ResultTableGenerator:
             row = {
                 'Method': config_name,
                 '#Bits': result.get('bits', 'N/A'),
-                'C4↓': perplexity.get('C4', float('inf')),
+                'OpenWebText↓': perplexity.get('OpenWebText', float('inf')),
                 'WikiText2↓': perplexity.get('WikiText2', float('inf'))
             }
             rows.append(row)
@@ -250,7 +250,7 @@ class ResultTableGenerator:
         latex += r"\caption{Perplexity Results}" + "\n"
         latex += r"\begin{tabular}{l|c|cc}" + "\n"
         latex += r"\hline" + "\n"
-        latex += r"Method & \#Bits & C4$\downarrow$ & WikiText2$\downarrow$ \\" + "\n"
+        latex += r"Method & \#Bits & OpenWebText$\downarrow$ & WikiText2$\downarrow$ \\" + "\n"
         latex += r"\hline" + "\n"
 
         for config_name, result in self.results.items():
@@ -259,7 +259,7 @@ class ResultTableGenerator:
 
             perplexity = result['perplexity']
             latex += f"{config_name} & {result.get('bits', 'N/A')}"
-            latex += f" & {perplexity.get('C4', float('inf')):.1f}"
+            latex += f" & {perplexity.get('OpenWebText', float('inf')):.1f}"
             latex += f" & {perplexity.get('WikiText2', float('inf')):.1f} \\\\\n"
 
         latex += r"\hline" + "\n"
@@ -301,7 +301,7 @@ class ResultTableGenerator:
     def _generate_markdown_table_2(self) -> str:
         """Generate Markdown for perplexity table"""
         md = "## Table 2: Perplexity Results (↓)\n\n"
-        md += "| Method | #Bits | C4↓ | WikiText2↓ |\n"
+        md += "| Method | #Bits | OpenWebText↓ | WikiText2↓ |\n"
         md += "|--------|-------|-----|------------|\n"
 
         for config_name, result in self.results.items():
@@ -310,7 +310,7 @@ class ResultTableGenerator:
 
             perplexity = result['perplexity']
             md += f"| {config_name} | {result.get('bits', 'N/A')}"
-            md += f" | {perplexity.get('C4', float('inf')):.1f}"
+            md += f" | {perplexity.get('OpenWebText', float('inf')):.1f}"
             md += f" | {perplexity.get('WikiText2', float('inf')):.1f} |\n"
 
         return md

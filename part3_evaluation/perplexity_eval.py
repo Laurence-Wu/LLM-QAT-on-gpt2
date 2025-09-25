@@ -46,16 +46,30 @@ class PerplexityEvaluator:
             except Exception as e:
                 print(f"Warning: Could not load {dataset_name} dataset: {e}")
                 return float('inf')
-        elif dataset_name == 'c4':
+        elif dataset_name == 'openwebtext':
             try:
-                c4_cfg = datasets_config.get('C4', {})
-                # Load C4 validation set in streaming mode
-                dataset = load_dataset(
-                    c4_cfg.get('dataset_name', 'allenai/c4'),
-                    c4_cfg.get('config', 'en'),
-                    split='validation',  # Use validation split without slice notation
-                    streaming=True  # Always use streaming for C4 due to size
-                )
+                # Load OpenWebText config
+                cfg = datasets_config.get('OpenWebText', {})
+
+                # Load dataset
+                dataset_name_str = cfg.get('dataset_name', 'Skylion007/openwebtext')
+                dataset_config = cfg.get('config', None)
+                dataset_split = cfg.get('split', 'train[:1000]')
+                use_streaming = cfg.get('streaming', False)
+
+                if dataset_config:
+                    dataset = load_dataset(
+                        dataset_name_str,
+                        dataset_config,
+                        split=dataset_split,
+                        streaming=use_streaming
+                    )
+                else:
+                    dataset = load_dataset(
+                        dataset_name_str,
+                        split=dataset_split,
+                        streaming=use_streaming
+                    )
                 texts = []
                 max_docs = self.config.get('max_samples', 100)
                 for i, item in enumerate(dataset):
@@ -63,7 +77,7 @@ class PerplexityEvaluator:
                         break
                     texts.append(item['text'])
             except Exception as e:
-                print(f"Warning: Could not load C4 dataset: {e}")
+                print(f"Warning: Could not load OpenWebText dataset: {e}")
                 return float('inf')
         else:
             print(f"Unknown dataset: {dataset_name}")
@@ -212,8 +226,8 @@ class PerplexityEvaluator:
 
     def evaluate_all_datasets(self, bit_config: Dict) -> Dict:
         """
-        Return perplexity for both WikiText2 and C4
-        Format: {'WikiText2': 11.2, 'C4': 7.5}
+        Return perplexity for both WikiText2 and OpenWebText
+        Format: {'WikiText2': 11.2, 'OpenWebText': 7.5}
         """
         results = {}
 
@@ -221,8 +235,8 @@ class PerplexityEvaluator:
         wikitext2_ppl = self.calculate_perplexity('wikitext2', bit_config)
         results['WikiText2'] = round(wikitext2_ppl, 1)
 
-        print("  Calculating C4 perplexity...")
-        c4_ppl = self.calculate_perplexity('c4', bit_config)
-        results['C4'] = round(c4_ppl, 1)
+        print("  Calculating OpenWebText perplexity...")
+        openwebtext_ppl = self.calculate_perplexity('openwebtext', bit_config)
+        results['OpenWebText'] = round(openwebtext_ppl, 1)
 
         return results

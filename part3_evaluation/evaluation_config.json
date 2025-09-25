@@ -99,11 +99,11 @@
         "config": "wikitext-2-raw-v1",
         "split": "test"
       },
-      "C4": {
-        "dataset_name": "allenai/c4",
-        "config": "en",
-        "split": "validation[:1000]",
-        "streaming": true
+      "OpenWebText": {
+        "dataset_name": "Skylion007/openwebtext",
+        "config": null,
+        "split": "train[:1000]",
+        "streaming": false
       }
     }
   },

@@ -644,21 +644,21 @@ def main():
         except Exception as e:
             print(f"    Error loading WikiText-2: {e}")
 
-        # Collect samples from C4
+        # Collect samples from OpenWebText
         try:
-            print("  Loading C4 validation samples...")
-            c4_dataset = load_dataset('c4', 'en', split='validation', streaming=True)
-            c4_samples = 0
-            for item in c4_dataset:
+            print("  Loading OpenWebText samples...")
+            openwebtext_dataset = load_dataset('Skylion007/openwebtext', split='train[:100]')
+            openwebtext_samples = 0
+            for item in openwebtext_dataset:
                 text = item['text'].strip()
                 if len(text) > 20:
                     calibration_texts.append(text)
-                    c4_samples += 1
-                    if c4_samples >= 50:
+                    openwebtext_samples += 1
+                    if openwebtext_samples >= 50:
                         break
-            print(f"    Added {c4_samples} C4 samples")
+            print(f"    Added {openwebtext_samples} OpenWebText samples")
         except Exception as e:
-            print(f"    Error loading C4: {e}")
+            print(f"    Error loading OpenWebText: {e}")
 
         # Collect samples from BoolQ
         try:
@@ -741,10 +741,10 @@ def main():
         perplexity_results = perplexity_evaluator.evaluate_all_datasets(bit_config)
         results['perplexity'] = perplexity_results
         print(f"   WikiText2: {perplexity_results['WikiText2']:.1f}")
-        print(f"   C4: {perplexity_results['C4']:.1f}")
+        print(f"   OpenWebText: {perplexity_results.get('OpenWebText', float('inf')):.1f}")
     except Exception as e:
         print(f"   Warning: Perplexity evaluation failed: {e}")
-        results['perplexity'] = {'WikiText2': float('inf'), 'C4': float('inf')}
+        results['perplexity'] = {'WikiText2': float('inf'), 'OpenWebText': float('inf')}
 
     # 1. Zero-shot evaluation (6 benchmarks)
     print("\n1. Zero-shot common sense evaluation...")
@@ -812,8 +812,8 @@ def main():
     if 'perplexity' in results and results['perplexity']:
         if 'WikiText2' in results['perplexity']:
             print(f"  WikiText2 PPL: {results['perplexity']['WikiText2']:.1f}")
-        if 'C4' in results['perplexity']:
-            print(f"  C4 PPL: {results['perplexity']['C4']:.1f}")
+        if 'OpenWebText' in results['perplexity']:
+            print(f"  OpenWebText PPL: {results['perplexity']['OpenWebText']:.1f}")
 
     if 'few_shot' in results and results['few_shot']:
         if 'MMLU' in results['few_shot']:

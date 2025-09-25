@@ -46,7 +46,7 @@ class LLMQATEvaluation:
 
     def evaluate_perplexity(self, bit_config: Dict) -> Dict:
         """
-        Calculate perplexity on WikiText2 and C4
+        Calculate perplexity on WikiText2 and OpenWebText
         Return both values
         """
         from perplexity_eval import PerplexityEvaluator
@@ -58,7 +58,7 @@ class LLMQATEvaluation:
 
         return {
             'WikiText2': results.get('WikiText2', float('inf')),
-            'C4': results.get('C4', float('inf'))
+            'OpenWebText': results.get('OpenWebText', float('inf'))
         }
 
     def evaluate_few_shot(self, bit_config: Dict, num_shots: int = 5) -> Dict:
@@ -158,7 +158,7 @@ class LLMQATEvaluation:
             perplexity_results = self.evaluate_perplexity(config)
             results['perplexity'] = perplexity_results
             print(f"   WikiText2: {perplexity_results['WikiText2']:.1f}")
-            print(f"   C4: {perplexity_results['C4']:.1f}")
+            print(f"   OpenWebText: {perplexity_results.get('OpenWebText', float('inf')):.1f}")
 
             if not skip_few_shot:
                 print("\n3. Few-shot evaluation...")
