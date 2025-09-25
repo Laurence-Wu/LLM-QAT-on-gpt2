@@ -18,17 +18,10 @@ class PerplexityEvaluator:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-    def calculate_perplexity(self, dataset_name: str, bit_config: Dict,
-                            stride: int = None, max_length: int = None) -> float:
-        """
-        Calculate perplexity on WikiText2 or C4
-        Using proper sliding window approach optimized for small GPT-2
-        """
-        if stride is None:
-            stride = self.config['stride']
-        if max_length is None:
-            max_length = self.config['max_length']
-
+    def calculate_perplexity(self, dataset_name: str, bit_config: Dict) -> float:
+        
+        stride = self.config['stride']
+        max_length = self.config['max_length']
         self.model.eval()
 
         # Load dataset from config
