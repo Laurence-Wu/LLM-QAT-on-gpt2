@@ -151,6 +151,11 @@ class PerplexityEvaluator:
                     # Clamp token IDs to valid range
                     input_ids = torch.clamp(input_ids, 0, vocab_size - 1)
 
+                # Debug first iteration
+                if iterations == 0:
+                    print(f"    Debug: First window - input_ids shape: {input_ids.shape}")
+                    print(f"      Token IDs range: [{input_ids.min().item()}, {input_ids.max().item()}]")
+
                 # Target is the same as input for language modeling
                 target_ids = input_ids.clone()
 
@@ -170,6 +175,12 @@ class PerplexityEvaluator:
                             else:
                                 logits = outputs
 
+                        # Debug first iteration
+                        if iterations == 0:
+                            print(f"    Debug: First window - logits shape: {logits.shape}")
+                            print(f"      Logits stats - mean: {logits.mean().item():.4f}, std: {logits.std().item():.4f}")
+                            print(f"      Logits range: [{logits.min().item():.4f}, {logits.max().item():.4f}]")
+
                         # Shift for next token prediction
                         shift_logits = logits[..., :-1, :].contiguous()
                         shift_labels = target_ids[..., 1:].contiguous()
@@ -183,6 +194,11 @@ class PerplexityEvaluator:
 
                         # Get mean loss for this segment
                         segment_loss = losses.mean().item()
+
+                        # Debug first iteration
+                        if iterations == 0:
+                            print(f"    Debug: First segment loss: {segment_loss:.4f}")
+                            print(f"      Perplexity would be: {math.exp(min(segment_loss, 10)):.2f}")
 
                         # Only add valid losses
                         if not math.isnan(segment_loss) and not math.isinf(segment_loss):
@@ -213,13 +229,23 @@ class PerplexityEvaluator:
         # No outlier filtering - use all valid losses
         avg_loss = np.mean(all_losses)
 
+        # Debug: Print loss statistics
+        print(f"    Debug: Total iterations: {iterations}, valid losses: {len(all_losses)}")
+        if all_losses:
+            print(f"    Debug: Loss statistics - min: {min(all_losses):.4f}, max: {max(all_losses):.4f}, mean: {avg_loss:.4f}")
+            print(f"    Debug: First 5 losses: {all_losses[:5]}")
+            print(f"    Debug: Last 5 losses: {all_losses[-5:]}")
+
         # Perplexity is exp(average_loss)
         try:
             ppl = math.exp(avg_loss)
+            print(f"    Debug: Computed perplexity: {ppl:.2f}")
             # Cap perplexity at a reasonable value
             if ppl > 100000:
+                print(f"    Debug: Capping perplexity from {ppl:.2f} to 100000")
                 ppl = 100000
         except OverflowError:
+            print(f"    Debug: Overflow error with avg_loss={avg_loss:.4f}, setting perplexity to 100000")
             ppl = 100000
 
         return ppl

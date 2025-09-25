@@ -536,11 +536,56 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
             max_length=64
         ).to(device)
 
+        print(f"  Test input shape: {test_inputs['input_ids'].shape}")
+
+        # Hook to capture quantizer outputs
+        quantizer_outputs = {}
+        def capture_quantizer_output(name):
+            def hook(module, input, output):
+                quantizer_outputs[name] = {
+                    'input_mean': input[0].mean().item() if isinstance(input, tuple) else input.mean().item(),
+                    'input_std': input[0].std().item() if isinstance(input, tuple) else input.std().item(),
+                    'output_mean': output.mean().item(),
+                    'output_std': output.std().item(),
+                    'input_shape': input[0].shape if isinstance(input, tuple) else input.shape,
+                    'output_shape': output.shape
+                }
+            return hook
+
+        # Register hooks on first few quantizers
+        hooks = []
+        for i, (name, quantizer) in enumerate(input_quantizers[:3]):
+            hook = quantizer.register_forward_hook(capture_quantizer_output(name))
+            hooks.append(hook)
+
         try:
-            _ = model(test_inputs['input_ids'])
-            print("  ✓ Quantization verified - forward pass successful")
+            outputs = model(test_inputs['input_ids'])
+            print("  ✓ Forward pass successful")
+
+            # Check output statistics
+            if hasattr(outputs, 'logits'):
+                logits = outputs.logits
+            else:
+                logits = outputs
+            print(f"  Output logits shape: {logits.shape}")
+            print(f"  Logits statistics - mean: {logits.mean().item():.4f}, std: {logits.std().item():.4f}")
+
+            # Check if quantizers were actually called
+            if quantizer_outputs:
+                print("  Quantizer activity detected:")
+                for name, stats in list(quantizer_outputs.items())[:3]:
+                    print(f"    {name}:")
+                    print(f"      input: mean={stats['input_mean']:.4f}, std={stats['input_std']:.4f}, shape={stats['input_shape']}")
+                    print(f"      output: mean={stats['output_mean']:.4f}, std={stats['output_std']:.4f}, shape={stats['output_shape']}")
+            else:
+                print("  ⚠ WARNING: No quantizer activity detected!")
+
         except Exception as e:
             print(f"  ⚠ Warning: Test forward pass failed: {e}")
+        finally:
+            # Remove hooks
+            for hook in hooks:
+                hook.remove()
 
     print(f"\n✓ Input calibration completed")
     print(f"  - Calibrated {len(input_quantizers)} input quantizers")

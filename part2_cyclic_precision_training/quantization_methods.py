@@ -124,7 +124,7 @@ class PerChannelLogQuantization(nn.Module):
         if not self.calibrated or self.channel_scales is None:
             # Calibrate on first pass
             self.channel_scales, self.channel_zero_points = self.calibrate_per_channel(x)
-            self.calibrated = True
+            self.calibrated = torch.tensor(True)
 
         # Apply quantization
         x_quant = self.quantize(x, self.channel_scales, self.channel_zero_points)
