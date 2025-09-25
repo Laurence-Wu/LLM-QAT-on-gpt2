@@ -21,7 +21,7 @@ class ModelConfig:
         self.embd_pdrop = 0.1
 
         # Cyclic precision settings
-        self.bit_widths = [4, 6, 8]  # Cycle through these precisions
+        self.bit_widths = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]  # Cycle through these precisions
         self.default_bits = 8  # Default/upper bound precision
 
         # LoRA settings per bit-width
