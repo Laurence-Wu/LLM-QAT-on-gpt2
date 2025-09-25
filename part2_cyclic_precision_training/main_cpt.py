@@ -238,6 +238,7 @@ def main(args):
         prt = PrecisionRangeTest(
             model,
             start_bits=cpt_config.prt_start_bits,
+            max_bits=max(model_config.bit_widths),  # Use the maximum bit width from config
             threshold=cpt_config.prt_threshold,
             test_iterations=cpt_config.prt_iterations,
             target_bits=training_config.target_bits
