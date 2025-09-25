@@ -13,8 +13,8 @@ from torch.utils.checkpoint import checkpoint
 
 # Try relative imports first (for package usage), fall back to direct imports (for local usage)
 
-from lora import SPLinearWithLoRA
-from switchable_batchnorm import SwitchableLayerNorm
+from .lora import SPLinearWithLoRA
+from .switchable_batchnorm import SwitchableLayerNorm
 
 
 class SPAttention(nn.Module):
