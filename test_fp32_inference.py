@@ -220,7 +220,7 @@ def test_fp32_model(checkpoint_path):
     # Create model and load weights
     print("\nLoading SP model...")
     sp_model = SPLMHeadModel(config)
-    sp_model.set_precision(16)  # Force FP32 mode
+    sp_model.set_precision(32)  # Force FP32 mode
     sp_model.load_state_dict(checkpoint['model_state_dict'], strict=True)
     sp_model.eval()
 
