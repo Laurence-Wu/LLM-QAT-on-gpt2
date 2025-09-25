@@ -20,11 +20,18 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 # Import shared components
 # Use the new separated model file for Switchable Precision
-from models_sp import SPLMHeadModel
-from dataset import create_dataloaders
-from deploy import save_sp_checkpoints
-from config_sp import ModelConfig, TrainingConfig
-from train_sp import train_sp
+try:
+    from .models_sp import SPLMHeadModel
+    from .dataset import create_dataloaders
+    from .deploy import save_sp_checkpoints
+    from .config_sp import ModelConfig, TrainingConfig
+    from .train_sp import train_sp
+except ImportError:
+    from models_sp import SPLMHeadModel
+    from dataset import create_dataloaders
+    from deploy import save_sp_checkpoints
+    from config_sp import ModelConfig, TrainingConfig
+    from train_sp import train_sp
 
 
 def initialize_model(model_config, device):
