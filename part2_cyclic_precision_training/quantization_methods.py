@@ -12,52 +12,69 @@ from typing import Optional, Tuple
 
 class PerChannelLogQuantization(nn.Module):
     """
-    Log-scale quantization with per-channel calibration.
+    Log-scale quantization with per-channel or per-tensor calibration.
     Non-uniform quantization that better preserves information.
     """
 
-    def __init__(self, num_bits: int = 8, symmetric: bool = True):
+    def __init__(self, num_bits: int = 8, symmetric: bool = True, per_channel: bool = True):
         super().__init__()
         self.num_bits = num_bits
         self.symmetric = symmetric
+        self.per_channel = per_channel
         self.register_buffer('calibrated', torch.tensor(False))
 
-        # Per-channel calibration parameters
+        # Calibration parameters (per-channel or per-tensor)
         self.register_buffer('channel_scales', None)
         self.register_buffer('channel_zero_points', None)
 
     def calibrate_per_channel(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Calibrate scale and zero-point per channel.
+        Calibrate scale and zero-point per channel or per tensor.
 
         Args:
             x: Input tensor [batch, seq_len, hidden_dim] or [out_features, in_features]
 
         Returns:
-            Tuple of (scale, zero_point) per channel
+            Tuple of (scale, zero_point) per channel or per tensor
         """
-        # Handle different tensor shapes
-        if x.dim() == 3:
-            # Activation tensor [batch, seq_len, hidden_dim]
-            # Calibrate per hidden dimension (channel)
-            channel_dim = -1
-            reduce_dims = (0, 1)  # Reduce over batch and sequence
-        elif x.dim() == 2:
-            # Weight tensor [out_features, in_features]
-            # Calibrate per output channel
-            channel_dim = 0
-            reduce_dims = (1,)  # Reduce over input features
+        if self.per_channel:
+            # Per-channel calibration (original behavior)
+            if x.dim() == 3:
+                # Activation tensor [batch, seq_len, hidden_dim]
+                # Calibrate per hidden dimension (channel)
+                channel_dim = -1
+                reduce_dims = (0, 1)  # Reduce over batch and sequence
+            elif x.dim() == 2:
+                # Weight tensor [out_features, in_features]
+                # Calibrate per output channel
+                channel_dim = 0
+                reduce_dims = (1,)  # Reduce over input features
+            else:
+                raise ValueError(f"Unexpected tensor dimension: {x.dim()}")
+
+            # Get min/max per channel
+            channel_max = x.max(dim=reduce_dims[0], keepdim=True)[0]
+            for dim in reduce_dims[1:]:
+                channel_max = channel_max.max(dim=dim, keepdim=True)[0]
+
+            channel_min = x.min(dim=reduce_dims[0], keepdim=True)[0]
+            for dim in reduce_dims[1:]:
+                channel_min = channel_min.min(dim=dim, keepdim=True)[0]
         else:
-            raise ValueError(f"Unexpected tensor dimension: {x.dim()}")
+            # Per-tensor calibration (global statistics)
+            # Reduce all dimensions to get single min/max values
+            channel_max = x.max()
+            channel_min = x.min()
 
-        # Get min/max per channel
-        channel_max = x.max(dim=reduce_dims[0], keepdim=True)[0]
-        for dim in reduce_dims[1:]:
-            channel_max = channel_max.max(dim=dim, keepdim=True)[0]
-
-        channel_min = x.min(dim=reduce_dims[0], keepdim=True)[0]
-        for dim in reduce_dims[1:]:
-            channel_min = channel_min.min(dim=dim, keepdim=True)[0]
+            # Reshape to match expected output shape
+            if x.dim() == 3:
+                channel_max = channel_max.view(1, 1, 1)
+                channel_min = channel_min.view(1, 1, 1)
+            elif x.dim() == 2:
+                channel_max = channel_max.view(1, 1)
+                channel_min = channel_min.view(1, 1)
+            else:
+                raise ValueError(f"Unexpected tensor dimension: {x.dim()}")
 
         if self.symmetric:
             # Symmetric quantization
@@ -125,41 +142,60 @@ class SBMQuantization(nn.Module):
     Based on the SBM paper Section 4 and Appendix B.
     """
 
-    def __init__(self, num_bits: int = 8, use_stochastic_rounding: bool = True):
+    def __init__(self, num_bits: int = 8, use_stochastic_rounding: bool = True, per_channel: bool = True):
         super().__init__()
         self.num_bits = num_bits
         self.use_stochastic_rounding = use_stochastic_rounding
+        self.per_channel = per_channel
 
-        # Per-channel calibration parameters
+        # Calibration parameters (per-channel or per-tensor)
         self.register_buffer('channel_vmin', None)
         self.register_buffer('channel_vmax', None)
         self.register_buffer('calibrated', torch.tensor(False))
 
     def calibrate_per_channel(self, x: torch.Tensor, percentile: float = 99.9):
         """
-        Calibrate using GEMMLOWP scheme with per-channel statistics.
+        Calibrate using GEMMLOWP scheme with per-channel or per-tensor statistics.
         """
-        # Get channel dimension
-        if x.dim() == 3:
-            # [batch, seq_len, hidden_dim]
-            x_flat = x.view(-1, x.size(-1))  # Flatten batch and seq
-        elif x.dim() == 2:
-            # [out_features, in_features]
-            x_flat = x
-        else:
-            raise ValueError(f"Unexpected tensor dimension: {x.dim()}")
+        if self.per_channel:
+            # Per-channel calibration (original behavior)
+            # Get channel dimension
+            if x.dim() == 3:
+                # [batch, seq_len, hidden_dim]
+                x_flat = x.view(-1, x.size(-1))  # Flatten batch and seq
+            elif x.dim() == 2:
+                # [out_features, in_features]
+                x_flat = x
+            else:
+                raise ValueError(f"Unexpected tensor dimension: {x.dim()}")
 
-        # Calculate per-channel min/max with percentile clipping
-        if percentile < 100:
-            # Use percentile for better robustness
-            channel_vmax = torch.quantile(x_flat, percentile / 100, dim=0)
-            channel_vmin = torch.quantile(x_flat, (100 - percentile) / 100, dim=0)
-        else:
-            channel_vmax = x_flat.max(dim=0)[0]
-            channel_vmin = x_flat.min(dim=0)[0]
+            # Calculate per-channel min/max with percentile clipping
+            if percentile < 100:
+                # Use percentile for better robustness
+                channel_vmax = torch.quantile(x_flat, percentile / 100, dim=0)
+                channel_vmin = torch.quantile(x_flat, (100 - percentile) / 100, dim=0)
+            else:
+                channel_vmax = x_flat.max(dim=0)[0]
+                channel_vmin = x_flat.min(dim=0)[0]
 
-        self.channel_vmin = channel_vmin.view(1, 1, -1) if x.dim() == 3 else channel_vmin.view(-1, 1)
-        self.channel_vmax = channel_vmax.view(1, 1, -1) if x.dim() == 3 else channel_vmax.view(-1, 1)
+            self.channel_vmin = channel_vmin.view(1, 1, -1) if x.dim() == 3 else channel_vmin.view(-1, 1)
+            self.channel_vmax = channel_vmax.view(1, 1, -1) if x.dim() == 3 else channel_vmax.view(-1, 1)
+        else:
+            # Per-tensor calibration (global statistics)
+            x_flat = x.flatten()
+
+            # Calculate global min/max with percentile clipping
+            if percentile < 100:
+                channel_vmax = torch.quantile(x_flat, percentile / 100)
+                channel_vmin = torch.quantile(x_flat, (100 - percentile) / 100)
+            else:
+                channel_vmax = x_flat.max()
+                channel_vmin = x_flat.min()
+
+            # Shape for global statistics
+            self.channel_vmin = channel_vmin.view(1, 1, 1) if x.dim() == 3 else channel_vmin.view(1, 1)
+            self.channel_vmax = channel_vmax.view(1, 1, 1) if x.dim() == 3 else channel_vmax.view(1, 1)
+
         self.calibrated = True
 
     def quantize_gemmlowp(self, x: torch.Tensor) -> torch.Tensor:
@@ -210,18 +246,21 @@ class GradientBifurcation:
     Uses different precision for weight gradients vs activation gradients.
     """
 
-    def __init__(self, weight_grad_bits: int = 16, activation_grad_bits: int = 8):
+    def __init__(self, weight_grad_bits: int = 16, activation_grad_bits: int = 8, per_channel: bool = True):
         self.weight_grad_bits = weight_grad_bits
         self.activation_grad_bits = activation_grad_bits
+        self.per_channel = per_channel
 
         # Quantizers for each gradient type
         self.weight_grad_quantizer = SBMQuantization(
             num_bits=weight_grad_bits,
-            use_stochastic_rounding=True
+            use_stochastic_rounding=True,
+            per_channel=per_channel
         )
         self.activation_grad_quantizer = PerChannelLogQuantization(
             num_bits=activation_grad_bits,
-            symmetric=True
+            symmetric=True,
+            per_channel=per_channel
         )
 
     def quantize_weight_gradient(self, grad: torch.Tensor) -> torch.Tensor:
@@ -243,17 +282,18 @@ class MultiPrecisionQuantizer:
     Used by CPT model to switch between precisions.
     """
 
-    def __init__(self, bit_widths: list = [4, 6, 8], quantizer_type: str = 'log'):
+    def __init__(self, bit_widths: list = [4, 6, 8], quantizer_type: str = 'log', per_channel: bool = True):
         self.bit_widths = bit_widths
         self.quantizer_type = quantizer_type
+        self.per_channel = per_channel
 
         # Create quantizer for each bit-width
         self.quantizers = {}
         for bits in bit_widths:
             if quantizer_type == 'log':
-                self.quantizers[bits] = PerChannelLogQuantization(num_bits=bits)
+                self.quantizers[bits] = PerChannelLogQuantization(num_bits=bits, per_channel=per_channel)
             elif quantizer_type == 'sbm':
-                self.quantizers[bits] = SBMQuantization(num_bits=bits)
+                self.quantizers[bits] = SBMQuantization(num_bits=bits, per_channel=per_channel)
             else:
                 raise ValueError(f"Unknown quantizer type: {quantizer_type}")
 

@@ -14,6 +14,7 @@ from cpt_model import CPTModel
 def save_cpt_checkpoint(
     model: CPTModel,
     optimizer: torch.optim.Optimizer,
+    lr_scheduler: torch.optim.lr_scheduler._LRScheduler,
     epoch: int,
     global_step: int,
     loss: float,
@@ -26,6 +27,7 @@ def save_cpt_checkpoint(
     Args:
         model: CPT model
         optimizer: Optimizer
+        lr_scheduler: Learning rate scheduler
         epoch: Current epoch
         global_step: Global training step
         loss: Current loss
@@ -38,6 +40,7 @@ def save_cpt_checkpoint(
     checkpoint = {
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
+        'lr_scheduler_state_dict': lr_scheduler.state_dict(),  # Save LR scheduler state
         'epoch': epoch,
         'global_step': global_step,
         'loss': loss,

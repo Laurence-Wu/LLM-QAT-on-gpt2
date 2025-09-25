@@ -196,20 +196,8 @@ class PerplexityEvaluator:
             return float('inf')
 
         # Calculate average loss across all valid segments
+        # No outlier filtering - use all valid losses
         avg_loss = np.mean(all_losses)
-
-        # Remove outliers (losses that are too high)
-        if len(all_losses) > 10:
-            # Use median and IQR to filter outliers
-            q1 = np.percentile(all_losses, 25)
-            q3 = np.percentile(all_losses, 75)
-            iqr = q3 - q1
-            lower_bound = q1 - 1.5 * iqr
-            upper_bound = q3 + 1.5 * iqr
-
-            filtered_losses = [l for l in all_losses if lower_bound <= l <= upper_bound]
-            if filtered_losses:
-                avg_loss = np.mean(filtered_losses)
 
         # Perplexity is exp(average_loss)
         try:

@@ -735,6 +735,17 @@ def main():
     # Create simple bit config for evaluators
     bit_config = {'W': current_bits, 'A': current_bits, 'KV': current_bits}
 
+        # 2. Perplexity evaluation with sliding window
+    print("\n2. Perplexity evaluation (sliding window)...")
+    try:
+        perplexity_results = perplexity_evaluator.evaluate_all_datasets(bit_config)
+        results['perplexity'] = perplexity_results
+        print(f"   WikiText2: {perplexity_results['WikiText2']:.1f}")
+        print(f"   C4: {perplexity_results['C4']:.1f}")
+    except Exception as e:
+        print(f"   Warning: Perplexity evaluation failed: {e}")
+        results['perplexity'] = {'WikiText2': float('inf'), 'C4': float('inf')}
+
     # 1. Zero-shot evaluation (6 benchmarks)
     print("\n1. Zero-shot common sense evaluation...")
     try:
@@ -751,16 +762,6 @@ def main():
         print(f"   Warning: Zero-shot evaluation failed: {e}")
         results['zero_shot'] = {'Average': 0.0}
 
-    # 2. Perplexity evaluation with sliding window
-    print("\n2. Perplexity evaluation (sliding window)...")
-    try:
-        perplexity_results = perplexity_evaluator.evaluate_all_datasets(bit_config)
-        results['perplexity'] = perplexity_results
-        print(f"   WikiText2: {perplexity_results['WikiText2']:.1f}")
-        print(f"   C4: {perplexity_results['C4']:.1f}")
-    except Exception as e:
-        print(f"   Warning: Perplexity evaluation failed: {e}")
-        results['perplexity'] = {'WikiText2': float('inf'), 'C4': float('inf')}
 
     # 3. Few-shot evaluation (5-shot)
     print("\n3. Few-shot evaluation (5-shot)...")

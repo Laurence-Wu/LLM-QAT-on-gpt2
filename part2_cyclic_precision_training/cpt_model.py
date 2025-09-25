@@ -80,16 +80,18 @@ class CPTLinear(nn.Module):
                 in_features, out_features, rank, alpha
             )
 
-        # Per-channel quantizers for weights
+        # Per-channel quantizers for weights (use per-channel during training)
         self.weight_quantizers = MultiPrecisionQuantizer(
             bit_widths=bit_widths,
-            quantizer_type='log'
+            quantizer_type='log',
+            per_channel=True  # Use per-channel calibration during training
         )
 
-        # Per-channel quantizers for activations
+        # Per-channel quantizers for activations (use per-channel during training)
         self.activation_quantizers = MultiPrecisionQuantizer(
             bit_widths=bit_widths,
-            quantizer_type='log'
+            quantizer_type='log',
+            per_channel=True  # Use per-channel calibration during training
         )
 
         # Current precision
@@ -397,6 +399,64 @@ class CPTModel(nn.Module):
             hidden_states=hidden_states,
             attentions=None
         )
+
+    def replace_quantizers_for_evaluation(self):
+        """
+        Replace all quantizers with per-tensor versions for evaluation.
+        This allows the model to handle variable-length sequences.
+        """
+        # Replace quantizers in all CPTLinear layers
+        for module in self.modules():
+            if isinstance(module, CPTLinear):
+                # Replace weight quantizers
+                for bits in module.weight_quantizers.bit_widths:
+                    old_quantizer = module.weight_quantizers.quantizers[bits]
+                    # Create new per-tensor quantizer
+                    if module.weight_quantizers.quantizer_type == 'log':
+                        new_quantizer = PerChannelLogQuantization(
+                            num_bits=bits,
+                            symmetric=old_quantizer.symmetric,
+                            per_channel=False  # Use per-tensor for evaluation
+                        )
+                    else:  # sbm
+                        new_quantizer = SBMQuantization(
+                            num_bits=bits,
+                            use_stochastic_rounding=old_quantizer.use_stochastic_rounding,
+                            per_channel=False  # Use per-tensor for evaluation
+                        )
+                    # Copy device and calibration state if needed
+                    new_quantizer = new_quantizer.to(old_quantizer.channel_scales.device if old_quantizer.channel_scales is not None else 'cpu')
+                    module.weight_quantizers.quantizers[bits] = new_quantizer
+
+                # Replace activation quantizers
+                for bits in module.activation_quantizers.bit_widths:
+                    old_quantizer = module.activation_quantizers.quantizers[bits]
+                    # Create new per-tensor quantizer
+                    if module.activation_quantizers.quantizer_type == 'log':
+                        new_quantizer = PerChannelLogQuantization(
+                            num_bits=bits,
+                            symmetric=old_quantizer.symmetric,
+                            per_channel=False  # Use per-tensor for evaluation
+                        )
+                    else:  # sbm
+                        new_quantizer = SBMQuantization(
+                            num_bits=bits,
+                            use_stochastic_rounding=old_quantizer.use_stochastic_rounding,
+                            per_channel=False  # Use per-tensor for evaluation
+                        )
+                    # Copy device
+                    new_quantizer = new_quantizer.to(old_quantizer.channel_scales.device if old_quantizer.channel_scales is not None else 'cpu')
+                    module.activation_quantizers.quantizers[bits] = new_quantizer
+
+        # Replace gradient bifurcation quantizers if present
+        try:
+            self.gradient_bifurcation = GradientBifurcation(
+                weight_grad_bits=self.gradient_bifurcation.weight_grad_bits,
+                activation_grad_bits=self.gradient_bifurcation.activation_grad_bits,
+                per_channel=False  # Use per-tensor for evaluation
+            )
+        except AttributeError:
+            pass  # No gradient bifurcation to replace
 
     def generate(self, input_ids, max_length=100, temperature=1.0, do_sample=True, **kwargs):
         """Simple generation method."""

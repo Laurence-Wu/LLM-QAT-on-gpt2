@@ -65,21 +65,17 @@ class CPTConfig:
         self.schedule_type = 'cosine'  # 'cosine', 'triangular', or 'linear'
 
         # Precision Range Test (PRT) settings
-        self.use_prt = False  # Whether to auto-detect lower bound
         self.prt_start_bits = 2  # Starting precision for PRT
         self.prt_threshold = 0.01  # Accuracy improvement threshold
         self.prt_iterations = 100  # Iterations per precision level
 
-        # Cycle bounds
-        self.lower_bound = 4  # Lower precision bound
-        self.upper_bound = 8  # Upper precision bound
 
 
 class TrainingConfig:
     """Training configuration for CPT."""
     def __init__(self):
         # Dataset
-        self.train_split = 'train[:80000]'
+        self.train_split = 'train[:5000]'
         self.val_split = 'validation[:5000]'
         self.batch_size = 32
         self.max_seq_length = 256
@@ -99,6 +95,7 @@ class TrainingConfig:
 
         # Cyclic precision schedule
         self.num_cycles = 32  # Total number of complete cycles during training
+        self.target_bits = 8  # Targeted precision for training
 
         # Evaluation
         self.eval_interval = 50

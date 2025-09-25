@@ -145,10 +145,11 @@ class PrecisionRangeTest:
     def __init__(
         self,
         model,
-        start_bits: int = 2,
-        max_bits: int = 16,
-        threshold: float = 0.01,
-        test_iterations: int = 100
+        start_bits: int,
+        max_bits: int,
+        threshold: float,
+        test_iterations: int,
+        target_bits: int
     ):
         """
         Initialize PRT.
@@ -165,6 +166,7 @@ class PrecisionRangeTest:
         self.max_bits = max_bits
         self.threshold = threshold
         self.test_iterations = test_iterations
+        self.target_bits = target_bits
 
     def find_lower_bound(self, dataloader, criterion) -> int:
         """
@@ -216,8 +218,8 @@ class PrecisionRangeTest:
 
             previous_acc = current_acc
 
-        # Default to 4-bit if no significant improvement found
-        return 4
+        # Default to start_bits if no significant improvement found
+        return self.start_bits
 
     def find_bounds(self, dataloader, criterion) -> Tuple[int, int]:
         """
@@ -231,7 +233,6 @@ class PrecisionRangeTest:
             Tuple of (lower_bound, upper_bound)
         """
         lower_bound = self.find_lower_bound(dataloader, criterion)
-        # Upper bound is typically 8-bit for efficiency
-        upper_bound = min(8, self.max_bits)
+        upper_bound = min(self.target_bits, self.max_bits)
 
         return lower_bound, upper_bound

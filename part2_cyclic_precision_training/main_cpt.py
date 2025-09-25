@@ -6,6 +6,7 @@ Implements the key CPT training loop with precision cycling within each step.
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from transformers import GPT2Tokenizer, GPT2Model
 import numpy as np
@@ -26,7 +27,8 @@ def train_step_with_cyclic_precision(
     model: CPTModel,
     batch: Dict[str, torch.Tensor],
     optimizer: optim.Optimizer,
-    scheduler: CyclicPrecisionScheduler,
+    precision_scheduler: CyclicPrecisionScheduler,
+    lr_scheduler: optim.lr_scheduler._LRScheduler,
     device: str
 ) -> Dict[str, float]:
     """
@@ -40,7 +42,7 @@ def train_step_with_cyclic_precision(
     labels = batch['labels'].to(device)
 
     # Get all precisions for this cycle
-    cycle_precisions = scheduler.get_cycle_precisions()
+    cycle_precisions = precision_scheduler.get_cycle_precisions()
 
     total_loss = 0
     losses_per_precision = {}
@@ -71,13 +73,18 @@ def train_step_with_cyclic_precision(
     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
     optimizer.step()
 
-    # Advance scheduler position
-    scheduler.global_step += 1
+    # Step learning rate scheduler for EACH precision in the cycle
+    # This ensures smooth LR decay across all precision iterations
+    for _ in cycle_precisions:
+        lr_scheduler.step()
+
+    # Advance precision scheduler position
+    precision_scheduler.global_step += 1
 
     return {
         'total_loss': total_loss / len(cycle_precisions),
         'losses_per_precision': losses_per_precision,
-        'cycle_info': scheduler.get_current_cycle_info()
+        'cycle_info': precision_scheduler.get_current_cycle_info()
     }
 
 
@@ -177,11 +184,11 @@ def main(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
-    # Load tokenizer
+    #load tokenizer
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     tokenizer.pad_token = tokenizer.eos_token
 
-    # Create datasets
+    # datasets
     print("Loading datasets...")
     train_dataset = WikiTextDataset(
         training_config.train_split,
@@ -210,7 +217,7 @@ def main(args):
         num_workers=training_config.num_workers
     )
 
-    # Create model
+    # model
     print("Creating CPT model...")
     model = CPTModel(config).to(device)
 
@@ -219,26 +226,27 @@ def main(args):
         load_pretrained_weights(model, device)
 
     # Create cyclic precision scheduler
-    scheduler = CyclicPrecisionScheduler(
+    precision_scheduler = CyclicPrecisionScheduler(
         bit_widths=model_config.bit_widths,
         schedule_type=cpt_config.schedule_type,
         cycle_length=cpt_config.cycle_length
     )
 
-    # Optional: Run Precision Range Test
-    if cpt_config.use_prt and not args.skip_prt:
+    # Run Precision Range Test (only during training, not evaluation)
+    if not args.eval_only:
         print("Running Precision Range Test...")
         prt = PrecisionRangeTest(
             model,
             start_bits=cpt_config.prt_start_bits,
             threshold=cpt_config.prt_threshold,
-            test_iterations=cpt_config.prt_iterations
+            test_iterations=cpt_config.prt_iterations,
+            target_bits=training_config.target_bits
         )
         lower_bound, upper_bound = prt.find_bounds(train_loader, nn.CrossEntropyLoss())
         print(f"PRT Results: Lower bound = {lower_bound}-bit, Upper bound = {upper_bound}-bit")
-        # Update scheduler with PRT results
-        scheduler.min_bits = lower_bound
-        scheduler.max_bits = upper_bound
+        # Update precision scheduler with PRT results
+        precision_scheduler.min_bits = lower_bound
+        precision_scheduler.max_bits = upper_bound
 
     # Create optimizer
     optimizer = optim.AdamW(
@@ -248,6 +256,22 @@ def main(args):
         eps=training_config.adam_epsilon,
         weight_decay=training_config.weight_decay
     )
+
+    # Calculate total steps for learning rate scheduler
+    # Total steps = num_epochs * steps_per_epoch * cycle_length
+    # This ensures LR updates for every precision change
+    steps_per_epoch = len(train_loader)
+    cycle_length = cpt_config.cycle_length
+    total_lr_steps = training_config.num_epochs * steps_per_epoch * cycle_length
+
+    # Create cosine learning rate scheduler
+    lr_scheduler = CosineAnnealingLR(
+        optimizer,
+        T_max=total_lr_steps,
+        eta_min=1e-6  # Minimum learning rate
+    )
+    print(f"Created LR scheduler with {total_lr_steps:,} total steps")
+    print(f"  ({training_config.num_epochs} epochs * {steps_per_epoch} batches * {cycle_length} precisions)")
 
     # Training loop
     print("Starting CPT training...")
@@ -265,7 +289,7 @@ def main(args):
         for batch_idx, batch in enumerate(progress_bar):
             # CRITICAL: Train with cyclic precision
             step_results = train_step_with_cyclic_precision(
-                model, batch, optimizer, scheduler, device
+                model, batch, optimizer, precision_scheduler, lr_scheduler, device
             )
 
             epoch_losses.append(step_results['total_loss'])
@@ -273,10 +297,12 @@ def main(args):
 
             # Update progress bar
             cycle_info = step_results['cycle_info']
+            current_lr = lr_scheduler.get_last_lr()[0]
             progress_bar.set_postfix({
                 'loss': f"{step_results['total_loss']:.4f}",
                 'precision': f"{cycle_info['current_precision']}bit",
-                'cycle': cycle_info['cycle_count']
+                'cycle': cycle_info['cycle_count'],
+                'lr': f"{current_lr:.2e}"
             })
 
             # Log detailed info periodically
@@ -308,14 +334,14 @@ def main(args):
                     print(f"New best validation loss: {best_val_loss:.4f}")
                     # Save best checkpoint
                     save_cpt_checkpoint(
-                        model, optimizer, epoch, global_step,
+                        model, optimizer, lr_scheduler, epoch, global_step,
                         best_val_loss, config, 'checkpoints/best_model.pth'
                     )
 
         # Save checkpoint
         if (epoch + 1) % training_config.save_interval == 0:
             save_cpt_checkpoint(
-                model, optimizer, epoch, global_step,
+                model, optimizer, lr_scheduler, epoch, global_step,
                 avg_epoch_loss, config, f'checkpoints/checkpoint_epoch{epoch+1}.pth'
             )
 
@@ -334,6 +360,8 @@ if __name__ == '__main__':
                         help='Skip Precision Range Test')
     parser.add_argument('--checkpoint', type=str, default=None,
                         help='Resume from checkpoint')
+    parser.add_argument('--eval_only', action='store_true',
+                        help='Only evaluate the model without training')
 
     args = parser.parse_args()
     main(args)
