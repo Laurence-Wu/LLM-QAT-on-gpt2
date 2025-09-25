@@ -6,10 +6,16 @@ Supports quantization strategies: minmax and log.
 import torch
 import torch.nn as nn
 
-from quantization_methods import (
-    apply_minmax_quantization,
-    apply_log_quantization
-)
+try:
+    from .quantization_methods import (
+        apply_minmax_quantization,
+        apply_log_quantization
+    )
+except ImportError:
+    from quantization_methods import (
+        apply_minmax_quantization,
+        apply_log_quantization
+    )
 
 
 
