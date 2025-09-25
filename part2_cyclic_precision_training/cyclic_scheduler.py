@@ -182,6 +182,9 @@ class PrecisionRangeTest:
         self.model.train()
         previous_acc = 0.0
 
+        # Get device from model
+        device = next(self.model.parameters()).device
+
         for bits in range(self.start_bits, self.max_bits + 1):
             # Set model to current precision
             self.model.set_precision(bits)
@@ -196,15 +199,19 @@ class PrecisionRangeTest:
                 if i >= self.test_iterations:
                     break
 
+                # Move batch to device
+                input_ids = batch['input_ids'].to(device)
+                labels = batch['labels'].to(device)
+
                 with torch.no_grad():
-                    outputs = self.model(batch['input_ids'])
-                    loss = criterion(outputs.logits, batch['labels'])
+                    outputs = self.model(input_ids)
+                    loss = criterion(outputs.logits, labels)
                     total_loss += loss.item()
 
                     # Calculate accuracy
                     predictions = outputs.logits.argmax(dim=-1)
-                    correct += (predictions == batch['labels']).sum().item()
-                    total += batch['labels'].numel()
+                    correct += (predictions == labels).sum().item()
+                    total += labels.numel()
 
             current_acc = correct / total if total > 0 else 0
             avg_loss = total_loss / min(i + 1, self.test_iterations)

@@ -398,6 +398,16 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
                 print(f"  Warning during calibration batch {i}: {e}")
                 continue
 
+    # Debug: Check if statistics were actually collected
+    print("\nDebug: Checking collected statistics...")
+    for i, (name, quantizer) in enumerate(input_quantizers[:3]):
+        print(f"  {name}:")
+        if quantizer.temp_min is not None:
+            print(f"    temp_min shape: {quantizer.temp_min.shape}, values: {quantizer.temp_min.flatten()[:5]}")
+            print(f"    temp_max shape: {quantizer.temp_max.shape}, values: {quantizer.temp_max.flatten()[:5]}")
+        else:
+            print(f"    WARNING: No statistics collected!")
+
     # Step 4: Compute quantization parameters and move to CPU
     print(f"\nStep 4: Computing and storing quantization parameters on CPU...")
 
@@ -454,8 +464,43 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
             quantizer.temp_min = None
             quantizer.temp_max = None
 
-    # Step 5: Patch forward methods to handle CPU-stored calibration
-    print(f"\nStep 5: Patching quantizers for CPU-to-device transfer...")
+    # Debug: Verify computed scale/zero_point values
+    print("\nDebug: Checking computed quantization parameters...")
+    for i, (name, quantizer) in enumerate(input_quantizers[:3]):
+        print(f"  {name}:")
+        print(f"    calibrated: {quantizer.calibrated}")
+        print(f"    quantizer_type: {quantizer.quantizer_type}")
+        print(f"    num_bits: {quantizer.num_bits}")
+        print(f"    per_channel: {quantizer.per_channel}")
+        if hasattr(quantizer, 'scale'):
+            print(f"    scale shape: {quantizer.scale.shape}, device: {quantizer.scale.device}")
+            print(f"      values: {quantizer.scale.flatten()[:5]}")
+        else:
+            print(f"    scale: None")
+        if hasattr(quantizer, 'zero_point'):
+            print(f"    zero_point shape: {quantizer.zero_point.shape}, device: {quantizer.zero_point.device}")
+            print(f"      values: {quantizer.zero_point.flatten()[:5]}")
+        else:
+            print(f"    zero_point: None")
+
+    # Step 5: Check if device transfer is needed
+    print(f"\nStep 5: Checking if device transfer is needed...")
+
+    # Do a simple test
+    test_input = torch.randn(1, 10, device=device)
+    for name, quantizer in input_quantizers[:1]:
+        print(f"  Testing {name}:")
+        print(f"    Input device: {test_input.device}")
+        print(f"    Scale device: {quantizer.scale.device if hasattr(quantizer, 'scale') else 'None'}")
+        if hasattr(quantizer, 'scale'):
+            print(f"    Devices match: {quantizer.scale.device == test_input.device}")
+            if quantizer.scale.device != test_input.device:
+                print("  ⚠ Device mismatch detected - patching needed")
+            else:
+                print("  ✓ No patching needed - devices match")
+
+    # Original patching code
+    print(f"\nPatching quantizers for CPU-to-device transfer...")
 
     def create_patched_forward(original_forward):
         def patched_forward(self, x):
