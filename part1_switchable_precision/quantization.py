@@ -15,11 +15,13 @@ from quantization_methods import (
 
 class LearnableFakeQuantize(nn.Module):
     def __init__(self, num_bits,
-                 channel_dim=0, quantizer_type='minmax', eps=1e-5, symmetric=True):
+                 channel_dim=0, quantizer_type='minmax', eps=1e-5, symmetric=True, per_channel=True):
         super().__init__()
         self.num_bits = max(1, min(num_bits, 32))
         self.symmetric = symmetric
-        self.channel_dim = channel_dim
+        self.per_channel = per_channel
+        # If per_channel is False, set channel_dim to None for global statistics
+        self.channel_dim = channel_dim if per_channel else None
         self.quantizer_type = quantizer_type
         self.eps = eps
 
@@ -149,14 +151,25 @@ class LearnableFakeQuantize(nn.Module):
                     # Get log₂ of non-zero absolute values
                     abs_x_clamped = torch.clamp(abs_x, min=self.eps)
                     log_x = torch.log2(abs_x_clamped)
-                    dims_to_reduce = list(range(log_x.dim()))
-                    dims_to_reduce.remove(self.channel_dim)
 
-                    min_val = log_x
-                    max_val = log_x
-                    for dim in sorted(dims_to_reduce, reverse=True):
-                        min_val = min_val.min(dim=dim, keepdim=True)[0]
-                        max_val = max_val.max(dim=dim, keepdim=True)[0]
+                    if self.channel_dim is not None:
+                        # Per-channel: reduce all dims except channel_dim
+                        dims_to_reduce = list(range(log_x.dim()))
+                        dims_to_reduce.remove(self.channel_dim)
+                    else:
+                        # Per-tensor: reduce all dimensions
+                        dims_to_reduce = list(range(log_x.dim()))
+
+                    if dims_to_reduce:
+                        min_val = log_x
+                        max_val = log_x
+                        for dim in sorted(dims_to_reduce, reverse=True):
+                            min_val = min_val.min(dim=dim, keepdim=True)[0]
+                            max_val = max_val.max(dim=dim, keepdim=True)[0]
+                    else:
+                        # No dimensions to reduce (shouldn't happen but handle it)
+                        min_val = log_x
+                        max_val = log_x
 
                     # Update temp min/max with log₂ values
                     if self.num_batches_collected == 0:
@@ -175,14 +188,24 @@ class LearnableFakeQuantize(nn.Module):
                     self.temp_min = torch.full(shape, log_eps, device=x.device)
                     self.temp_max = torch.full(shape, log_eps, device=x.device)
             else:
-                dims_to_reduce = list(range(x.dim()))
-                dims_to_reduce.remove(self.channel_dim)
+                if self.channel_dim is not None:
+                    # Per-channel: reduce all dims except channel_dim
+                    dims_to_reduce = list(range(x.dim()))
+                    dims_to_reduce.remove(self.channel_dim)
+                else:
+                    # Per-tensor: reduce all dimensions
+                    dims_to_reduce = list(range(x.dim()))
 
-                min_val = x
-                max_val = x
-                for dim in sorted(dims_to_reduce, reverse=True):
-                    min_val = min_val.min(dim=dim, keepdim=True)[0]
-                    max_val = max_val.max(dim=dim, keepdim=True)[0]
+                if dims_to_reduce:
+                    min_val = x
+                    max_val = x
+                    for dim in sorted(dims_to_reduce, reverse=True):
+                        min_val = min_val.min(dim=dim, keepdim=True)[0]
+                        max_val = max_val.max(dim=dim, keepdim=True)[0]
+                else:
+                    # No dimensions to reduce
+                    min_val = x
+                    max_val = x
 
                 if self.num_batches_collected == 0:
                     self.temp_min = min_val.clone().detach()

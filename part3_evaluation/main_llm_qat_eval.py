@@ -20,6 +20,7 @@ if part1_dir not in sys.path:
     sys.path.insert(0, part1_dir)
 
 from part1_switchable_precision.models_sp import SPModel, SPLMHeadModel
+from part1_switchable_precision.quantization import LearnableFakeQuantize
 from transformers import GPT2Config, GPT2Tokenizer, GPT2LMHeadModel
 from datasets import load_dataset
 
@@ -317,10 +318,10 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
 
 
 def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
-    """Recalibrate quantizers using evaluation data - based on training calibration logic"""
+    """Replace quantizers with per-tensor versions and recalibrate for evaluation data"""
 
     print("\n" + "="*60)
-    print("CALIBRATING MODEL FOR EVALUATION DATA")
+    print("REPLACING QUANTIZERS WITH PER-TENSOR VERSIONS FOR EVALUATION")
     print("="*60)
 
     # Get the bit-width the model is currently at (following .claude rule: no hasattr)
@@ -337,24 +338,136 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
         return
 
     bits_key = f'{current_bits}bit'
-    print(f"Calibrating for {current_bits}-bit precision")
+    print(f"Replacing and calibrating quantizers for {current_bits}-bit precision")
 
-    # Step 1: Weight quantizers already calibrated from training
-    print(f"\nStep 1: Weight quantizers (keeping training calibration)")
+    # Step 1: Replace all quantizers with per-tensor versions (per_channel=False)
+    print(f"\nStep 1: Creating per-tensor quantizers (per_channel=False)")
 
-    # Step 2: Recalibrate INPUT quantizers with evaluation data
-    print(f"\nStep 2: Recalibrating input quantizers for evaluation data...")
+    replaced_weight = 0
+    replaced_input = 0
+    replaced_lora = 0
 
-    # Start input quantizer calibration
-    input_started = 0
     for name, module in model.named_modules():
+        # Replace weight quantizers
+        try:
+            if bits_key in module.quantizers_weight:
+                old_quantizer = module.quantizers_weight[bits_key]
+                # Create new per-tensor quantizer with same settings but per_channel=False
+                new_quantizer = LearnableFakeQuantize(
+                    num_bits=old_quantizer.num_bits,
+                    channel_dim=0,  # Will be ignored due to per_channel=False
+                    quantizer_type=old_quantizer.quantizer_type,
+                    eps=old_quantizer.eps,
+                    symmetric=old_quantizer.symmetric,
+                    per_channel=False  # KEY: Use per-tensor calibration
+                )
+                # Move to same device as old quantizer
+                new_quantizer = new_quantizer.to(old_quantizer.scale.device)
+                module.quantizers_weight[bits_key] = new_quantizer
+                replaced_weight += 1
+        except AttributeError:
+            pass
+
+        # Replace input quantizers
+        try:
+            if bits_key in module.quantizers_input:
+                old_quantizer = module.quantizers_input[bits_key]
+                # Create new per-tensor quantizer with same settings but per_channel=False
+                new_quantizer = LearnableFakeQuantize(
+                    num_bits=old_quantizer.num_bits,
+                    channel_dim=1,  # Will be ignored due to per_channel=False
+                    quantizer_type=old_quantizer.quantizer_type,
+                    eps=old_quantizer.eps,
+                    symmetric=old_quantizer.symmetric,
+                    per_channel=False  # KEY: Use per-tensor calibration
+                )
+                # Move to same device as old quantizer
+                new_quantizer = new_quantizer.to(old_quantizer.scale.device)
+                module.quantizers_input[bits_key] = new_quantizer
+                replaced_input += 1
+        except AttributeError:
+            pass
+
+        # Replace LoRA quantizers (quantize_A and quantize_B)
+        try:
+            if module.quantize_A is not None:
+                old_quantizer = module.quantize_A
+                new_quantizer = LearnableFakeQuantize(
+                    num_bits=old_quantizer.num_bits,
+                    channel_dim=1,  # Will be ignored due to per_channel=False
+                    quantizer_type=old_quantizer.quantizer_type,
+                    eps=old_quantizer.eps,
+                    symmetric=old_quantizer.symmetric,
+                    per_channel=False  # KEY: Use per-tensor calibration
+                )
+                new_quantizer = new_quantizer.to(old_quantizer.scale.device)
+                module.quantize_A = new_quantizer
+                replaced_lora += 1
+        except AttributeError:
+            pass
+
+        try:
+            if module.quantize_B is not None:
+                old_quantizer = module.quantize_B
+                new_quantizer = LearnableFakeQuantize(
+                    num_bits=old_quantizer.num_bits,
+                    channel_dim=0,  # Will be ignored due to per_channel=False
+                    quantizer_type=old_quantizer.quantizer_type,
+                    eps=old_quantizer.eps,
+                    symmetric=old_quantizer.symmetric,
+                    per_channel=False  # KEY: Use per-tensor calibration
+                )
+                new_quantizer = new_quantizer.to(old_quantizer.scale.device)
+                module.quantize_B = new_quantizer
+                replaced_lora += 1
+        except AttributeError:
+            pass
+
+    print(f"  Replaced {replaced_weight} weight quantizers with per-tensor versions")
+    print(f"  Replaced {replaced_input} input quantizers with per-tensor versions")
+    print(f"  Replaced {replaced_lora} LoRA quantizers with per-tensor versions")
+
+    # Step 2: Start calibration on all new quantizers
+    print(f"\nStep 2: Starting calibration for all quantizers...")
+
+    # Start calibration for all quantizers
+    calibration_started = 0
+    for name, module in model.named_modules():
+        # Weight quantizers
+        try:
+            if bits_key in module.quantizers_weight:
+                module.quantizers_weight[bits_key].start_calibration()
+                calibration_started += 1
+        except AttributeError:
+            pass
+
+        # Input quantizers
         try:
             if bits_key in module.quantizers_input:
                 module.quantizers_input[bits_key].start_calibration()
-                input_started += 1
+                calibration_started += 1
         except AttributeError:
-            continue
-    print(f"  Started calibration for {input_started} input quantizers")
+            pass
+
+        # LoRA quantizers
+        try:
+            if module.quantize_A is not None:
+                module.quantize_A.start_calibration()
+                calibration_started += 1
+        except AttributeError:
+            pass
+
+        try:
+            if module.quantize_B is not None:
+                module.quantize_B.start_calibration()
+                calibration_started += 1
+        except AttributeError:
+            pass
+
+    print(f"  Started calibration for {calibration_started} quantizers")
+
+    # Step 3: Collect statistics from evaluation data
+    print(f"\nStep 3: Collecting statistics from evaluation data...")
 
     # Disable LoRA during calibration (following training logic)
     try:
@@ -375,12 +488,13 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
         for i in range(min(num_batches, len(eval_texts))):
             text = eval_texts[i]
 
-            # Tokenize with actual evaluation settings (variable length, no padding to 256!)
+            # Tokenize with actual evaluation settings (variable length, no padding)
+            # Per-tensor calibration will create global statistics across all sequence lengths
             inputs = tokenizer(
                 text,
                 return_tensors='pt',
                 truncation=True,
-                max_length=256,  # Cap at 256 but don't pad
+                max_length=1024,  # Allow longer sequences for better statistics
                 padding=False
             )
             inputs = {k: v.to(device) for k, v in inputs.items()}
@@ -390,7 +504,8 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
                 _ = model(inputs['input_ids'])
                 samples_processed += 1
                 seq_len = inputs['input_ids'].shape[1]
-                print(f"  Processed sample {i+1}: length={seq_len} tokens")
+                if (i + 1) % 5 == 0 or i == 0:  # Print every 5th sample
+                    print(f"  Processed sample {i+1}: length={seq_len} tokens")
             except Exception as e:
                 print(f"  Warning on sample {i}: {e}")
 
@@ -400,20 +515,46 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
     except AttributeError:
         print("  Model does not have enable_lora_after_calibration method")
 
-    # Finish input quantizer calibration
-    input_calibrated = 0
+    # Step 4: Finish calibration for all quantizers
+    print(f"\nStep 4: Finishing calibration...")
+
+    calibrated_count = 0
     for name, module in model.named_modules():
+        # Weight quantizers
         try:
-            if bits_key in module.quantizers_input:
-                module.quantizers_input[bits_key].finish_calibration(debug=False)
-                input_calibrated += 1
+            if bits_key in module.quantizers_weight:
+                module.quantizers_weight[bits_key].finish_calibration(debug=False)
+                calibrated_count += 1
         except AttributeError:
             continue
 
-    print(f"  ✓ Calibrated {input_calibrated} input quantizers with {samples_processed} samples")
+        # Input quantizers
+        try:
+            if bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].finish_calibration(debug=False)
+                calibrated_count += 1
+        except AttributeError:
+            continue
 
-    # Verify calibration stats shape
-    print("\n  Checking new calibration stats shapes:")
+        # LoRA quantizers
+        try:
+            if module.quantize_A is not None:
+                module.quantize_A.finish_calibration(debug=False)
+                calibrated_count += 1
+        except AttributeError:
+            continue
+
+        try:
+            if module.quantize_B is not None:
+                module.quantize_B.finish_calibration(debug=False)
+                calibrated_count += 1
+        except AttributeError:
+            continue
+
+    print(f"  ✓ Calibrated {calibrated_count} quantizers with {samples_processed} samples")
+
+    # Verify calibration stats shape (should all be [1] for per-tensor)
+    print("\n  Checking calibration stats shapes (should be [1] for per-tensor):")
     checked = 0
     for name, module in model.named_modules():
         try:
@@ -429,7 +570,7 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
             continue
 
     print("\n" + "="*60)
-    print("CALIBRATION COMPLETE")
+    print("PER-TENSOR CALIBRATION COMPLETE")
     print("="*60 + "\n")
 
 
