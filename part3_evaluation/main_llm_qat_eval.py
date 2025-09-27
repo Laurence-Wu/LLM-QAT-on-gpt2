@@ -107,18 +107,20 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
             if isinstance(attr_val, dict):
                 setattr(config, attr_name, {int(k) if isinstance(k, str) else k: v for k, v in attr_val.items()})
 
-        # Create model and load weights
+        # Create model
         model = SPLMHeadModel(config)
         model = model.cuda()
 
-        if 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'], strict=True)
-            print("✅ Model weights loaded successfully")
-
-        # Set model to checkpoint bit width
+        # CRITICAL: Set precision BEFORE loading weights (matches test_inference.py)
+        # This ensures quantizers are in the correct state when weights are loaded
         if checkpoint_bit_width:
             model.set_precision(checkpoint_bit_width)
             print(f"✅ Model set to {checkpoint_bit_width}-bit precision")
+
+        # Load weights AFTER setting precision
+        if 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'], strict=True)
+            print("✅ Model weights loaded successfully")
 
     else:
         raise ValueError("No model path provided! Please specify --model_path with a trained checkpoint file.")
