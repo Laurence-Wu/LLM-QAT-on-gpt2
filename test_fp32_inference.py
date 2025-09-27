@@ -188,16 +188,40 @@ def compute_perplexity_simple(model, tokenizer, text):
 
 
 def test_fp32_model(checkpoint_path):
-    """Test FP32 model performance."""
+    """Test model performance at checkpoint-specified precision."""
     print("="*70)
-    print("  FP32 MODEL INFERENCE TEST")
+    print("  MODEL INFERENCE TEST")
     print("="*70)
 
     # Load checkpoint
     checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
     model_config = checkpoint['model_config']
+
+    # Try to get bit width from multiple sources
     bit_width = checkpoint.get('bit_width', None)
+
+    # If not found, try to extract from filename
+    if bit_width is None:
+        import re
+        # Look for patterns like "16bit", "8bit" in filename
+        filename_match = re.search(r'(\d+)bit', os.path.basename(checkpoint_path))
+        if filename_match:
+            bit_width = int(filename_match.group(1))
+            print(f"Extracted bit width {bit_width} from filename")
+
+    # If still not found, check metadata
+    if bit_width is None and 'metadata' in checkpoint:
+        bit_width = checkpoint['metadata'].get('target_bits', None)
+        if bit_width:
+            print(f"Found bit width {bit_width} in metadata")
+
     print(f"Checkpoint bit width: {bit_width}")
+
+    if bit_width is None:
+        print("WARNING: Could not determine bit width from checkpoint")
+        print("Available checkpoint keys:", list(checkpoint.keys()))
+        if 'metadata' in checkpoint:
+            print("Metadata contents:", checkpoint['metadata'])
 
     # Create config with minimal setup
     config = GPT2Config(
@@ -224,10 +248,28 @@ def test_fp32_model(checkpoint_path):
     print("\nLoading SP model...")
     sp_model = SPLMHeadModel(config)
 
-    # Use bit width from checkpoint, fallback to 16 if not present
-    target_precision = bit_width if bit_width is not None else 16
-    print(f"Setting model to {target_precision}-bit precision from checkpoint")
+    # Determine target precision
+    if bit_width is not None:
+        target_precision = bit_width
+        print(f"Setting model to {target_precision}-bit precision from checkpoint")
+    else:
+        # If no bit width found, try to infer from available bit_widths in config
+        if 'bit_widths' in model_config and model_config['bit_widths']:
+            available_bits = model_config['bit_widths']
+            # Use the highest non-32 bit width as default
+            non_32_bits = [b for b in available_bits if b < 32]
+            if non_32_bits:
+                target_precision = max(non_32_bits)
+                print(f"No bit width specified, using highest available: {target_precision}-bit")
+            else:
+                target_precision = 16
+                print(f"No bit width specified, defaulting to 16-bit")
+        else:
+            target_precision = 16
+            print(f"WARNING: No bit width information found, defaulting to 16-bit")
+
     sp_model.set_precision(target_precision)
+    print(f"Model precision set to {target_precision}-bit")
 
     sp_model.load_state_dict(checkpoint['model_state_dict'], strict=True)
     sp_model.eval()
@@ -237,7 +279,7 @@ def test_fp32_model(checkpoint_path):
     tokenizer.pad_token = tokenizer.eos_token
 
     print("\n" + "="*70)
-    print("  COMPARING WITH PRETRAINED GPT-2")
+    print(f"  COMPARING {target_precision}-BIT MODEL WITH PRETRAINED GPT-2")
     print("="*70)
 
     # Load pretrained GPT-2 for comparison
@@ -398,9 +440,9 @@ def test_fp32_model(checkpoint_path):
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description='Test FP32 model inference')
+    parser = argparse.ArgumentParser(description='Test model inference at checkpoint precision')
     parser.add_argument('--checkpoint', type=str, required=True,
-                       help='Path to FP32 checkpoint')
+                       help='Path to model checkpoint (.pth file with bit width info)')
     args = parser.parse_args()
 
     test_fp32_model(args.checkpoint)
