@@ -160,20 +160,20 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
     input_quantizers = []
     for name, module in model.named_modules():
         try:
-            if 'quantizers_input' in dir(module):
-                quantizers_input = module.quantizers_input
-                if bits_key in quantizers_input:
-                    quantizer = quantizers_input[bits_key]
-                    # Model already created with per_channel_quantization=False
-                    # Just reset calibration state
-                    quantizer.calibrated = False
-                    quantizer.collecting_stats = True
-                    quantizer.num_batches_collected = 0
-                    quantizer.temp_min = None
-                    quantizer.temp_max = None
-                    input_quantizers.append((name, quantizer))
-        except AttributeError as e:
-            print(f"Module {name} doesn't have quantizers_input: {e}")
+            quantizers_input = module.quantizers_input
+            if bits_key not in quantizers_input:
+                continue
+
+            quantizer = quantizers_input[bits_key]
+            # Reset calibration state
+            quantizer.calibrated = False
+            quantizer.collecting_stats = True
+            quantizer.num_batches_collected = 0
+            quantizer.temp_min = None
+            quantizer.temp_max = None
+            input_quantizers.append((name, quantizer))
+        except AttributeError:
+            # Module doesn't have quantizers_input
             continue
 
     print(f"Found {len(input_quantizers)} input quantizers to calibrate")
@@ -206,60 +206,9 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
             except Exception:
                 continue
 
-    # Compute quantization parameters
+    # Finish calibration using built-in quantizer method
     for name, quantizer in input_quantizers:
-        quantizer.collecting_stats = False
-
-        if quantizer.temp_min is not None and quantizer.temp_max is not None:
-            temp_min_cpu = quantizer.temp_min.cpu()
-            temp_max_cpu = quantizer.temp_max.cpu()
-
-            # Compute scale and zero_point
-            if quantizer.quantizer_type == 'minmax':
-                if quantizer.symmetric:
-                    max_val = torch.max(torch.abs(temp_min_cpu), torch.abs(temp_max_cpu))
-                    scale = max_val / (2 ** (quantizer.num_bits - 1) - 1)
-                    zero_point = torch.zeros_like(scale)
-                else:
-                    scale = (temp_max_cpu - temp_min_cpu) / (2 ** quantizer.num_bits - 1)
-                    zero_point = temp_min_cpu
-            elif quantizer.quantizer_type == 'log':
-                eps = 1e-8
-                log_min = torch.log(torch.abs(temp_min_cpu) + eps)
-                log_max = torch.log(torch.abs(temp_max_cpu) + eps)
-                scale = (log_max - log_min)
-                zero_point = log_min
-            else:
-                # Default minmax
-                max_val = torch.max(torch.abs(temp_min_cpu), torch.abs(temp_max_cpu))
-                scale = max_val / (2 ** (quantizer.num_bits - 1) - 1)
-                zero_point = torch.zeros_like(scale)
-
-            quantizer.scale = scale
-            quantizer.zero_point = zero_point
-            quantizer.running_min = temp_min_cpu
-            quantizer.running_max = temp_max_cpu
-            quantizer.calibrated = True
-            quantizer.temp_min = None
-            quantizer.temp_max = None
-
-    # Patch quantizers for device transfer
-    def create_patched_forward(original_forward):
-        def patched_forward(self, x):
-            if self.calibrated:
-                if self.scale.device != x.device:
-                    self.scale = self.scale.to(x.device)
-                if self.zero_point.device != x.device:
-                    self.zero_point = self.zero_point.to(x.device)
-            return original_forward(x)
-        return patched_forward
-
-    import types
-    for name, quantizer in input_quantizers:
-        if quantizer.calibrated:
-            original_forward = quantizer.forward
-            patched_forward = create_patched_forward(original_forward)
-            quantizer.forward = types.MethodType(patched_forward, quantizer)
+        quantizer.finish_calibration()
 
     print(f"✓ Calibration completed for {len(input_quantizers)} quantizers")
     print("="*60 + "\n")

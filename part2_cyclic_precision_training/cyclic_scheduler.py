@@ -205,7 +205,11 @@ class PrecisionRangeTest:
 
                 with torch.no_grad():
                     outputs = self.model(input_ids)
-                    loss = criterion(outputs.logits, labels)
+                    # Reshape logits from [batch, seq, vocab] to [batch*seq, vocab]
+                    logits = outputs.logits.view(-1, outputs.logits.size(-1))
+                    # Reshape labels from [batch, seq] to [batch*seq]
+                    labels_flat = labels.view(-1)
+                    loss = criterion(logits, labels_flat)
                     total_loss += loss.item()
 
                     # Calculate accuracy
