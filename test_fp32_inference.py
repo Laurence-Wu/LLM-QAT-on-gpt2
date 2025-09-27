@@ -217,10 +217,18 @@ def test_fp32_model(checkpoint_path):
             setattr(config, attr, {int(k) if isinstance(k, str) else k: v
                                   for k, v in getattr(config, attr).items()})
 
+    # Set per-tensor quantization for evaluation
+    config.per_channel_quantization = False
+
     # Create model and load weights
     print("\nLoading SP model...")
     sp_model = SPLMHeadModel(config)
-    sp_model.set_precision(16)  # Force FP32 mode
+
+    # Use bit width from checkpoint, fallback to 16 if not present
+    target_precision = bit_width if bit_width is not None else 16
+    print(f"Setting model to {target_precision}-bit precision from checkpoint")
+    sp_model.set_precision(target_precision)
+
     sp_model.load_state_dict(checkpoint['model_state_dict'], strict=True)
     sp_model.eval()
 

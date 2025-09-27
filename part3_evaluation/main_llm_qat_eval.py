@@ -101,6 +101,7 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
         config.lora_alpha_per_bit = model_config.get('lora_alpha_per_bit', {})
         config.activation_bits_per_bit = model_config.get('activation_bits_per_bit', {})
         config.quantizer_per_bit = model_config.get('quantizer_per_bit', {})
+        config.per_channel_quantization = False  # Always use per-tensor for evaluation
 
         # Convert string keys to int for dictionaries
         for attr_name in ['lora_rank_per_bit', 'lora_alpha_per_bit', 'activation_bits_per_bit', 'quantizer_per_bit']:
@@ -158,15 +159,22 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
     # Prepare input quantizers for calibration
     input_quantizers = []
     for name, module in model.named_modules():
-        if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
-            quantizer = module.quantizers_input[bits_key]
-            quantizer.per_channel = False
-            quantizer.calibrated = False
-            quantizer.collecting_stats = True
-            quantizer.num_batches_collected = 0
-            quantizer.temp_min = None
-            quantizer.temp_max = None
-            input_quantizers.append((name, quantizer))
+        try:
+            if 'quantizers_input' in dir(module):
+                quantizers_input = module.quantizers_input
+                if bits_key in quantizers_input:
+                    quantizer = quantizers_input[bits_key]
+                    # Model already created with per_channel_quantization=False
+                    # Just reset calibration state
+                    quantizer.calibrated = False
+                    quantizer.collecting_stats = True
+                    quantizer.num_batches_collected = 0
+                    quantizer.temp_min = None
+                    quantizer.temp_max = None
+                    input_quantizers.append((name, quantizer))
+        except AttributeError as e:
+            print(f"Module {name} doesn't have quantizers_input: {e}")
+            continue
 
     print(f"Found {len(input_quantizers)} input quantizers to calibrate")
 
