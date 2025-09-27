@@ -4,9 +4,9 @@
     "dataset": "wikitext",
     "dataset_config": "wikitext-2-raw-v1",
     "split": "validation",
-    "num_samples": 100,
-    "batch_size": 4,
-    "max_length": 128,
+    "num_samples": 100000,
+    "batch_size": 32,
+    "max_length": 256,
     "warm_up_batches": 10,
     "truncation": true,
     "padding": "max_length"
