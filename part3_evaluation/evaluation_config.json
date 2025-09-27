@@ -105,9 +105,9 @@
         "split": "test"
       },
       "OpenWebText": {
-        "dataset_name": "Skylion007/openwebtext",
+        "dataset_name": "openwebtext",
         "config": null,
-        "split": "train[:1000]",
+        "split": "train[:100]",
         "streaming": false
       }
     }

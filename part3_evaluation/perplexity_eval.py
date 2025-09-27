@@ -66,23 +66,9 @@ class PerplexityEvaluator:
                 return float('inf')
         elif dataset_name == 'openwebtext':
             try:
-                cfg = datasets_config.get('OpenWebText', {})
-                dataset_name_str = cfg.get('dataset_name', 'Skylion007/openwebtext')
-                dataset_config = cfg.get('config', None)
-                dataset_split = cfg.get('split', 'train[:1000]')
-                use_streaming = cfg.get('streaming', False)
-
-                if dataset_config:
-                    dataset = load_dataset(dataset_name_str, dataset_config, split=dataset_split, streaming=use_streaming)
-                else:
-                    dataset = load_dataset(dataset_name_str, split=dataset_split, streaming=use_streaming)
-
-                texts = []
-                max_docs = self.config.get('max_samples', 100)
-                for i, item in enumerate(dataset):
-                    if i >= max_docs:
-                        break
-                    texts.append(item['text'])
+                # Use alternative OpenWebText dataset that doesn't use deprecated scripts
+                dataset = load_dataset('stas/openwebtext-10k', split='train')
+                texts = [item['text'] for item in dataset if item['text'].strip()][:100]
             except Exception as e:
                 print(f"Warning: Could not load OpenWebText dataset: {e}")
                 return float('inf')
