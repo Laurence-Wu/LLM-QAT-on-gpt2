@@ -72,7 +72,7 @@ class TrainingConfig:
         self.max_grad_norm = 1.0
 
         # Training schedule
-        self.num_iterations = 5
+        self.num_iterations = 1000
         self.gradient_accumulation_steps = 8
 
         # Evaluation
