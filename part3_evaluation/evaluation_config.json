@@ -89,7 +89,7 @@
     }
   },
   "perplexity": {
-    "stride": 128,
+    "stride": 32,
     "max_length": 256,
     "max_samples": 100000,
     "batch_size": 1,
@@ -99,11 +99,34 @@
         "config": "wikitext-2-raw-v1",
         "split": "test"
       },
+      "WikiText103": {
+        "dataset_name": "wikitext",
+        "config": "wikitext-103-raw-v1",
+        "split": "test"
+      },
       "OpenWebText": {
         "dataset_name": "Skylion007/openwebtext",
         "config": null,
         "split": "train[:1000]",
         "streaming": false
+      }
+    }
+  },
+  "perplexity_long_context": {
+    "stride": 32,
+    "max_length": 1024,
+    "max_samples": 10000,
+    "batch_size": 1,
+    "datasets": {
+      "WikiText2": {
+        "dataset_name": "wikitext",
+        "config": "wikitext-2-raw-v1",
+        "split": "test"
+      },
+      "WikiText103": {
+        "dataset_name": "wikitext",
+        "config": "wikitext-103-raw-v1",
+        "split": "test"
       }
     }
   },

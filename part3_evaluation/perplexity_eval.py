@@ -40,6 +40,18 @@ class PerplexityEvaluator:
             except Exception as e:
                 print(f"Warning: Could not load {dataset_name} dataset: {e}")
                 return float('inf')
+        elif dataset_name == 'wikitext103':
+            try:
+                wiki_cfg = datasets_config.get('WikiText103', {})
+                dataset = load_dataset(
+                    wiki_cfg.get('dataset_name', 'wikitext'),
+                    wiki_cfg.get('config', 'wikitext-103-raw-v1'),
+                    split=wiki_cfg.get('split', 'test')
+                )
+                texts = [item['text'] for item in dataset if item['text'].strip()]
+            except Exception as e:
+                print(f"Warning: Could not load {dataset_name} dataset: {e}")
+                return float('inf')
         elif dataset_name == 'openwebtext':
             try:
                 cfg = datasets_config.get('OpenWebText', {})
@@ -75,6 +87,7 @@ class PerplexityEvaluator:
 
         print(f"Processing {min(len(texts), max_texts)} texts with max_length={max_length}, stride={stride}")
         print(f"Total texts available: {len(texts)}")
+        print(f"Note: With stride={stride}, this will create ~{max_length//stride}x more segments than stride={max_length}")
 
         # Add debug for first text
         debug_first_text = True
@@ -207,8 +220,8 @@ class PerplexityEvaluator:
 
     def evaluate_all_datasets(self, bit_config: Dict) -> Dict:
         """
-        Return perplexity for both WikiText2 and OpenWebText
-        Format: {'WikiText2': 11.2, 'OpenWebText': 7.5}
+        Return perplexity for WikiText2, WikiText103, and OpenWebText
+        Format: {'WikiText2': 11.2, 'WikiText103': 10.5, 'OpenWebText': 7.5}
         """
         results = {}
 
@@ -216,8 +229,33 @@ class PerplexityEvaluator:
         wikitext2_ppl = self.calculate_perplexity('wikitext2', bit_config)
         results['WikiText2'] = round(wikitext2_ppl, 1)
 
+        # Only calculate WikiText103 if it's in the config
+        if 'WikiText103' in self.config.get('datasets', {}):
+            print("  Calculating WikiText103 perplexity...")
+            wikitext103_ppl = self.calculate_perplexity('wikitext103', bit_config)
+            results['WikiText103'] = round(wikitext103_ppl, 1)
+
         print("  Calculating OpenWebText perplexity...")
         openwebtext_ppl = self.calculate_perplexity('openwebtext', bit_config)
         results['OpenWebText'] = round(openwebtext_ppl, 1)
+
+        return results
+
+    def evaluate_long_context(self, bit_config: Dict, config_override: Dict = None) -> Dict:
+        """
+        Evaluate with longer context (1024 tokens) to test model's full capacity
+        """
+        # Save original config
+        original_config = self.config.copy()
+
+        # Override with long context settings if provided
+        if config_override:
+            self.config.update(config_override)
+            print(f"  Using long context: max_length={self.config['max_length']}, stride={self.config['stride']}")
+
+        results = self.evaluate_all_datasets(bit_config)
+
+        # Restore original config
+        self.config = original_config
 
         return results

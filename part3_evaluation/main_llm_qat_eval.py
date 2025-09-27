@@ -50,11 +50,11 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
         if checkpoint_bit_width:
             print(f"Checkpoint was saved at {checkpoint_bit_width}-bit precision")
 
-        # Extract configs
-        model_config = checkpoint.get('model_config', {})
-        training_config = checkpoint.get('training_config', {})
+        # Extract configs - direct access to ensure they exist
+        model_config = checkpoint['model_config']
+        training_config = checkpoint.get('training_config', {})  # This one is optional
 
-        # Extract key parameters
+        # Extract key parameters - direct access for required fields
         n_layer = model_config['n_layer']
         n_embd = model_config['n_embd']
         n_head = model_config['n_head']
@@ -73,17 +73,17 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
         if actual_n_positions is None and training_config:
             actual_n_positions = training_config.get('max_seq_length', 1024)
 
-        # Build GPT2Config
+        # Build GPT2Config - use direct access for required fields
         config = GPT2Config(
-            vocab_size=model_config.get('vocab_size', 50257),
+            vocab_size=model_config['vocab_size'],  # Required field
             n_positions=actual_n_positions or 1024,
             n_embd=n_embd,
             n_layer=n_layer,
             n_head=n_head,
-            layer_norm_epsilon=model_config.get('layer_norm_epsilon', 1e-5),
-            embd_pdrop=model_config.get('embd_pdrop', 0.0),
-            lora_rank=model_config.get('lora_rank', 0),
-            lora_alpha=model_config.get('lora_alpha', 0)
+            layer_norm_epsilon=model_config.get('layer_norm_epsilon', 1e-5),  # Optional with sensible default
+            embd_pdrop=model_config.get('embd_pdrop', 0.0),  # Optional, default no dropout
+            lora_rank=model_config.get('lora_rank', 0),  # Optional, default no LoRA
+            lora_alpha=model_config.get('lora_alpha', 0)  # Optional, default no LoRA
         )
 
         print(f"\nModel Configuration:")
@@ -92,12 +92,12 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
         print(f"  - n_positions: {config.n_positions}")
         print(f"  - bit_widths: {bit_widths}")
 
-        # Add SP-specific configurations
+        # Add SP-specific configurations - these are required for SP models
         config.bit_widths = bit_widths
-        config.lora_rank_per_bit = model_config.get('lora_rank_per_bit', {})
-        config.lora_alpha_per_bit = model_config.get('lora_alpha_per_bit', {})
-        config.activation_bits_per_bit = model_config.get('activation_bits_per_bit', {})
-        config.quantizer_per_bit = model_config.get('quantizer_per_bit', {})
+        config.lora_rank_per_bit = model_config['lora_rank_per_bit']
+        config.lora_alpha_per_bit = model_config['lora_alpha_per_bit']
+        config.activation_bits_per_bit = model_config['activation_bits_per_bit']
+        config.quantizer_per_bit = model_config['quantizer_per_bit']
         # CRITICAL: Use per-tensor quantization for evaluation
         config.per_channel_quantization = False
 
