@@ -170,19 +170,27 @@ class ZeroShotEvaluator:
             answer = example['answer']
 
             # Use likelihood-based scoring
-            # Replace _ with each option and compare likelihoods
-            choices = []
             if '_' in sentence:
-                # Replace blank with each option
-                choices.append(sentence.replace('_', option1))
-                choices.append(sentence.replace('_', option2))
+                # Split at the blank to create context and choices
+                parts = sentence.split('_')
+                if len(parts) == 2:
+                    # Context is everything before the blank
+                    context = parts[0]
+                    # Choices are option + everything after blank
+                    suffix = parts[1]
+                    choices = [option1 + suffix, option2 + suffix]
+                else:
+                    # Multiple blanks or edge case - score full sentences
+                    choices = [sentence.replace('_', option1), sentence.replace('_', option2)]
+                    context = ""  # Will score full sentences
             else:
-                # If no blank, append options to sentence
-                choices.append(f"{sentence} {option1}")
-                choices.append(f"{sentence} {option2}")
+                # No blank marker - this shouldn't happen in WinoGrande
+                # But handle it by comparing sentence + option
+                context = sentence + " "
+                choices = [option1, option2]
 
-            # Get most likely completion (empty context since we're scoring full sentences)
-            predicted_idx = self._compute_choice_likelihood("", choices)
+            # Get most likely completion
+            predicted_idx = self._compute_choice_likelihood(context, choices)
 
             # Answer is '1' or '2' (1-indexed)
             predicted_answer = str(predicted_idx + 1)
@@ -250,14 +258,22 @@ class ZeroShotEvaluator:
         log_probs = []
 
         for choice in choices:
-            # Tokenize context and full text (context + choice)
-            context_tokens = self.tokenizer(context, return_tensors='pt', padding=False, truncation=True, max_length=200)
-            full_text = context + choice
+            # Handle empty context case
+            if not context or len(context.strip()) == 0:
+                # Score the entire choice text
+                full_text = choice
+                context_length = 0
+            else:
+                # Normal case with context
+                full_text = context + choice
+                context_tokens = self.tokenizer(context, return_tensors='pt', padding=False, truncation=True, max_length=200)
+                context_length = context_tokens['input_ids'].shape[1]
+
+            # Tokenize full text
             full_tokens = self.tokenizer(full_text, return_tensors='pt', padding=False, truncation=True, max_length=256)
 
             # Move to device
             input_ids = full_tokens['input_ids'].to(self.device)
-            context_length = context_tokens['input_ids'].shape[1]
 
             # Get model outputs
             with torch.no_grad():
@@ -268,30 +284,39 @@ class ZeroShotEvaluator:
                     logits = outputs.logits
 
                 # Compute log probabilities for the choice tokens only
-                # We need probabilities from position (context_length-1) to predict choice tokens
                 if logits.dim() == 2:
                     logits = logits.unsqueeze(0)  # Add batch dimension if needed
 
                 # Get log probabilities
                 log_probs_all = F.log_softmax(logits, dim=-1)
 
-                # Extract log probs for the choice tokens
-                choice_start = context_length - 1  # Start predicting from this position
-                choice_end = input_ids.shape[1] - 1  # Up to second-to-last position
+                # Determine which tokens to score
+                if context_length == 0:
+                    # Score all tokens except the first one (no previous token to condition on)
+                    choice_start = 0
+                    choice_end = input_ids.shape[1] - 1
+                else:
+                    # Score tokens after context
+                    choice_start = max(0, context_length - 1)  # Ensure non-negative
+                    choice_end = input_ids.shape[1] - 1
 
-                if choice_start < choice_end:
+                if choice_start < choice_end and choice_end > 0:
                     # Get predicted token positions
                     predicted_tokens = input_ids[:, choice_start+1:choice_end+1]
                     # Get corresponding log probs
                     relevant_log_probs = log_probs_all[:, choice_start:choice_end, :]
 
-                    # Gather log probs for actual tokens
-                    token_log_probs = relevant_log_probs.gather(2, predicted_tokens.unsqueeze(-1)).squeeze(-1)
+                    # Ensure dimensions match
+                    if predicted_tokens.shape[1] > 0 and relevant_log_probs.shape[1] > 0:
+                        # Gather log probs for actual tokens
+                        token_log_probs = relevant_log_probs.gather(2, predicted_tokens.unsqueeze(-1)).squeeze(-1)
 
-                    # Sum log probabilities (or take mean to normalize for length)
-                    total_log_prob = token_log_probs.sum().item()
-                    # Normalize by number of tokens to avoid length bias
-                    avg_log_prob = total_log_prob / max(1, predicted_tokens.shape[1])
+                        # Sum log probabilities (or take mean to normalize for length)
+                        total_log_prob = token_log_probs.sum().item()
+                        # Normalize by number of tokens to avoid length bias
+                        avg_log_prob = total_log_prob / max(1, predicted_tokens.shape[1])
+                    else:
+                        avg_log_prob = float('-inf')
                 else:
                     avg_log_prob = float('-inf')
 
