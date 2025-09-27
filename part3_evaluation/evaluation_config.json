@@ -107,7 +107,7 @@
       "C4": {
         "dataset_name": "allenai/c4",
         "config": "en",
-        "split": "validation[:100]",
+        "split": "validation",
         "streaming": true
       }
     }

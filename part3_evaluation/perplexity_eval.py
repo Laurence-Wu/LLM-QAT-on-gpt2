@@ -69,10 +69,10 @@ class PerplexityEvaluator:
                 cfg = datasets_config.get('C4', {})
                 dataset_name_str = cfg.get('dataset_name', 'allenai/c4')
                 config_str = cfg.get('config', 'en')
-                split_str = cfg.get('split', 'validation[:100]')
+                split_str = cfg.get('split', 'validation')
                 use_streaming = cfg.get('streaming', True)
 
-                dataset = load_dataset(dataset_name_str, config_str, split=split_str, streaming=use_streaming, trust_remote_code=True)
+                dataset = load_dataset(dataset_name_str, config_str, split=split_str, streaming=use_streaming)
 
                 texts = []
                 max_docs = min(self.config.get('max_samples', 100), 100)
