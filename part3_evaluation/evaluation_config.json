@@ -102,13 +102,13 @@
       "WikiText103": {
         "dataset_name": "wikitext",
         "config": "wikitext-103-raw-v1",
-        "split": "test"
+        "split": "validation"
       },
-      "OpenWebText": {
-        "dataset_name": "openwebtext",
-        "config": null,
-        "split": "train[:100]",
-        "streaming": false
+      "C4": {
+        "dataset_name": "allenai/c4",
+        "config": "en",
+        "split": "validation[:100]",
+        "streaming": true
       }
     }
   },

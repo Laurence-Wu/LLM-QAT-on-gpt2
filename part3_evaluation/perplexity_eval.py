@@ -64,13 +64,24 @@ class PerplexityEvaluator:
             except Exception as e:
                 print(f"Warning: Could not load {dataset_name} dataset: {e}")
                 return float('inf')
-        elif dataset_name == 'openwebtext':
+        elif dataset_name == 'c4':
             try:
-                # Use alternative OpenWebText dataset that doesn't use deprecated scripts
-                dataset = load_dataset('stas/openwebtext-10k', split='train')
-                texts = [item['text'] for item in dataset if item['text'].strip()][:100]
+                cfg = datasets_config.get('C4', {})
+                dataset_name_str = cfg.get('dataset_name', 'allenai/c4')
+                config_str = cfg.get('config', 'en')
+                split_str = cfg.get('split', 'validation[:100]')
+                use_streaming = cfg.get('streaming', True)
+
+                dataset = load_dataset(dataset_name_str, config_str, split=split_str, streaming=use_streaming, trust_remote_code=True)
+
+                texts = []
+                max_docs = min(self.config.get('max_samples', 100), 100)
+                for i, item in enumerate(dataset):
+                    if i >= max_docs:
+                        break
+                    texts.append(item['text'])
             except Exception as e:
-                print(f"Warning: Could not load OpenWebText dataset: {e}")
+                print(f"Warning: Could not load C4 dataset: {e}")
                 return float('inf')
         else:
             print(f"Unknown dataset: {dataset_name}")
@@ -209,9 +220,9 @@ class PerplexityEvaluator:
             wikitext103_ppl = self.calculate_perplexity('wikitext103', bit_config)
             results['WikiText103'] = round(wikitext103_ppl, 1)
 
-        print("  Calculating OpenWebText perplexity...")
-        openwebtext_ppl = self.calculate_perplexity('openwebtext', bit_config)
-        results['OpenWebText'] = round(openwebtext_ppl, 1)
+        print("  Calculating C4 perplexity...")
+        c4_ppl = self.calculate_perplexity('c4', bit_config)
+        results['C4'] = round(c4_ppl, 1)
 
         return results
 
