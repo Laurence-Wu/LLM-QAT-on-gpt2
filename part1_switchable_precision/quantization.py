@@ -144,12 +144,44 @@ class LearnableFakeQuantize(nn.Module):
             if debug:
                 print(f"      ⚠️ No statistics collected for {self.num_bits}-bit {self.quantizer_type} quantizer")
 
+    def _get_reduction_dims(self, tensor):
+        """Get dimensions to reduce based on per_channel setting."""
+        if self.per_channel and self.channel_dim is not None:
+            # Per-channel: reduce all dims except channel_dim
+            dims_to_reduce = list(range(tensor.dim()))
+            dims_to_reduce.remove(self.channel_dim)
+        else:
+            # Per-tensor: reduce all dimensions
+            dims_to_reduce = list(range(tensor.dim()))
+        return dims_to_reduce
+
+    def _reduce_min_max(self, tensor, dims_to_reduce):
+        """Reduce tensor along specified dimensions to get min/max."""
+        if not dims_to_reduce:
+            return tensor, tensor
+
+        min_val = tensor
+        max_val = tensor
+        for dim in sorted(dims_to_reduce, reverse=True):
+            min_val = min_val.min(dim=dim, keepdim=True)[0]
+            max_val = max_val.max(dim=dim, keepdim=True)[0]
+        return min_val, max_val
+
+    def _get_default_shape(self, x, default_value):
+        """Get appropriate tensor shape for default values based on per_channel setting."""
+        if self.per_channel and self.channel_dim is not None:
+            shape = list(x.shape)
+            shape[self.channel_dim] = 1
+            return torch.full(shape, default_value, device=x.device)
+        else:
+            # Per-tensor: return scalar tensor
+            return torch.tensor(default_value, device=x.device)
+
     def _collect_statistics_batch(self, x):
         """Collect min/max statistics for current batch."""
         with torch.no_grad():
             if self.quantizer_type == 'log':
                 # For log quantization, collect log₂ statistics directly
-                # Handle zeros and get absolute values
                 abs_x = torch.abs(x)
                 non_zero_mask = abs_x > self.eps
 
@@ -158,24 +190,9 @@ class LearnableFakeQuantize(nn.Module):
                     abs_x_clamped = torch.clamp(abs_x, min=self.eps)
                     log_x = torch.log2(abs_x_clamped)
 
-                    if self.channel_dim is not None:
-                        # Per-channel: reduce all dims except channel_dim
-                        dims_to_reduce = list(range(log_x.dim()))
-                        dims_to_reduce.remove(self.channel_dim)
-                    else:
-                        # Per-tensor: reduce all dimensions
-                        dims_to_reduce = list(range(log_x.dim()))
-
-                    if dims_to_reduce:
-                        min_val = log_x
-                        max_val = log_x
-                        for dim in sorted(dims_to_reduce, reverse=True):
-                            min_val = min_val.min(dim=dim, keepdim=True)[0]
-                            max_val = max_val.max(dim=dim, keepdim=True)[0]
-                    else:
-                        # No dimensions to reduce (shouldn't happen but handle it)
-                        min_val = log_x
-                        max_val = log_x
+                    # Get dimensions to reduce and compute min/max
+                    dims_to_reduce = self._get_reduction_dims(log_x)
+                    min_val, max_val = self._reduce_min_max(log_x, dims_to_reduce)
 
                     # Update temp min/max with log₂ values
                     if self.num_batches_collected == 0:
@@ -184,34 +201,15 @@ class LearnableFakeQuantize(nn.Module):
                     else:
                         self.temp_min = torch.minimum(self.temp_min, min_val)
                         self.temp_max = torch.maximum(self.temp_max, max_val)
-                # If all values are zero, keep existing temp_min/temp_max or use defaults
+                # If all values are zero and this is the first batch, use defaults
                 elif self.num_batches_collected == 0:
-                    # Initialize with default values for all-zero input
-                    # Use log2(eps) as both min and max
                     log_eps = torch.log2(torch.tensor(self.eps))
-                    shape = list(x.shape)
-                    shape[self.channel_dim] = 1
-                    self.temp_min = torch.full(shape, log_eps, device=x.device)
-                    self.temp_max = torch.full(shape, log_eps, device=x.device)
+                    self.temp_min = self._get_default_shape(x, log_eps)
+                    self.temp_max = self._get_default_shape(x, log_eps)
             else:
-                if self.channel_dim is not None:
-                    # Per-channel: reduce all dims except channel_dim
-                    dims_to_reduce = list(range(x.dim()))
-                    dims_to_reduce.remove(self.channel_dim)
-                else:
-                    # Per-tensor: reduce all dimensions
-                    dims_to_reduce = list(range(x.dim()))
-
-                if dims_to_reduce:
-                    min_val = x
-                    max_val = x
-                    for dim in sorted(dims_to_reduce, reverse=True):
-                        min_val = min_val.min(dim=dim, keepdim=True)[0]
-                        max_val = max_val.max(dim=dim, keepdim=True)[0]
-                else:
-                    # No dimensions to reduce
-                    min_val = x
-                    max_val = x
+                # Standard min-max statistics collection
+                dims_to_reduce = self._get_reduction_dims(x)
+                min_val, max_val = self._reduce_min_max(x, dims_to_reduce)
 
                 if self.num_batches_collected == 0:
                     self.temp_min = min_val.clone().detach()
