@@ -21,7 +21,7 @@ except ImportError:
 
 class LearnableFakeQuantize(nn.Module):
     def __init__(self, num_bits,
-                 channel_dim=0, quantizer_type='minmax', eps=1e-5, symmetric=True, per_channel=True):
+                 channel_dim=0, quantizer_type='minmax', eps=1e-5, symmetric=True, per_channel=True, is_input=False):
         super().__init__()
         self.num_bits = max(1, min(num_bits, 32))
         self.symmetric = symmetric
@@ -30,6 +30,7 @@ class LearnableFakeQuantize(nn.Module):
         self.channel_dim = channel_dim if per_channel else None
         self.quantizer_type = quantizer_type
         self.eps = eps
+        self.is_input = is_input  # Flag to differentiate input vs weight quantizers
 
         # Update quantization range
         self._update_quant_range()
@@ -50,14 +51,40 @@ class LearnableFakeQuantize(nn.Module):
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         """Override to resize buffers to match checkpoint shapes and set calibrated flag."""
-        # Resize our buffers to match the shapes in the checkpoint
-        for buffer_name in ['scale', 'zero_point', 'running_min', 'running_max']:
-            key = prefix + buffer_name
-            if key in state_dict:
-                # Get the buffer and resize it to match loaded shape
-                buffer = getattr(self, buffer_name, None)
-                if buffer is not None:
-                    buffer.resize_as_(state_dict[key])
+        # Special handling for input quantizers to handle sequence length mismatches
+        if self.is_input:
+            for buffer_name in ['scale', 'zero_point', 'running_min', 'running_max']:
+                key = prefix + buffer_name
+                if key in state_dict:
+                    loaded_tensor = state_dict[key]
+                    buffer = getattr(self, buffer_name, None)
+                    if buffer is not None:
+                        # For input quantizers, handle potential sequence length mismatch
+                        # If loaded shape has sequence dimension (dim 1), reduce it
+                        if loaded_tensor.dim() == 3 and loaded_tensor.shape[1] > 1:
+                            # Old format: [1, seq_len, 1] -> reduce to [1, 1, features]
+                            if self.quantizer_type == 'log':
+                                # For log quantization, use max for conservative quantization
+                                reduced = loaded_tensor.max(dim=1, keepdim=True)[0]
+                            else:
+                                # For minmax, use appropriate reduction
+                                if 'min' in buffer_name:
+                                    reduced = loaded_tensor.min(dim=1, keepdim=True)[0]
+                                elif 'max' in buffer_name:
+                                    reduced = loaded_tensor.max(dim=1, keepdim=True)[0]
+                                else:
+                                    # For scale/zero_point, use max for conservative quantization
+                                    reduced = loaded_tensor.max(dim=1, keepdim=True)[0]
+                            state_dict[key] = reduced
+                        buffer.resize_as_(state_dict[key])
+        else:
+            # Standard handling for weight quantizers
+            for buffer_name in ['scale', 'zero_point', 'running_min', 'running_max']:
+                key = prefix + buffer_name
+                if key in state_dict:
+                    buffer = getattr(self, buffer_name, None)
+                    if buffer is not None:
+                        buffer.resize_as_(state_dict[key])
 
         # Call parent implementation to actually load the values
         super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
@@ -149,7 +176,10 @@ class LearnableFakeQuantize(nn.Module):
         if self.per_channel and self.channel_dim is not None:
             # Per-channel: reduce all dims except channel_dim
             dims_to_reduce = list(range(tensor.dim()))
-            dims_to_reduce.remove(self.channel_dim)
+            # Handle negative indexing for channel_dim
+            actual_dim = self.channel_dim if self.channel_dim >= 0 else tensor.dim() + self.channel_dim
+            if actual_dim in dims_to_reduce:
+                dims_to_reduce.remove(actual_dim)
         else:
             # Per-tensor: reduce all dimensions
             dims_to_reduce = list(range(tensor.dim()))
@@ -171,7 +201,9 @@ class LearnableFakeQuantize(nn.Module):
         """Get appropriate tensor shape for default values based on per_channel setting."""
         if self.per_channel and self.channel_dim is not None:
             shape = list(x.shape)
-            shape[self.channel_dim] = 1
+            # Handle negative indexing for channel_dim
+            actual_dim = self.channel_dim if self.channel_dim >= 0 else len(shape) + self.channel_dim
+            shape[actual_dim] = 1
             return torch.full(shape, default_value, device=x.device)
         else:
             # Per-tensor: return scalar tensor

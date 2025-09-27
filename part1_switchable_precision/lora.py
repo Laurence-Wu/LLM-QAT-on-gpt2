@@ -35,10 +35,10 @@ class LoRALayer(nn.Module):
             self.lora_B = nn.Parameter(torch.zeros(rank, out_features))
             nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
             nn.init.zeros_(self.lora_B)
-            # A: [rank, in_features] -> quantize along in_features (dim=1)
+            # A: [in_features, rank] -> quantize along rank (dim=1)
             self.quantize_A = LearnableFakeQuantize(num_bits=bits, quantizer_type=quantizer_type, channel_dim=1, eps=eps, per_channel=per_channel)
-            # B: [out_features, rank] -> quantize along out_features (dim=0)
-            self.quantize_B = LearnableFakeQuantize(num_bits=bits, quantizer_type=quantizer_type, channel_dim=0, eps=eps, per_channel=per_channel)
+            # B: [rank, out_features] -> quantize along out_features (dim=1)
+            self.quantize_B = LearnableFakeQuantize(num_bits=bits, quantizer_type=quantizer_type, channel_dim=1, eps=eps, per_channel=per_channel)
             
             self.register_buffer('lora_A_quantized', torch.empty(in_features, rank))
             self.register_buffer('lora_B_quantized', torch.empty(rank, out_features))
@@ -84,10 +84,11 @@ class SPLinearWithLoRA(nn.Module):
                                                 quantizer_type=quantizer_per_bit[bits], channel_dim=0, eps=eps, per_channel=per_channel)
             for bits in student_bits
         })
-        # Input quantizers: [batch, in_features] -> channel_dim=1 (per feature)
+        # Input quantizers: [batch, seq_len, in_features] -> channel_dim=-1 (last dimension)
         self.quantizers_input = nn.ModuleDict({
             f'{bits}bit': LearnableFakeQuantize(num_bits=bits,
-                                                quantizer_type=quantizer_per_bit[bits], channel_dim=1, eps=eps, per_channel=per_channel)
+                                                quantizer_type=quantizer_per_bit[bits], channel_dim=-1, eps=eps,
+                                                per_channel=per_channel, is_input=True)
             for bits in student_bits
         })
 
