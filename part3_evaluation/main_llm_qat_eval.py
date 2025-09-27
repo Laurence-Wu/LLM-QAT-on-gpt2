@@ -25,9 +25,6 @@ from transformers import GPT2Config, GPT2Tokenizer, GPT2LMHeadModel
 from datasets import load_dataset
 
 from part3_evaluation.llm_qat_metrics import LLMQATEvaluation
-from part3_evaluation.bit_configurations import BitConfigurations
-from part3_evaluation.generate_tables import ResultTableGenerator
-from part3_evaluation.baseline_comparison import BaselineComparison
 from part3_evaluation.zero_shot_tasks import ZeroShotEvaluator
 from part3_evaluation.few_shot_eval import FewShotEvaluator
 from part3_evaluation.perplexity_eval import PerplexityEvaluator
@@ -134,10 +131,8 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
     return model, checkpoint_bit_width
 
 
-def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
-    """Simplified calibration for evaluation using the quantizer's built-in methods"""
-
-    print("\nCalibrating quantizers for evaluation...")
+def verify_calibration_status(model):
+    """Verify that quantizers are calibrated from checkpoint - no recalibration needed"""
 
     # Get current bit width
     current_bits = None
@@ -149,65 +144,30 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
             continue
 
     if current_bits is None or current_bits >= 32:
-        print(f"No calibration needed (current_bits: {current_bits})")
+        print(f"No quantization active (current_bits: {current_bits})")
         return model
 
-    print(f"Calibrating for {current_bits}-bit precision")
+    print(f"\nVerifying calibration for {current_bits}-bit precision...")
 
-    # Find input quantizers that need calibration
+    # Check calibration status
     bits_key = f'{current_bits}bit'
-    input_quantizers = []
+    calibrated_count = 0
+    total_count = 0
+
     for name, module in model.named_modules():
-        try:
-            if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
-                quantizer = module.quantizers_input[bits_key]
-                quantizer.start_calibration()  # Use built-in method
-                input_quantizers.append((name, quantizer))
-        except AttributeError:
-            continue
+        if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
+            quantizer = module.quantizers_input[bits_key]
+            total_count += 1
+            if quantizer.calibrated:
+                calibrated_count += 1
 
-    if not input_quantizers:
+    if total_count > 0:
+        print(f"✓ {calibrated_count}/{total_count} input quantizers calibrated from checkpoint")
+        if calibrated_count < total_count:
+            print(f"⚠️ Warning: {total_count - calibrated_count} quantizers not calibrated")
+    else:
         print("No input quantizers found")
-        return model
 
-    print(f"Found {len(input_quantizers)} input quantizers")
-
-    # Load calibration data
-    if eval_texts is None:
-        try:
-            dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split='validation')
-            eval_texts = [item['text'] for item in dataset if item['text'].strip()][:50]
-        except Exception as e:
-            print(f"Warning: Could not load calibration data: {e}")
-            return model
-
-    # Collect statistics
-    model.eval()
-    device = next(model.parameters()).device
-
-    with torch.no_grad():
-        for i, text in enumerate(eval_texts):
-            if not text.strip() or i >= num_batches:
-                continue
-
-            inputs = tokenizer(
-                text,
-                return_tensors='pt',
-                truncation=True,
-                max_length=256,
-                padding=False
-            )
-
-            try:
-                _ = model(inputs['input_ids'].to(device))
-            except Exception:
-                continue
-
-    # Finish calibration
-    for name, quantizer in input_quantizers:
-        quantizer.finish_calibration()
-
-    print(f"✓ Calibration completed")
     return model
 
 
@@ -245,30 +205,12 @@ def main():
     model, checkpoint_bit_width = load_switchable_model(args.model_path, config_path=args.config_path, use_pretrained=False)
     tokenizer = load_tokenizer()
 
-    # Calibrate if needed
+    # Verify calibration status (no recalibration - use training calibration)
     if checkpoint_bit_width and checkpoint_bit_width < 32:
         print(f"\nModel loaded at {checkpoint_bit_width}-bit precision")
-        print("Preparing calibration...")
-
-        # Collect calibration samples
-        calibration_texts = []
-
-        # WikiText-2 samples
-        try:
-            wikitext = load_dataset('wikitext', 'wikitext-2-raw-v1', split='validation')
-            for item in wikitext:
-                text = item['text'].strip()
-                if len(text) > 20:
-                    calibration_texts.append(text)
-                    if len(calibration_texts) >= 50:
-                        break
-        except Exception as e:
-            print(f"Warning: Could not load WikiText-2: {e}")
-
-        if calibration_texts:
-            calibrate_for_evaluation(model, tokenizer, eval_texts=calibration_texts[:100])
+        model = verify_calibration_status(model)
     else:
-        print(f"No calibration needed (bit width: {checkpoint_bit_width})")
+        print(f"No quantization active (bit width: {checkpoint_bit_width})")
 
     # Initialize evaluators
     device = eval_config.get('device', 'cuda')
