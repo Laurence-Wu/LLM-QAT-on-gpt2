@@ -49,6 +49,9 @@ class ModelConfig:
         # Activation bits per weight precision
         self.activation_bits_per_bit = {6: 6, 8: 8, 16: 16}  # Match weight precision
 
+        # Quantization mode
+        self.per_channel_quantization = True  # Use per-channel for training, False for evaluation
+
 
 class TrainingConfig:
     """Training configuration for Switchable Precision."""

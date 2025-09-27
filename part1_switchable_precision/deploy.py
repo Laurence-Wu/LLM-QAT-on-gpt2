@@ -209,3 +209,97 @@ def save_sp_checkpoints(model, base_filename, model_config, training_config=None
 
     print(f"\nSaved {len(saved_checkpoints)}/{len([b for b in bit_widths if b != 32])} checkpoints")
     return saved_checkpoints
+
+
+def load_model_for_evaluation(checkpoint_path, config=None, target_bits=None, device='cuda'):
+    """
+    Load SP model for evaluation with per-tensor quantization.
+
+    Args:
+        checkpoint_path: Path to saved checkpoint
+        config: Model config (will be loaded from checkpoint if not provided)
+        target_bits: Target bit width for evaluation
+        device: Device to load model on
+
+    Returns:
+        model: Loaded model ready for evaluation with per-tensor quantization
+    """
+    import torch
+    from transformers import GPT2Config
+
+    # Import model classes
+    try:
+        from models_sp import SPLMHeadModel
+        from config_sp import ModelConfig
+    except ImportError:
+        from .models_sp import SPLMHeadModel
+        from .config_sp import ModelConfig
+
+    device = torch.device(device if torch.cuda.is_available() else 'cpu')
+
+    # Load checkpoint
+    print(f"Loading checkpoint from {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+
+    # Extract config from checkpoint if not provided
+    if config is None:
+        if 'model_config' in checkpoint:
+            config = ModelConfig()
+            # Load saved config attributes
+            for key, value in checkpoint['model_config'].items():
+                setattr(config, key, value)
+        else:
+            raise ValueError("No config provided and checkpoint doesn't contain model_config")
+
+    # Override per_channel_quantization for evaluation
+    config.per_channel_quantization = False  # Use per-tensor for evaluation
+
+    # Determine target bits
+    if target_bits is None:
+        if 'bit_width' in checkpoint:
+            target_bits = checkpoint['bit_width']
+        elif 'target_bits' in checkpoint.get('metadata', {}):
+            target_bits = checkpoint['metadata']['target_bits']
+        else:
+            target_bits = 16  # Default to 16-bit
+
+    print(f"Setting up model for {target_bits}-bit evaluation with per-tensor quantization")
+
+    # Create GPT2 config
+    gpt2_config = GPT2Config(
+        vocab_size=config.vocab_size,
+        n_positions=config.n_positions,
+        n_embd=config.n_embd,
+        n_layer=config.n_layer,
+        n_head=config.n_head,
+        layer_norm_epsilon=config.layer_norm_epsilon,
+        use_cache=False,
+        bos_token_id=50256,
+        eos_token_id=50256,
+    )
+
+    # Add switchable precision configs
+    gpt2_config.lora_rank_per_bit = config.lora_rank_per_bit
+    gpt2_config.lora_alpha_per_bit = config.lora_alpha_per_bit
+    gpt2_config.quantizer_per_bit = config.quantizer_per_bit
+    gpt2_config.bit_widths = config.bit_widths
+    gpt2_config.per_channel_quantization = False  # Ensure per-tensor for evaluation
+
+    # Create model
+    model = SPLMHeadModel(gpt2_config)
+
+    # Load state dict
+    if 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+    else:
+        model.load_state_dict(checkpoint)
+
+    # Set to target precision
+    model.set_precision(target_bits)
+
+    # Move to device and set to eval mode
+    model = model.to(device)
+    model.eval()
+
+    print(f"Model loaded successfully for {target_bits}-bit evaluation with per-tensor quantization")
+    return model

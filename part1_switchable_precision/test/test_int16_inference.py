@@ -14,7 +14,7 @@ from tqdm import tqdm
 sys.path.append(str(Path(__file__).parent.parent))
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from lora import LoRAGPT2Model
+from deploy import load_model_for_evaluation
 from quantization import LearnableFakeQuantize
 
 
@@ -34,31 +34,46 @@ class INT16InferenceTester:
         self.model = self._initialize_model(checkpoint_path)
 
     def _initialize_model(self, checkpoint_path: Optional[str] = None):
-        """Initialize GPT2 model with LoRA and load checkpoint if provided"""
-        config = GPT2Config.from_pretrained('gpt2')
+        """Initialize model with per-tensor quantization for evaluation"""
+        print("Loading INT16 model with per-tensor quantization...")
 
-        # Create model with 16-bit configuration
-        model = LoRAGPT2Model(
-            config,
-            lora_r=8,
-            lora_alpha=16,
-            lora_dropout=0.1,
-            bits=16,  # INT16 configuration
-            quantizer_type='minmax'
-        )
+        if not checkpoint_path or not os.path.exists(checkpoint_path):
+            print(f"Warning: Checkpoint path not found: {checkpoint_path}")
+            print("Using random initialization - results may not be meaningful")
+            # For testing purposes, create a model with per-tensor quantization
+            from config_sp import ModelConfig
+            from models_sp import SPLMHeadModel
 
-        # Load checkpoint if provided
-        if checkpoint_path and os.path.exists(checkpoint_path):
-            print(f"Loading checkpoint from {checkpoint_path}")
-            checkpoint = torch.load(checkpoint_path, map_location=self.device)
+            config = ModelConfig()
+            config.per_channel_quantization = False  # Use per-tensor for evaluation
 
-            if 'model_state_dict' in checkpoint:
-                model.load_state_dict(checkpoint['model_state_dict'])
-            else:
-                model.load_state_dict(checkpoint)
-            print("Checkpoint loaded successfully")
+            gpt2_config = GPT2Config(
+                vocab_size=config.vocab_size,
+                n_positions=config.n_positions,
+                n_embd=config.n_embd,
+                n_layer=config.n_layer,
+                n_head=config.n_head,
+                layer_norm_epsilon=config.layer_norm_epsilon,
+                use_cache=False,
+            )
+
+            # Add switchable precision configs
+            gpt2_config.lora_rank_per_bit = config.lora_rank_per_bit
+            gpt2_config.lora_alpha_per_bit = config.lora_alpha_per_bit
+            gpt2_config.quantizer_per_bit = config.quantizer_per_bit
+            gpt2_config.bit_widths = config.bit_widths
+            gpt2_config.per_channel_quantization = False
+
+            model = SPLMHeadModel(gpt2_config)
+            model.set_precision(16)
         else:
-            print("No checkpoint provided or file not found, using random initialization")
+            # Load model with per-tensor quantization for evaluation
+            model = load_model_for_evaluation(
+                checkpoint_path=checkpoint_path,
+                target_bits=16,  # INT16 configuration
+                device=self.device
+            )
+            return model  # Already on device and in eval mode
 
         model = model.to(self.device)
         model.eval()
@@ -85,15 +100,13 @@ class INT16InferenceTester:
 
         bits_key = f'{current_bits}bit'
 
-        # Configure input quantizers for per-tensor mode
+        # Configure input quantizers for calibration (already in per-tensor mode)
         input_quantizers = []
         for name, module in self.model.named_modules():
             if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
                 quantizer = module.quantizers_input[bits_key]
-                # Switch to per-tensor mode
-                quantizer.per_channel = False
-                quantizer.channel_dim = None
-                # Enable calibration
+                # Quantizers are already in per-tensor mode from model loading
+                # Just enable calibration
                 quantizer.calibrated = False
                 quantizer.collecting_stats = True
                 quantizer.num_batches_collected = 0

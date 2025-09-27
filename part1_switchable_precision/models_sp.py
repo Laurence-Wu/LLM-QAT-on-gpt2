@@ -36,6 +36,7 @@ class SPAttention(nn.Module):
         lora_rank_per_bit = config.lora_rank_per_bit
         lora_alpha_per_bit = config.lora_alpha_per_bit
         quantizer_per_bit = config.quantizer_per_bit
+        per_channel = getattr(config, 'per_channel_quantization', True)
 
         # Switchable layers with per-bit-width LoRA modules
         self.c_attn = SPLinearWithLoRA(
@@ -43,14 +44,16 @@ class SPAttention(nn.Module):
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
-            quantizer_per_bit=quantizer_per_bit
+            quantizer_per_bit=quantizer_per_bit,
+            per_channel=per_channel
         )
         self.c_proj = SPLinearWithLoRA(
             config.n_embd, config.n_embd,
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
-            quantizer_per_bit=quantizer_per_bit
+            quantizer_per_bit=quantizer_per_bit,
+            per_channel=per_channel
         )
 
         ## use this bias mask as the attention mask.
@@ -107,6 +110,7 @@ class SPMLP(nn.Module):
                 "Required: lora_rank_per_bit, lora_alpha_per_bit"
             )
         quantizer_per_bit = getattr(config, 'quantizer_per_bit', None)
+        per_channel = getattr(config, 'per_channel_quantization', True)
 
         # Switchable layers with per-bit-width LoRA modules
         self.c_fc = SPLinearWithLoRA(
@@ -114,14 +118,16 @@ class SPMLP(nn.Module):
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
-            quantizer_per_bit=quantizer_per_bit
+            quantizer_per_bit=quantizer_per_bit,
+            per_channel=per_channel
         )
         self.c_proj = SPLinearWithLoRA(
             4 * config.n_embd, config.n_embd,
             bit_widths=bit_widths,
             lora_rank_per_bit=lora_rank_per_bit,
             lora_alpha_per_bit=lora_alpha_per_bit,
-            quantizer_per_bit=quantizer_per_bit
+            quantizer_per_bit=quantizer_per_bit,
+            per_channel=per_channel
         )
         self.act = nn.GELU()
 
