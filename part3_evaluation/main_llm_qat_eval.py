@@ -30,7 +30,7 @@ from part3_evaluation.few_shot_eval import FewShotEvaluator
 from part3_evaluation.perplexity_eval import PerplexityEvaluator
 
 
-def load_switchable_model(model_path: str = None, config_path: str = None, use_pretrained: bool = True):
+def load_switchable_model(model_path: str = None, use_pretrained: bool = True):
     """Load switchable precision model with proper configuration"""
 
     if not torch.cuda.is_available():
@@ -52,7 +52,7 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
 
         # Extract configs - direct access to ensure they exist
         model_config = checkpoint['model_config']
-        training_config = checkpoint.get('training_config', {})  # This one is optional
+        training_config = checkpoint['training_config']  # Required from checkpoint
 
         # Extract key parameters - direct access for required fields
         n_layer = model_config['n_layer']
@@ -132,7 +132,7 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
     device = torch.device('cuda')
     print(f"✅ Model ready on {device}")
 
-    return model, checkpoint_bit_width
+    return model, checkpoint_bit_width, model_config, training_config
 
 
 def verify_calibration_status(model):
@@ -194,8 +194,6 @@ def main():
     parser = argparse.ArgumentParser(description='LLM-QAT Paper Evaluation Suite')
     parser.add_argument('--model_path', type=str, required=True,
                        help='Path to trained model checkpoint (.pth file)')
-    parser.add_argument('--config_path', type=str,
-                       help='Path to training config JSON file')
     parser.add_argument('--eval_config', type=str,
                        default='evaluation_config.json',
                        help='Path to evaluation configuration JSON file')
@@ -206,7 +204,7 @@ def main():
     print(f"Loaded evaluation config from: {args.eval_config}")
 
     # Load model and tokenizer
-    model, checkpoint_bit_width = load_switchable_model(args.model_path, config_path=args.config_path, use_pretrained=False)
+    model, checkpoint_bit_width, model_config, training_config = load_switchable_model(args.model_path, use_pretrained=False)
     tokenizer = load_tokenizer()
 
     # Verify calibration status (no recalibration - use training calibration)

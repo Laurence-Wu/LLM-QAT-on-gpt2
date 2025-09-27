@@ -21,7 +21,7 @@ class ModelConfig:
         self.embd_pdrop = 0.1
 
         # Cyclic precision settings
-        self.bit_widths = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]  # Cycle through these precisions
+        self.bit_widths = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,13,14,15,16,17,18]  # Cycle through these precisions
         self.default_bits = 8  # Default/upper bound precision
 
         # LoRA settings per bit-width
@@ -90,7 +90,6 @@ class TrainingConfig:
 
         # Training schedule
         self.num_epochs = 160
-        self.num_iterations = None  # Will be calculated based on dataset
         self.gradient_accumulation_steps = 8
 
         # Cyclic precision schedule

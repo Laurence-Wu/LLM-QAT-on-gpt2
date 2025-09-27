@@ -16,7 +16,7 @@ def save_cpt_checkpoint(
     optimizer: torch.optim.Optimizer,
     lr_scheduler: torch.optim.lr_scheduler._LRScheduler,
     epoch: int,
-    global_step: int,
+    global_cycle: int,
     loss: float,
     config: dict,
     filepath: str
@@ -29,7 +29,7 @@ def save_cpt_checkpoint(
         optimizer: Optimizer
         lr_scheduler: Learning rate scheduler
         epoch: Current epoch
-        global_step: Global training step
+        global_cycle: Global training cycle
         loss: Current loss
         config: Configuration dictionary
         filepath: Path to save checkpoint
@@ -42,7 +42,7 @@ def save_cpt_checkpoint(
         'optimizer_state_dict': optimizer.state_dict(),
         'lr_scheduler_state_dict': lr_scheduler.state_dict(),  # Save LR scheduler state
         'epoch': epoch,
-        'global_step': global_step,
+        'global_cycle': global_cycle,
         'loss': loss,
         'model_config': config['model'].__dict__,
         'training_config': config['training'].__dict__,

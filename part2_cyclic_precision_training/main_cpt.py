@@ -23,7 +23,7 @@ from deploy import save_cpt_checkpoint, save_final_models
 from dataset import WikiTextDataset
 
 
-def train_step_with_cyclic_precision(
+def train_cycle_with_cyclic_precision(
     model: CPTModel,
     batch: Dict[str, torch.Tensor],
     optimizer: optim.Optimizer,
@@ -79,7 +79,7 @@ def train_step_with_cyclic_precision(
         lr_scheduler.step()
 
     # Advance precision scheduler position
-    precision_scheduler.global_step += 1
+    precision_scheduler.global_cycle += 1
 
     return {
         'total_loss': total_loss / len(cycle_precisions),
@@ -274,25 +274,25 @@ def main(args):
         weight_decay=training_config.weight_decay
     )
 
-    # Calculate total steps for learning rate scheduler
-    # Total steps = num_epochs * steps_per_epoch * cycle_length
+    # Calculate total cycles for learning rate scheduler
+    # Total cycles = num_epochs * steps_per_epoch * cycle_length
     # This ensures LR updates for every precision change
     steps_per_epoch = len(train_loader)
     cycle_length = cpt_config.cycle_length
-    total_lr_steps = training_config.num_epochs * steps_per_epoch * cycle_length
+    total_lr_cycles = training_config.num_epochs * steps_per_epoch * cycle_length
 
     # Create cosine learning rate scheduler
     lr_scheduler = CosineAnnealingLR(
         optimizer,
-        T_max=total_lr_steps,
+        T_max=total_lr_cycles,
         eta_min=1e-6  # Minimum learning rate
     )
-    print(f"Created LR scheduler with {total_lr_steps:,} total steps")
+    print(f"Created LR scheduler with {total_lr_cycles:,} total cycles")
     print(f"  ({training_config.num_epochs} epochs * {steps_per_epoch} batches * {cycle_length} precisions)")
 
     # Training loop
     print("Starting CPT training...")
-    global_step = 0
+    global_cycle = 0
     best_val_loss = float('inf')
 
     for epoch in range(training_config.num_epochs):
@@ -305,30 +305,30 @@ def main(args):
 
         for batch_idx, batch in enumerate(progress_bar):
             # CRITICAL: Train with cyclic precision
-            step_results = train_step_with_cyclic_precision(
+            cycle_results = train_cycle_with_cyclic_precision(
                 model, batch, optimizer, precision_scheduler, lr_scheduler, device
             )
 
-            epoch_losses.append(step_results['total_loss'])
-            global_step += 1
+            epoch_losses.append(cycle_results['total_loss'])
+            global_cycle += 1
 
             # Update progress bar
-            cycle_info = step_results['cycle_info']
+            cycle_info = cycle_results['cycle_info']
             current_lr = lr_scheduler.get_last_lr()[0]
             progress_bar.set_postfix({
-                'loss': f"{step_results['total_loss']:.4f}",
+                'loss': f"{cycle_results['total_loss']:.4f}",
                 'precision': f"{cycle_info['current_precision']}bit",
                 'cycle': cycle_info['cycle_count'],
                 'lr': f"{current_lr:.2e}"
             })
 
             # Log detailed info periodically
-            if global_step % training_config.log_interval == 0:
-                precision_losses = step_results['losses_per_precision']
-                print(f"\nStep {global_step} - Losses per precision: {precision_losses}")
+            if global_cycle % training_config.log_interval == 0:
+                precision_losses = cycle_results['losses_per_precision']
+                print(f"\nCycle {global_cycle} - Losses per precision: {precision_losses}")
 
             # Clear cache periodically
-            if global_step % training_config.empty_cache_interval == 0 and torch.cuda.is_available():
+            if global_cycle % training_config.empty_cache_interval == 0 and torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
         # Epoch statistics
@@ -351,14 +351,14 @@ def main(args):
                     print(f"New best validation loss: {best_val_loss:.4f}")
                     # Save best checkpoint
                     save_cpt_checkpoint(
-                        model, optimizer, lr_scheduler, epoch, global_step,
+                        model, optimizer, lr_scheduler, epoch, global_cycle,
                         best_val_loss, config, 'checkpoints/best_model.pth'
                     )
 
         # Save checkpoint
         if (epoch + 1) % training_config.save_interval == 0:
             save_cpt_checkpoint(
-                model, optimizer, lr_scheduler, epoch, global_step,
+                model, optimizer, lr_scheduler, epoch, global_cycle,
                 avg_epoch_loss, config, f'checkpoints/checkpoint_epoch{epoch+1}.pth'
             )
 

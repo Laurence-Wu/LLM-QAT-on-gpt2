@@ -36,7 +36,7 @@ class CyclicPrecisionScheduler:
         self.cycle_length = cycle_length or len(bit_widths)
 
         # Track current position
-        self.global_step = 0
+        self.global_cycle = 0
         self.cycle_count = 0
 
     def get_precision_at_position(self, position: int) -> int:
@@ -97,16 +97,16 @@ class CyclicPrecisionScheduler:
             precisions.append(self.get_precision_at_position(i))
         return precisions
 
-    def step(self) -> int:
+    def cycle(self) -> int:
         """
         Get current precision and advance position.
 
         Returns:
             Current bit-width
         """
-        position = self.global_step % self.cycle_length
+        position = self.global_cycle % self.cycle_length
         precision = self.get_precision_at_position(position)
-        self.global_step += 1
+        self.global_cycle += 1
 
         # Track cycle completions
         if position == self.cycle_length - 1:
@@ -121,9 +121,9 @@ class CyclicPrecisionScheduler:
         Returns:
             Dictionary with cycle information
         """
-        position = self.global_step % self.cycle_length
+        position = self.global_cycle % self.cycle_length
         return {
-            'global_step': self.global_step,
+            'global_cycle': self.global_cycle,
             'cycle_count': self.cycle_count,
             'position_in_cycle': position,
             'current_precision': self.get_precision_at_position(position),
@@ -132,7 +132,7 @@ class CyclicPrecisionScheduler:
 
     def reset(self):
         """Reset scheduler to initial state."""
-        self.global_step = 0
+        self.global_cycle = 0
         self.cycle_count = 0
 
 
