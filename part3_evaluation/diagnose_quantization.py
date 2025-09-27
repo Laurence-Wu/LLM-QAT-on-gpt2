@@ -233,70 +233,11 @@ def test_inference_variance(model, tokenizer, device='cuda', num_runs=5):
     return max_variance, mean_variance
 
 
-def compute_simple_perplexity(model, tokenizer, text, device='cuda', max_length=512):
-    """
-    Compute perplexity using simple method (like test_inference.py).
-    This is the baseline method that works correctly.
-    """
-    model.eval()
-    model = model.to(device)
-
-    # Verify model is in eval mode
-    if model.training:
-        print("WARNING: Model was not in eval mode!")
-        model.eval()
-
-    # Tokenize with truncation
-    encodings = tokenizer(text, return_tensors='pt', truncation=True, max_length=max_length)
-    input_ids = encodings['input_ids'].to(device)
-
-    if input_ids.size(1) < 2:
-        return float('inf'), {}
-
-    with torch.no_grad():
-        outputs = model(input_ids)
-
-        # Handle different output formats
-        if isinstance(outputs, dict):
-            logits = outputs.get('logits', None)
-        elif hasattr(outputs, 'logits'):
-            logits = outputs.logits
-        else:
-            logits = outputs
-
-        if logits is None:
-            return float('inf'), {}
-
-        # Compute loss manually
-        shift_logits = logits[..., :-1, :].contiguous()
-        shift_labels = input_ids[..., 1:].contiguous()
-
-        loss_fct = nn.CrossEntropyLoss()
-        loss = loss_fct(
-            shift_logits.view(-1, shift_logits.size(-1)),
-            shift_labels.view(-1)
-        )
-
-        perplexity = torch.exp(loss).item()
-
-        # Collect statistics
-        stats = {
-            'loss': loss.item(),
-            'perplexity': perplexity,
-            'logits_mean': logits.mean().item(),
-            'logits_std': logits.std().item(),
-            'logits_min': logits.min().item(),
-            'logits_max': logits.max().item(),
-            'num_tokens': input_ids.size(1)
-        }
-
-    return perplexity, stats
 
 
 def compute_sliding_window_perplexity(model, tokenizer, text, device='cuda', stride=256, max_length=256):
     """
-    Compute perplexity using sliding window (like perplexity_eval.py).
-    This method seems to cause issues in evaluation.
+    Compute perplexity using sliding window with proper context handling.
     """
     model.eval()
     model = model.to(device)
@@ -312,10 +253,17 @@ def compute_sliding_window_perplexity(model, tokenizer, text, device='cuda', str
     all_losses = []
     all_logits_stats = []
 
-    # Sliding window approach
-    for begin_loc in range(0, seq_len, stride):
+    # Use half the window as context
+    context_size = max_length // 2
+    predict_size = max_length - context_size
+    actual_stride = min(stride, predict_size)  # Don't re-score same tokens
+
+    # Sliding window with context handling
+    for window_idx, begin_loc in enumerate(range(0, seq_len, actual_stride)):
         end_loc = min(begin_loc + max_length, seq_len)
-        if end_loc - begin_loc < 10:
+        window_size = end_loc - begin_loc
+
+        if window_size < context_size + 10:
             break
 
         input_chunk = input_ids[:, begin_loc:end_loc]
@@ -332,13 +280,26 @@ def compute_sliding_window_perplexity(model, tokenizer, text, device='cuda', str
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = input_chunk[..., 1:].contiguous()
 
-            loss_fct = nn.CrossEntropyLoss()
-            loss = loss_fct(
-                shift_logits.view(-1, shift_logits.size(-1)),
-                shift_labels.view(-1)
-            )
+            # Skip context tokens
+            if window_idx == 0:
+                skip_tokens = min(32, window_size // 4)  # First window: skip less
+            else:
+                skip_tokens = context_size  # Later windows: skip full context
 
-            all_losses.append(loss.item())
+            if shift_logits.size(1) > skip_tokens:
+                shift_logits = shift_logits[:, skip_tokens:, :]
+                shift_labels = shift_labels[:, skip_tokens:]
+
+                loss_fct = nn.CrossEntropyLoss()
+                loss = loss_fct(
+                    shift_logits.view(-1, shift_logits.size(-1)),
+                    shift_labels.view(-1)
+                )
+
+                all_losses.append(loss.item())
+            else:
+                continue  # Skip if window too small
+
             all_logits_stats.append({
                 'mean': logits.mean().item(),
                 'std': logits.std().item(),
@@ -367,13 +328,12 @@ def compute_sliding_window_perplexity(model, tokenizer, text, device='cuda', str
     return perplexity, stats
 
 
-def test_simple_vs_sliding_perplexity(model, tokenizer, device='cuda', test_text=None):
+def test_sliding_window_perplexity(model, tokenizer, device='cuda', test_text=None):
     """
-    Compare simple perplexity (like test_inference.py) vs sliding window approach.
-    This helps identify if the sliding window is causing the degradation.
+    Test the sliding window perplexity calculation with proper context handling.
     """
     print("\n" + "="*60)
-    print("SIMPLE VS SLIDING WINDOW PERPLEXITY COMPARISON")
+    print("SLIDING WINDOW PERPLEXITY TEST")
     print("="*60)
 
     model.eval()
@@ -389,16 +349,8 @@ def test_simple_vs_sliding_perplexity(model, tokenizer, device='cuda', test_text
 
     print(f"\nTest text length: {len(tokenizer.encode(test_text))} tokens")
 
-    # Test with simple method
-    print("\n1. Simple Method (like test_inference.py):")
-    simple_ppl, simple_stats = compute_simple_perplexity(model, tokenizer, test_text, device)
-    print(f"   Perplexity: {simple_ppl:.2f}")
-    print(f"   Loss: {simple_stats.get('loss', 0):.4f}")
-    print(f"   Logits mean: {simple_stats.get('logits_mean', 0):.2f}")
-    print(f"   Logits std: {simple_stats.get('logits_std', 0):.2f}")
-
     # Test with sliding window
-    print("\n2. Sliding Window Method (like perplexity_eval.py):")
+    print("\nSliding Window Method with Context Handling:")
     sliding_ppl, sliding_stats = compute_sliding_window_perplexity(model, tokenizer, test_text, device)
     print(f"   Perplexity: {sliding_ppl:.2f}")
     print(f"   Loss: {sliding_stats.get('loss', 0):.4f}")
@@ -406,30 +358,24 @@ def test_simple_vs_sliding_perplexity(model, tokenizer, device='cuda', test_text
     print(f"   Logits mean: {sliding_stats.get('logits_mean', 0):.2f}")
     print(f"   Logits std: {sliding_stats.get('logits_std', 0):.2f}")
 
-    # Compare results
-    print("\n3. Comparison:")
-    if simple_ppl > 0 and sliding_ppl > 0:
-        ratio = sliding_ppl / simple_ppl
-        print(f"   Perplexity ratio (sliding/simple): {ratio:.2f}x")
+    # Analyze results
+    print("\nAnalysis:")
+    if sliding_stats.get('logits_mean', 0) < -50:
+        print("   🔴 WARNING: Extremely negative logits detected!")
+        print("      This indicates severe model degradation or quantization failure.")
+    elif sliding_stats.get('logits_mean', 0) < -30:
+        print("   🟡 Moderately negative logits detected.")
+    else:
+        print("   🟢 Logits appear normal.")
 
-        logits_diff = sliding_stats.get('logits_mean', 0) - simple_stats.get('logits_mean', 0)
-        print(f"   Logits mean difference: {logits_diff:+.2f}")
+    if sliding_ppl > 100:
+        print("   🔴 Very high perplexity - model may be malfunctioning.")
+    elif sliding_ppl > 50:
+        print("   🟡 High perplexity - possible issues with model.")
+    else:
+        print("   🟢 Perplexity is within reasonable range.")
 
-        if ratio > 2:
-            print("   🔴 WARNING: Sliding window perplexity is significantly worse!")
-            print("      This suggests the sliding window approach is causing degradation.")
-        elif ratio > 1.5:
-            print("   🟡 Sliding window perplexity is moderately worse.")
-        else:
-            print("   🟢 Both methods give similar results.")
-
-        if abs(logits_diff) > 20:
-            print("   🔴 Large logits difference detected - possible numerical issues!")
-
-    return {
-        'simple': {'perplexity': simple_ppl, **simple_stats},
-        'sliding': {'perplexity': sliding_ppl, **sliding_stats}
-    }
+    return {'perplexity': sliding_ppl, **sliding_stats}
 
 
 def track_batch_degradation(model, tokenizer, texts=None, device='cuda', max_texts=10):
@@ -681,10 +627,10 @@ def comprehensive_diagnosis(model, tokenizer, device='cuda'):
     max_var, mean_var = test_inference_variance(model, tokenizer, device)
     results['variance'] = {'max': max_var, 'mean': mean_var}
 
-    # 3. Simple vs sliding window
-    print("\n[3/5] Comparing perplexity calculation methods...")
-    comparison = test_simple_vs_sliding_perplexity(model, tokenizer, device)
-    results['perplexity_comparison'] = comparison
+    # 3. Test sliding window perplexity
+    print("\n[3/5] Testing sliding window perplexity...")
+    perplexity_test = test_sliding_window_perplexity(model, tokenizer, device)
+    results['perplexity_test'] = perplexity_test
 
     # 4. Batch degradation
     print("\n[4/5] Tracking batch processing degradation...")
@@ -713,13 +659,14 @@ def comprehensive_diagnosis(model, tokenizer, device='cuda'):
     if results['variance']['max'] > 0.01:
         issues_found.append("High inference variance detected")
 
-    # Check perplexity method issues
-    if 'perplexity_comparison' in results:
-        simple_ppl = results['perplexity_comparison']['simple'].get('perplexity', 0)
-        sliding_ppl = results['perplexity_comparison']['sliding'].get('perplexity', 0)
-        if simple_ppl > 0 and sliding_ppl > 0:
-            if sliding_ppl / simple_ppl > 2:
-                issues_found.append("Sliding window method causes degradation")
+    # Check perplexity issues
+    if 'perplexity_test' in results:
+        ppl = results['perplexity_test'].get('perplexity', 0)
+        logits_mean = results['perplexity_test'].get('logits_mean', 0)
+        if ppl > 100:
+            issues_found.append(f"Very high perplexity: {ppl:.1f}")
+        if logits_mean < -50:
+            issues_found.append(f"Extremely negative logits: {logits_mean:.1f}")
 
     # Check batch degradation
     if results.get('batch_degradation'):

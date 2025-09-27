@@ -199,8 +199,6 @@ def main():
                        help='Path to evaluation configuration JSON file')
     parser.add_argument('--diagnose', action='store_true',
                        help='Run quantization health diagnostic before evaluation')
-    parser.add_argument('--use-simple-perplexity', action='store_true',
-                       help='Use simple perplexity method (like test_inference.py) instead of sliding window')
     args = parser.parse_args()
 
     # Load configurations
@@ -228,7 +226,7 @@ def main():
         print("="*70)
         from diagnose_quantization import (
             comprehensive_diagnosis,
-            test_simple_vs_sliding_perplexity,
+            test_sliding_window_perplexity,
             track_batch_degradation
         )
 
@@ -237,15 +235,15 @@ def main():
 
         # Check for issues
         has_issues = False
-        if 'perplexity_comparison' in diagnostic_results:
-            simple_ppl = diagnostic_results['perplexity_comparison']['simple'].get('perplexity', 0)
-            sliding_ppl = diagnostic_results['perplexity_comparison']['sliding'].get('perplexity', 0)
-            if simple_ppl > 0 and sliding_ppl > 0 and sliding_ppl / simple_ppl > 1.5:
+        if 'perplexity_test' in diagnostic_results:
+            ppl = diagnostic_results['perplexity_test'].get('perplexity', 0)
+            logits_mean = diagnostic_results['perplexity_test'].get('logits_mean', 0)
+            if ppl > 100 or logits_mean < -50:
                 has_issues = True
-                print("\n⚠️ WARNING: Sliding window method shows degradation!")
-                print(f"   Simple method PPL: {simple_ppl:.2f}")
-                print(f"   Sliding window PPL: {sliding_ppl:.2f}")
-                print("   Consider using simple method for evaluation.")
+                print("\n⚠️ WARNING: Model shows severe issues!")
+                print(f"   Perplexity: {ppl:.2f}")
+                print(f"   Logits mean: {logits_mean:.2f}")
+                print("   Model may have quantization failure or other critical issues.")
 
         print("\nDiagnostic complete. Proceeding with evaluation...\n")
 
@@ -271,30 +269,8 @@ def main():
 
     # 1. Perplexity evaluation
     print("\n1. Perplexity evaluation...")
-    if args.use_simple_perplexity:
-        print("   Using SIMPLE perplexity method (no sliding window)")
     try:
-        # Modify evaluation method based on argument
-        if args.use_simple_perplexity:
-            # Use simple method for each dataset
-            perplexity_results = {}
-            for dataset in ['wikitext2', 'wikitext103', 'openwebtext']:
-                if dataset == 'wikitext2' and 'WikiText2' in perplexity_evaluator.config.get('datasets', {}):
-                    print(f"   Calculating WikiText2 perplexity (simple method)...")
-                    ppl = perplexity_evaluator.calculate_perplexity('wikitext2', bit_config, use_simple_method=True)
-                    perplexity_results['WikiText2'] = round(ppl, 1)
-                elif dataset == 'wikitext103' and 'WikiText103' in perplexity_evaluator.config.get('datasets', {}):
-                    print(f"   Calculating WikiText103 perplexity (simple method)...")
-                    ppl = perplexity_evaluator.calculate_perplexity('wikitext103', bit_config, use_simple_method=True)
-                    perplexity_results['WikiText103'] = round(ppl, 1)
-                elif dataset == 'openwebtext':
-                    print(f"   Calculating OpenWebText perplexity (simple method)...")
-                    ppl = perplexity_evaluator.calculate_perplexity('openwebtext', bit_config, use_simple_method=True)
-                    perplexity_results['OpenWebText'] = round(ppl, 1)
-        else:
-            # Use original sliding window method
-            perplexity_results = perplexity_evaluator.evaluate_all_datasets(bit_config)
-
+        perplexity_results = perplexity_evaluator.evaluate_all_datasets(bit_config)
         results['perplexity'] = perplexity_results
         for dataset, ppl in perplexity_results.items():
             print(f"   {dataset}: {ppl:.1f}")

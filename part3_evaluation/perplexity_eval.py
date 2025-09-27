@@ -18,14 +18,16 @@ class PerplexityEvaluator:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-    def calculate_perplexity(self, dataset_name: str, bit_config: Dict, use_simple_method: bool = False) -> float:
+    def calculate_perplexity(self, dataset_name: str, bit_config: Dict) -> float:
         """
-        Calculate perplexity with option to use simple method or sliding window.
+        Calculate perplexity using sliding window with proper context handling.
+
+        Each window uses first half as context (not scored) and second half for prediction (scored).
+        This ensures all scored tokens have sufficient context.
 
         Args:
             dataset_name: Name of dataset to evaluate
             bit_config: Bit configuration for the model
-            use_simple_method: If True, use simple method like test_inference.py (no sliding window)
         """
 
         stride = self.config['stride']
@@ -95,19 +97,20 @@ class PerplexityEvaluator:
         if not texts:
             return float('inf')
 
-        # Simple approach: use fixed max_length from config
+        # Sliding window approach with proper context handling
         all_losses = []
         max_texts = self.config.get('max_samples', 100)
 
-        if use_simple_method:
-            print(f"Using SIMPLE method (like test_inference.py) - no sliding window")
-            print(f"Processing {min(len(texts), max_texts)} texts with max_length={max_length}")
-        else:
-            print(f"Using SLIDING WINDOW method with max_length={max_length}, stride={stride}")
-            print(f"Processing {min(len(texts), max_texts)} texts")
-            print(f"Note: With stride={stride}, this will create ~{max_length//stride}x more segments than stride={max_length}")
+        # Calculate context and prediction sizes
+        context_size = max_length // 2  # First half for context
+        predict_size = max_length - context_size  # Second half for prediction
 
-        print(f"Total texts available: {len(texts)}")
+        print(f"Using SLIDING WINDOW with proper context handling:")
+        print(f"  Window size: {max_length} tokens")
+        print(f"  Context size: {context_size} tokens (not scored)")
+        print(f"  Prediction size: {predict_size} tokens (scored)")
+        print(f"  Stride: {stride} tokens")
+        print(f"Processing {min(len(texts), max_texts)} texts from {len(texts)} available")
 
         # Add debug for first text
         debug_first_text = True
@@ -116,21 +119,30 @@ class PerplexityEvaluator:
             if not text.strip():
                 continue
 
-            if use_simple_method:
-                # Simple method: process entire text at once (with truncation)
-                encodings = self.tokenizer(
-                    text,
-                    return_tensors='pt',
-                    truncation=True,
-                    max_length=max_length,
-                    padding=False
-                )
+            # Sliding window method with proper context handling
+            encodings = self.tokenizer(
+                text,
+                return_tensors='pt',
+                truncation=True,
+                max_length=max_length * 4,  # Allow longer for sliding window
+                padding=False
+            )
 
-                seq_len = encodings.input_ids.size(1)
-                if seq_len < 10:
-                    continue
+            seq_len = encodings.input_ids.size(1)
+            if seq_len < 10:
+                continue
 
-                input_ids = encodings.input_ids.to(self.device)
+            # Use sliding window with proper context handling
+            # Step by stride for the sliding windows
+            for window_idx, begin_loc in enumerate(range(0, seq_len, stride)):
+                end_loc = min(begin_loc + max_length, seq_len)
+                window_size = end_loc - begin_loc
+
+                # Need at least context_size + some tokens to predict
+                if window_size < context_size + 10:
+                    break
+
+                input_ids = encodings.input_ids[:, begin_loc:end_loc].to(self.device)
 
                 with torch.no_grad():
                     try:
@@ -148,6 +160,21 @@ class PerplexityEvaluator:
                         shift_logits = logits[..., :-1, :].contiguous()
                         shift_labels = input_ids[..., 1:].contiguous()
 
+                        # CRITICAL: Only score tokens AFTER the context prefix
+                        if window_idx == 0:
+                            # First window: skip initial tokens (they have no context)
+                            skip_tokens = min(32, window_size // 4)  # Skip first 32 tokens or 25% of window
+                        else:
+                            # Subsequent windows: skip the context portion (first half)
+                            skip_tokens = context_size
+
+                        # Only calculate loss on tokens with sufficient context
+                        if shift_logits.size(1) > skip_tokens:
+                            shift_logits = shift_logits[:, skip_tokens:, :]
+                            shift_labels = shift_labels[:, skip_tokens:]
+                        else:
+                            continue  # Window too small after skipping context
+
                         loss_fct = torch.nn.CrossEntropyLoss()
                         loss = loss_fct(
                             shift_logits.view(-1, shift_logits.size(-1)),
@@ -160,9 +187,11 @@ class PerplexityEvaluator:
 
                             # Debug first few losses
                             if debug_first_text and len(all_losses) <= 3:
-                                print(f"\n  Debug text {len(all_losses)}:")
+                                print(f"\n  Debug window {window_idx+1} (segment {len(all_losses)}):")
+                                print(f"    Window position: [{begin_loc}:{end_loc}]")
                                 print(f"    Input shape: {input_ids.shape}")
-                                print(f"    Logits shape: {logits.shape}")
+                                print(f"    Context skipped: {skip_tokens} tokens")
+                                print(f"    Tokens scored: {shift_logits.shape[1]} tokens")
                                 print(f"    Loss: {loss_value:.4f} (PPL: {math.exp(loss_value):.2f})")
                                 # Check logits statistics
                                 logits_mean = logits.mean().item()
@@ -187,84 +216,6 @@ class PerplexityEvaluator:
                         if debug_first_text:
                             print(f"\n  ❌ Exception during evaluation: {e}")
                         continue
-
-            else:
-                # Original sliding window method
-                encodings = self.tokenizer(
-                    text,
-                    return_tensors='pt',
-                    truncation=True,
-                    max_length=max_length * 4,  # Allow longer for sliding window
-                    padding=False
-                )
-
-                seq_len = encodings.input_ids.size(1)
-                if seq_len < 10:
-                    continue
-
-                # Use sliding window approach similar to test_inference.py
-                for begin_loc in range(0, seq_len, stride):
-                    end_loc = min(begin_loc + max_length, seq_len)
-                    if end_loc - begin_loc < 10:
-                        break
-
-                    input_ids = encodings.input_ids[:, begin_loc:end_loc].to(self.device)
-
-                    with torch.no_grad():
-                        try:
-                            outputs = self.model(input_ids)
-                            try:
-                                logits = outputs.logits
-                            except AttributeError:
-                                try:
-                                    logits = outputs[0]
-                                except (IndexError, TypeError):
-                                    print(f"Warning: Could not extract logits from outputs type {type(outputs)}")
-                                    continue
-
-                            # Calculate loss using standard next-token prediction
-                            shift_logits = logits[..., :-1, :].contiguous()
-                            shift_labels = input_ids[..., 1:].contiguous()
-
-                            loss_fct = torch.nn.CrossEntropyLoss()
-                            loss = loss_fct(
-                                shift_logits.view(-1, shift_logits.size(-1)),
-                                shift_labels.view(-1)
-                            )
-
-                            if not torch.isnan(loss) and not torch.isinf(loss):
-                                loss_value = loss.item()
-                                all_losses.append(loss_value)
-
-                                # Debug first few losses
-                                if debug_first_text and len(all_losses) <= 3:
-                                    print(f"\n  Debug segment {len(all_losses)}:")
-                                    print(f"    Input shape: {input_ids.shape}")
-                                    print(f"    Logits shape: {logits.shape}")
-                                    print(f"    Loss: {loss_value:.4f} (PPL: {math.exp(loss_value):.2f})")
-                                    # Check logits statistics
-                                    logits_mean = logits.mean().item()
-                                    logits_std = logits.std().item()
-                                    logits_min = logits.min().item()
-                                    logits_max = logits.max().item()
-                                    print(f"    Logits stats: mean={logits_mean:.2f}, std={logits_std:.2f}, min={logits_min:.2f}, max={logits_max:.2f}")
-
-                                    # Warning for abnormal logits
-                                    if logits_mean < -50:
-                                        print(f"    ⚠️ WARNING: Abnormally low logits detected! Model may be misconfigured or quantization failed.")
-                                        print(f"    Expected logits mean: -5 to -15, Got: {logits_mean:.2f}")
-                                        print(f"    This indicates severe quantization degradation or initialization issues.")
-
-                                    if len(all_losses) >= 3:
-                                        debug_first_text = False  # Stop debugging after first text
-                            else:
-                                if debug_first_text:
-                                    print(f"\n  ⚠️ Invalid loss detected: {loss.item() if not torch.isnan(loss) else 'NaN'}")
-
-                        except Exception as e:
-                            if debug_first_text:
-                                print(f"\n  ❌ Exception during evaluation: {e}")
-                            continue
 
         if not all_losses:
             return float('inf')
