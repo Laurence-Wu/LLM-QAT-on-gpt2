@@ -204,67 +204,67 @@ class PerplexityEvaluator:
 
                 # Use sliding window approach similar to test_inference.py
                 for begin_loc in range(0, seq_len, stride):
-                end_loc = min(begin_loc + max_length, seq_len)
-                if end_loc - begin_loc < 10:
-                    break
+                    end_loc = min(begin_loc + max_length, seq_len)
+                    if end_loc - begin_loc < 10:
+                        break
 
-                input_ids = encodings.input_ids[:, begin_loc:end_loc].to(self.device)
+                    input_ids = encodings.input_ids[:, begin_loc:end_loc].to(self.device)
 
-                with torch.no_grad():
-                    try:
-                        outputs = self.model(input_ids)
+                    with torch.no_grad():
                         try:
-                            logits = outputs.logits
-                        except AttributeError:
+                            outputs = self.model(input_ids)
                             try:
-                                logits = outputs[0]
-                            except (IndexError, TypeError):
-                                print(f"Warning: Could not extract logits from outputs type {type(outputs)}")
-                                continue
+                                logits = outputs.logits
+                            except AttributeError:
+                                try:
+                                    logits = outputs[0]
+                                except (IndexError, TypeError):
+                                    print(f"Warning: Could not extract logits from outputs type {type(outputs)}")
+                                    continue
 
-                        # Calculate loss using standard next-token prediction
-                        shift_logits = logits[..., :-1, :].contiguous()
-                        shift_labels = input_ids[..., 1:].contiguous()
+                            # Calculate loss using standard next-token prediction
+                            shift_logits = logits[..., :-1, :].contiguous()
+                            shift_labels = input_ids[..., 1:].contiguous()
 
-                        loss_fct = torch.nn.CrossEntropyLoss()
-                        loss = loss_fct(
-                            shift_logits.view(-1, shift_logits.size(-1)),
-                            shift_labels.view(-1)
-                        )
+                            loss_fct = torch.nn.CrossEntropyLoss()
+                            loss = loss_fct(
+                                shift_logits.view(-1, shift_logits.size(-1)),
+                                shift_labels.view(-1)
+                            )
 
-                        if not torch.isnan(loss) and not torch.isinf(loss):
-                            loss_value = loss.item()
-                            all_losses.append(loss_value)
+                            if not torch.isnan(loss) and not torch.isinf(loss):
+                                loss_value = loss.item()
+                                all_losses.append(loss_value)
 
-                            # Debug first few losses
-                            if debug_first_text and len(all_losses) <= 3:
-                                print(f"\n  Debug segment {len(all_losses)}:")
-                                print(f"    Input shape: {input_ids.shape}")
-                                print(f"    Logits shape: {logits.shape}")
-                                print(f"    Loss: {loss_value:.4f} (PPL: {math.exp(loss_value):.2f})")
-                                # Check logits statistics
-                                logits_mean = logits.mean().item()
-                                logits_std = logits.std().item()
-                                logits_min = logits.min().item()
-                                logits_max = logits.max().item()
-                                print(f"    Logits stats: mean={logits_mean:.2f}, std={logits_std:.2f}, min={logits_min:.2f}, max={logits_max:.2f}")
+                                # Debug first few losses
+                                if debug_first_text and len(all_losses) <= 3:
+                                    print(f"\n  Debug segment {len(all_losses)}:")
+                                    print(f"    Input shape: {input_ids.shape}")
+                                    print(f"    Logits shape: {logits.shape}")
+                                    print(f"    Loss: {loss_value:.4f} (PPL: {math.exp(loss_value):.2f})")
+                                    # Check logits statistics
+                                    logits_mean = logits.mean().item()
+                                    logits_std = logits.std().item()
+                                    logits_min = logits.min().item()
+                                    logits_max = logits.max().item()
+                                    print(f"    Logits stats: mean={logits_mean:.2f}, std={logits_std:.2f}, min={logits_min:.2f}, max={logits_max:.2f}")
 
-                                # Warning for abnormal logits
-                                if logits_mean < -50:
-                                    print(f"    ⚠️ WARNING: Abnormally low logits detected! Model may be misconfigured or quantization failed.")
-                                    print(f"    Expected logits mean: -5 to -15, Got: {logits_mean:.2f}")
-                                    print(f"    This indicates severe quantization degradation or initialization issues.")
+                                    # Warning for abnormal logits
+                                    if logits_mean < -50:
+                                        print(f"    ⚠️ WARNING: Abnormally low logits detected! Model may be misconfigured or quantization failed.")
+                                        print(f"    Expected logits mean: -5 to -15, Got: {logits_mean:.2f}")
+                                        print(f"    This indicates severe quantization degradation or initialization issues.")
 
-                                if len(all_losses) >= 3:
-                                    debug_first_text = False  # Stop debugging after first text
-                        else:
+                                    if len(all_losses) >= 3:
+                                        debug_first_text = False  # Stop debugging after first text
+                            else:
+                                if debug_first_text:
+                                    print(f"\n  ⚠️ Invalid loss detected: {loss.item() if not torch.isnan(loss) else 'NaN'}")
+
+                        except Exception as e:
                             if debug_first_text:
-                                print(f"\n  ⚠️ Invalid loss detected: {loss.item() if not torch.isnan(loss) else 'NaN'}")
-
-                    except Exception as e:
-                        if debug_first_text:
-                            print(f"\n  ❌ Exception during evaluation: {e}")
-                        continue
+                                print(f"\n  ❌ Exception during evaluation: {e}")
+                            continue
 
         if not all_losses:
             return float('inf')
