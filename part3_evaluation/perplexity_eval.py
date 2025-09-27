@@ -48,10 +48,8 @@ class PerplexityEvaluator:
                 dataset_name_str = wiki_cfg.get('dataset_name', 'wikitext')
                 config_str = wiki_cfg.get('config', 'wikitext-2-raw-v1')
                 split_str = wiki_cfg.get('split', 'test')
-                print(f"  Loading WikiText2: {dataset_name_str}, config={config_str}, split={split_str}")
                 dataset = load_dataset(dataset_name_str, config_str, split=split_str)
                 texts = [item['text'] for item in dataset if item['text'].strip()]
-                print(f"  Loaded {len(texts)} texts from WikiText2")
             except Exception as e:
                 print(f"Warning: Could not load {dataset_name} dataset: {e}")
                 return float('inf')
@@ -61,10 +59,8 @@ class PerplexityEvaluator:
                 dataset_name_str = wiki_cfg.get('dataset_name', 'wikitext')
                 config_str = wiki_cfg.get('config', 'wikitext-103-raw-v1')
                 split_str = wiki_cfg.get('split', 'test')
-                print(f"  Loading WikiText103: {dataset_name_str}, config={config_str}, split={split_str}")
                 dataset = load_dataset(dataset_name_str, config_str, split=split_str)
                 texts = [item['text'] for item in dataset if item['text'].strip()]
-                print(f"  Loaded {len(texts)} texts from WikiText103")
             except Exception as e:
                 print(f"Warning: Could not load {dataset_name} dataset: {e}")
                 return float('inf')
@@ -105,15 +101,8 @@ class PerplexityEvaluator:
         context_size = max_length // 2  # First half for context
         predict_size = max_length - context_size  # Second half for prediction
 
-        print(f"Using SLIDING WINDOW with proper context handling:")
-        print(f"  Window size: {max_length} tokens")
-        print(f"  Context size: {context_size} tokens (not scored)")
-        print(f"  Prediction size: {predict_size} tokens (scored)")
-        print(f"  Stride: {stride} tokens")
-        print(f"Processing {min(len(texts), max_texts)} texts from {len(texts)} available")
-
-        # Add debug for first text
-        debug_first_text = True
+        print(f"Using sliding window: {max_length} tokens, stride: {stride}")
+        print(f"Processing {min(len(texts), max_texts)} texts")
 
         for text_idx, text in enumerate(tqdm(texts[:max_texts], desc=f"Processing {dataset_name}")):
             if not text.strip():
@@ -192,36 +181,7 @@ class PerplexityEvaluator:
                             loss_value = loss.item()
                             all_losses.append(loss_value)
 
-                            # Debug first few losses
-                            if debug_first_text and len(all_losses) <= 3:
-                                print(f"\n  Debug window {window_idx+1} (segment {len(all_losses)}):")
-                                print(f"    Window position: [{begin_loc}:{end_loc}]")
-                                print(f"    Input shape: {input_ids.shape}")
-                                print(f"    Context skipped: {skip_tokens} tokens")
-                                print(f"    Tokens scored: {shift_logits.shape[1]} tokens")
-                                print(f"    Loss: {loss_value:.4f} (PPL: {math.exp(loss_value):.2f})")
-                                # Check logits statistics
-                                logits_mean = logits.mean().item()
-                                logits_std = logits.std().item()
-                                logits_min = logits.min().item()
-                                logits_max = logits.max().item()
-                                print(f"    Logits stats: mean={logits_mean:.2f}, std={logits_std:.2f}, min={logits_min:.2f}, max={logits_max:.2f}")
-
-                                # Warning for abnormal logits
-                                if logits_mean < -50:
-                                    print(f"    ⚠️ WARNING: Abnormally low logits detected! Model may be misconfigured or quantization failed.")
-                                    print(f"    Expected logits mean: -5 to -15, Got: {logits_mean:.2f}")
-                                    print(f"    This indicates severe quantization degradation or initialization issues.")
-
-                                if len(all_losses) >= 3:
-                                    debug_first_text = False  # Stop debugging after first text
-                        else:
-                            if debug_first_text:
-                                print(f"\n  ⚠️ Invalid loss detected: {loss.item() if not torch.isnan(loss) else 'NaN'}")
-
                     except Exception as e:
-                        if debug_first_text:
-                            print(f"\n  ❌ Exception during evaluation: {e}")
                         continue
 
         if not all_losses:
@@ -242,36 +202,7 @@ class PerplexityEvaluator:
 
         perplexity = math.exp(avg_loss)
 
-        print(f"\n  === Loss Distribution Analysis ===")
-        print(f"  Processed {len(all_losses)} segments from {text_idx + 1} texts")
-        print(f"  Loss stats:")
-        print(f"    Mean: {avg_loss:.4f} (PPL: {perplexity:.2f})")
-        print(f"    Std:  {std_loss:.4f}")
-        print(f"    Min:  {min_loss:.4f} (PPL: {math.exp(min_loss):.2f})")
-        print(f"    Max:  {max_loss:.4f} (PPL: {math.exp(max_loss):.2f})")
-        print(f"  Percentiles:")
-        print(f"    25th: {p25:.4f} (PPL: {math.exp(p25):.2f})")
-        print(f"    50th: {p50:.4f} (PPL: {math.exp(p50):.2f})")
-        print(f"    75th: {p75:.4f} (PPL: {math.exp(p75):.2f})")
-        print(f"    95th: {p95:.4f} (PPL: {math.exp(p95):.2f})")
-
-        # Check for outliers
-        outlier_threshold = p95 + 1.5 * (p95 - p75)  # IQR method for extreme outliers
-        outliers = [l for l in all_losses if l > outlier_threshold]
-        if outliers:
-            print(f"  \n⚠️  Found {len(outliers)} extreme outliers (>{outlier_threshold:.2f})")
-            print(f"    Outlier mean: {np.mean(outliers):.4f} (PPL: {math.exp(np.mean(outliers)):.2f})")
-
-            # Calculate perplexity without outliers
-            filtered_losses = [l for l in all_losses if l <= outlier_threshold]
-            if filtered_losses:
-                filtered_avg = np.mean(filtered_losses)
-                filtered_ppl = math.exp(filtered_avg)
-                print(f"    Without outliers: loss={filtered_avg:.4f}, PPL={filtered_ppl:.2f}")
-
-        # Sample some actual losses to see the pattern
-        print(f"\n  Sample losses (first 10): {[f'{l:.3f}' for l in all_losses[:10]]}")
-        print(f"  Sample losses (last 10):  {[f'{l:.3f}' for l in all_losses[-10:]]}")
+        print(f"  Processed {len(all_losses)} segments, PPL: {perplexity:.1f}")
 
         return perplexity
 
