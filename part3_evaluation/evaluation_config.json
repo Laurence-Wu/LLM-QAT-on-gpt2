@@ -89,7 +89,7 @@
     }
   },
   "perplexity": {
-    "stride": 32,
+    "stride": 256,
     "max_length": 256,
     "max_samples": 100000,
     "batch_size": 1,
@@ -113,7 +113,7 @@
     }
   },
   "perplexity_long_context": {
-    "stride": 32,
+    "stride": 512,
     "max_length": 1024,
     "max_samples": 10000,
     "batch_size": 1,

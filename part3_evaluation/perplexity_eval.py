@@ -18,12 +18,24 @@ class PerplexityEvaluator:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-    def calculate_perplexity(self, dataset_name: str, bit_config: Dict) -> float:
-        """Simplified perplexity calculation using the same approach as test files."""
+    def calculate_perplexity(self, dataset_name: str, bit_config: Dict, use_simple_method: bool = False) -> float:
+        """
+        Calculate perplexity with option to use simple method or sliding window.
+
+        Args:
+            dataset_name: Name of dataset to evaluate
+            bit_config: Bit configuration for the model
+            use_simple_method: If True, use simple method like test_inference.py (no sliding window)
+        """
 
         stride = self.config['stride']
         max_length = self.config['max_length']
         self.model.eval()
+
+        # Verify model is in eval mode
+        if self.model.training:
+            print("⚠️ WARNING: Model was not in eval mode! Setting to eval now...")
+            self.model.eval()
 
         # Load dataset from config
         datasets_config = self.config.get('datasets', {})
@@ -31,24 +43,26 @@ class PerplexityEvaluator:
         if dataset_name == 'wikitext2':
             try:
                 wiki_cfg = datasets_config.get('WikiText2', {})
-                dataset = load_dataset(
-                    wiki_cfg.get('dataset_name', 'wikitext'),
-                    wiki_cfg.get('config', 'wikitext-2-raw-v1'),
-                    split=wiki_cfg.get('split', 'test')
-                )
+                dataset_name_str = wiki_cfg.get('dataset_name', 'wikitext')
+                config_str = wiki_cfg.get('config', 'wikitext-2-raw-v1')
+                split_str = wiki_cfg.get('split', 'test')
+                print(f"  Loading WikiText2: {dataset_name_str}, config={config_str}, split={split_str}")
+                dataset = load_dataset(dataset_name_str, config_str, split=split_str)
                 texts = [item['text'] for item in dataset if item['text'].strip()]
+                print(f"  Loaded {len(texts)} texts from WikiText2")
             except Exception as e:
                 print(f"Warning: Could not load {dataset_name} dataset: {e}")
                 return float('inf')
         elif dataset_name == 'wikitext103':
             try:
                 wiki_cfg = datasets_config.get('WikiText103', {})
-                dataset = load_dataset(
-                    wiki_cfg.get('dataset_name', 'wikitext'),
-                    wiki_cfg.get('config', 'wikitext-103-raw-v1'),
-                    split=wiki_cfg.get('split', 'test')
-                )
+                dataset_name_str = wiki_cfg.get('dataset_name', 'wikitext')
+                config_str = wiki_cfg.get('config', 'wikitext-103-raw-v1')
+                split_str = wiki_cfg.get('split', 'test')
+                print(f"  Loading WikiText103: {dataset_name_str}, config={config_str}, split={split_str}")
+                dataset = load_dataset(dataset_name_str, config_str, split=split_str)
                 texts = [item['text'] for item in dataset if item['text'].strip()]
+                print(f"  Loaded {len(texts)} texts from WikiText103")
             except Exception as e:
                 print(f"Warning: Could not load {dataset_name} dataset: {e}")
                 return float('inf')
@@ -85,9 +99,15 @@ class PerplexityEvaluator:
         all_losses = []
         max_texts = self.config.get('max_samples', 100)
 
-        print(f"Processing {min(len(texts), max_texts)} texts with max_length={max_length}, stride={stride}")
+        if use_simple_method:
+            print(f"Using SIMPLE method (like test_inference.py) - no sliding window")
+            print(f"Processing {min(len(texts), max_texts)} texts with max_length={max_length}")
+        else:
+            print(f"Using SLIDING WINDOW method with max_length={max_length}, stride={stride}")
+            print(f"Processing {min(len(texts), max_texts)} texts")
+            print(f"Note: With stride={stride}, this will create ~{max_length//stride}x more segments than stride={max_length}")
+
         print(f"Total texts available: {len(texts)}")
-        print(f"Note: With stride={stride}, this will create ~{max_length//stride}x more segments than stride={max_length}")
 
         # Add debug for first text
         debug_first_text = True
@@ -96,21 +116,94 @@ class PerplexityEvaluator:
             if not text.strip():
                 continue
 
-            # Tokenize text
-            encodings = self.tokenizer(
-                text,
-                return_tensors='pt',
-                truncation=True,
-                max_length=max_length * 4,  # Allow longer for sliding window
-                padding=False
-            )
+            if use_simple_method:
+                # Simple method: process entire text at once (with truncation)
+                encodings = self.tokenizer(
+                    text,
+                    return_tensors='pt',
+                    truncation=True,
+                    max_length=max_length,
+                    padding=False
+                )
 
-            seq_len = encodings.input_ids.size(1)
-            if seq_len < 10:
-                continue
+                seq_len = encodings.input_ids.size(1)
+                if seq_len < 10:
+                    continue
 
-            # Use sliding window approach similar to test_inference.py
-            for begin_loc in range(0, seq_len, stride):
+                input_ids = encodings.input_ids.to(self.device)
+
+                with torch.no_grad():
+                    try:
+                        outputs = self.model(input_ids)
+                        try:
+                            logits = outputs.logits
+                        except AttributeError:
+                            try:
+                                logits = outputs[0]
+                            except (IndexError, TypeError):
+                                print(f"Warning: Could not extract logits from outputs type {type(outputs)}")
+                                continue
+
+                        # Calculate loss using standard next-token prediction
+                        shift_logits = logits[..., :-1, :].contiguous()
+                        shift_labels = input_ids[..., 1:].contiguous()
+
+                        loss_fct = torch.nn.CrossEntropyLoss()
+                        loss = loss_fct(
+                            shift_logits.view(-1, shift_logits.size(-1)),
+                            shift_labels.view(-1)
+                        )
+
+                        if not torch.isnan(loss) and not torch.isinf(loss):
+                            loss_value = loss.item()
+                            all_losses.append(loss_value)
+
+                            # Debug first few losses
+                            if debug_first_text and len(all_losses) <= 3:
+                                print(f"\n  Debug text {len(all_losses)}:")
+                                print(f"    Input shape: {input_ids.shape}")
+                                print(f"    Logits shape: {logits.shape}")
+                                print(f"    Loss: {loss_value:.4f} (PPL: {math.exp(loss_value):.2f})")
+                                # Check logits statistics
+                                logits_mean = logits.mean().item()
+                                logits_std = logits.std().item()
+                                logits_min = logits.min().item()
+                                logits_max = logits.max().item()
+                                print(f"    Logits stats: mean={logits_mean:.2f}, std={logits_std:.2f}, min={logits_min:.2f}, max={logits_max:.2f}")
+
+                                # Warning for abnormal logits
+                                if logits_mean < -50:
+                                    print(f"    ⚠️ WARNING: Abnormally low logits detected! Model may be misconfigured or quantization failed.")
+                                    print(f"    Expected logits mean: -5 to -15, Got: {logits_mean:.2f}")
+                                    print(f"    This indicates severe quantization degradation or initialization issues.")
+
+                                if len(all_losses) >= 3:
+                                    debug_first_text = False  # Stop debugging after first text
+                        else:
+                            if debug_first_text:
+                                print(f"\n  ⚠️ Invalid loss detected: {loss.item() if not torch.isnan(loss) else 'NaN'}")
+
+                    except Exception as e:
+                        if debug_first_text:
+                            print(f"\n  ❌ Exception during evaluation: {e}")
+                        continue
+
+            else:
+                # Original sliding window method
+                encodings = self.tokenizer(
+                    text,
+                    return_tensors='pt',
+                    truncation=True,
+                    max_length=max_length * 4,  # Allow longer for sliding window
+                    padding=False
+                )
+
+                seq_len = encodings.input_ids.size(1)
+                if seq_len < 10:
+                    continue
+
+                # Use sliding window approach similar to test_inference.py
+                for begin_loc in range(0, seq_len, stride):
                 end_loc = min(begin_loc + max_length, seq_len)
                 if end_loc - begin_loc < 10:
                     break
@@ -155,6 +248,12 @@ class PerplexityEvaluator:
                                 logits_min = logits.min().item()
                                 logits_max = logits.max().item()
                                 print(f"    Logits stats: mean={logits_mean:.2f}, std={logits_std:.2f}, min={logits_min:.2f}, max={logits_max:.2f}")
+
+                                # Warning for abnormal logits
+                                if logits_mean < -50:
+                                    print(f"    ⚠️ WARNING: Abnormally low logits detected! Model may be misconfigured or quantization failed.")
+                                    print(f"    Expected logits mean: -5 to -15, Got: {logits_mean:.2f}")
+                                    print(f"    This indicates severe quantization degradation or initialization issues.")
 
                                 if len(all_losses) >= 3:
                                     debug_first_text = False  # Stop debugging after first text

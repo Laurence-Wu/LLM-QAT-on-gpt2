@@ -197,6 +197,10 @@ def main():
     parser.add_argument('--eval_config', type=str,
                        default='evaluation_config.json',
                        help='Path to evaluation configuration JSON file')
+    parser.add_argument('--diagnose', action='store_true',
+                       help='Run quantization health diagnostic before evaluation')
+    parser.add_argument('--use-simple-perplexity', action='store_true',
+                       help='Use simple perplexity method (like test_inference.py) instead of sliding window')
     args = parser.parse_args()
 
     # Load configurations
@@ -216,6 +220,35 @@ def main():
 
     # Initialize evaluators
     device = eval_config.get('device', 'cuda')
+
+    # Run diagnostic if requested
+    if args.diagnose:
+        print("\n" + "="*70)
+        print("Running Comprehensive Quantization Diagnostics...")
+        print("="*70)
+        from diagnose_quantization import (
+            comprehensive_diagnosis,
+            test_simple_vs_sliding_perplexity,
+            track_batch_degradation
+        )
+
+        # Run comprehensive diagnosis
+        diagnostic_results = comprehensive_diagnosis(model, tokenizer, device)
+
+        # Check for issues
+        has_issues = False
+        if 'perplexity_comparison' in diagnostic_results:
+            simple_ppl = diagnostic_results['perplexity_comparison']['simple'].get('perplexity', 0)
+            sliding_ppl = diagnostic_results['perplexity_comparison']['sliding'].get('perplexity', 0)
+            if simple_ppl > 0 and sliding_ppl > 0 and sliding_ppl / simple_ppl > 1.5:
+                has_issues = True
+                print("\n⚠️ WARNING: Sliding window method shows degradation!")
+                print(f"   Simple method PPL: {simple_ppl:.2f}")
+                print(f"   Sliding window PPL: {sliding_ppl:.2f}")
+                print("   Consider using simple method for evaluation.")
+
+        print("\nDiagnostic complete. Proceeding with evaluation...\n")
+
     evaluator = LLMQATEvaluation(model, tokenizer)
     zero_shot_evaluator = ZeroShotEvaluator(model, tokenizer, device=device, config=eval_config.get('zero_shot', {}))
     few_shot_evaluator = FewShotEvaluator(model, tokenizer, device=device, config=eval_config.get('few_shot', {}))
@@ -238,8 +271,30 @@ def main():
 
     # 1. Perplexity evaluation
     print("\n1. Perplexity evaluation...")
+    if args.use_simple_perplexity:
+        print("   Using SIMPLE perplexity method (no sliding window)")
     try:
-        perplexity_results = perplexity_evaluator.evaluate_all_datasets(bit_config)
+        # Modify evaluation method based on argument
+        if args.use_simple_perplexity:
+            # Use simple method for each dataset
+            perplexity_results = {}
+            for dataset in ['wikitext2', 'wikitext103', 'openwebtext']:
+                if dataset == 'wikitext2' and 'WikiText2' in perplexity_evaluator.config.get('datasets', {}):
+                    print(f"   Calculating WikiText2 perplexity (simple method)...")
+                    ppl = perplexity_evaluator.calculate_perplexity('wikitext2', bit_config, use_simple_method=True)
+                    perplexity_results['WikiText2'] = round(ppl, 1)
+                elif dataset == 'wikitext103' and 'WikiText103' in perplexity_evaluator.config.get('datasets', {}):
+                    print(f"   Calculating WikiText103 perplexity (simple method)...")
+                    ppl = perplexity_evaluator.calculate_perplexity('wikitext103', bit_config, use_simple_method=True)
+                    perplexity_results['WikiText103'] = round(ppl, 1)
+                elif dataset == 'openwebtext':
+                    print(f"   Calculating OpenWebText perplexity (simple method)...")
+                    ppl = perplexity_evaluator.calculate_perplexity('openwebtext', bit_config, use_simple_method=True)
+                    perplexity_results['OpenWebText'] = round(ppl, 1)
+        else:
+            # Use original sliding window method
+            perplexity_results = perplexity_evaluator.evaluate_all_datasets(bit_config)
+
         results['perplexity'] = perplexity_results
         for dataset, ppl in perplexity_results.items():
             print(f"   {dataset}: {ppl:.1f}")
