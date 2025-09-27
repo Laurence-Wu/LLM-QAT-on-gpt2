@@ -147,14 +147,21 @@ class PerplexityEvaluator:
                 with torch.no_grad():
                     try:
                         outputs = self.model(input_ids)
-                        try:
-                            logits = outputs.logits
-                        except AttributeError:
+
+                        # Check if outputs is already a tensor (raw logits)
+                        if isinstance(outputs, torch.Tensor):
+                            logits = outputs  # Use directly, preserves batch dimension
+                        else:
+                            # Try to extract logits from dict/object
                             try:
-                                logits = outputs[0]
-                            except (IndexError, TypeError):
-                                print(f"Warning: Could not extract logits from outputs type {type(outputs)}")
-                                continue
+                                logits = outputs.logits
+                            except AttributeError:
+                                try:
+                                    # Only use indexing for non-tensor outputs
+                                    logits = outputs[0]
+                                except (IndexError, TypeError):
+                                    print(f"Warning: Could not extract logits from outputs type {type(outputs)}")
+                                    continue
 
                         # Calculate loss using standard next-token prediction
                         shift_logits = logits[..., :-1, :].contiguous()
