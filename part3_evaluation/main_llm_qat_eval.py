@@ -101,7 +101,8 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
         config.lora_alpha_per_bit = model_config.get('lora_alpha_per_bit', {})
         config.activation_bits_per_bit = model_config.get('activation_bits_per_bit', {})
         config.quantizer_per_bit = model_config.get('quantizer_per_bit', {})
-        config.per_channel_quantization = False  # Always use per-tensor for evaluation
+        # CRITICAL: Use per-tensor quantization for evaluation
+        config.per_channel_quantization = False
 
         # Convert string keys to int for dictionaries
         for attr_name in ['lora_rank_per_bit', 'lora_alpha_per_bit', 'activation_bits_per_bit', 'quantizer_per_bit']:
@@ -134,11 +135,9 @@ def load_switchable_model(model_path: str = None, config_path: str = None, use_p
 
 
 def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
-    """Calibrate input quantizers for evaluation"""
+    """Simplified calibration for evaluation using the quantizer's built-in methods"""
 
-    print("\n" + "="*60)
-    print("CALIBRATING INPUT QUANTIZERS FOR EVALUATION")
-    print("="*60)
+    print("\nCalibrating quantizers for evaluation...")
 
     # Get current bit width
     current_bits = None
@@ -153,43 +152,42 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
         print(f"No calibration needed (current_bits: {current_bits})")
         return model
 
-    bits_key = f'{current_bits}bit'
     print(f"Calibrating for {current_bits}-bit precision")
 
-    # Prepare input quantizers for calibration
+    # Find input quantizers that need calibration
+    bits_key = f'{current_bits}bit'
     input_quantizers = []
     for name, module in model.named_modules():
         try:
-            quantizers_input = module.quantizers_input
-            if bits_key not in quantizers_input:
-                continue
-
-            quantizer = quantizers_input[bits_key]
-            # Reset calibration state
-            quantizer.calibrated = False
-            quantizer.collecting_stats = True
-            quantizer.num_batches_collected = 0
-            quantizer.temp_min = None
-            quantizer.temp_max = None
-            input_quantizers.append((name, quantizer))
+            if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
+                quantizer = module.quantizers_input[bits_key]
+                quantizer.start_calibration()  # Use built-in method
+                input_quantizers.append((name, quantizer))
         except AttributeError:
-            # Module doesn't have quantizers_input
             continue
 
-    print(f"Found {len(input_quantizers)} input quantizers to calibrate")
+    if not input_quantizers:
+        print("No input quantizers found")
+        return model
 
-    # Load calibration data if not provided
+    print(f"Found {len(input_quantizers)} input quantizers")
+
+    # Load calibration data
     if eval_texts is None:
-        dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split='validation')
-        eval_texts = [item['text'] for item in dataset if item['text'].strip()][:num_batches]
+        try:
+            dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split='validation')
+            eval_texts = [item['text'] for item in dataset if item['text'].strip()][:50]
+        except Exception as e:
+            print(f"Warning: Could not load calibration data: {e}")
+            return model
 
     # Collect statistics
     model.eval()
     device = next(model.parameters()).device
 
     with torch.no_grad():
-        for text in eval_texts:
-            if not text.strip():
+        for i, text in enumerate(eval_texts):
+            if not text.strip() or i >= num_batches:
                 continue
 
             inputs = tokenizer(
@@ -199,20 +197,17 @@ def calibrate_for_evaluation(model, tokenizer, eval_texts=None, num_batches=10):
                 max_length=256,
                 padding=False
             )
-            inputs = {k: v.to(device) for k, v in inputs.items()}
 
             try:
-                _ = model(inputs['input_ids'])
+                _ = model(inputs['input_ids'].to(device))
             except Exception:
                 continue
 
-    # Finish calibration using built-in quantizer method
+    # Finish calibration
     for name, quantizer in input_quantizers:
         quantizer.finish_calibration()
 
-    print(f"✓ Calibration completed for {len(input_quantizers)} quantizers")
-    print("="*60 + "\n")
-
+    print(f"✓ Calibration completed")
     return model
 
 
