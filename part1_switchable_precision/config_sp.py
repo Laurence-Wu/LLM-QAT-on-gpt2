@@ -25,6 +25,7 @@ class ModelConfig:
         # Quantizer type: 'minmax', 'relu_clip', 'tanh', or 'log'
         self.quantizer_type = 'log'  # Default to log quantization
         self.quantizer_per_bit = {
+            4: 'log',    # Use log for 4-bit (non-uniform quantization)
             6: 'log',    # Use log for 6-bit (non-uniform quantization)
             8: 'log',    # Use log for 8-bit (non-uniform quantization)
             16: 'log',   # Use log for 16-bit (non-uniform quantization)
@@ -36,18 +37,18 @@ class ModelConfig:
         self.lora_alpha = 32
 
         # Switchable precision settings
-        self.bit_widths = [6, 8, 16, 32]  # Include teacher bit-width in list
+        self.bit_widths = [4, 6, 8, 16, 32]  # Include teacher bit-width in list
         self.teacher_bits = 32  # Teacher uses FP32 (no quantization)
 
 
         # Lower precision uses HIGHER rank to compensate for quantization errors
         # CRITICAL: 32-bit must have rank=0 (no LoRA for teacher)
         # 6-bit needs much higher rank due to quantization cliff
-        self.lora_rank_per_bit = {6: 32, 8: 16, 16: 16, 32: 0}  # Increased 6-bit rank from 12 to 32
-        self.lora_alpha_per_bit = {6: 64, 8: 32, 16: 32, 32: 0}  # Increased 6-bit alpha accordingly
+        self.lora_rank_per_bit = {4: 64, 6: 32, 8: 16, 16: 16, 32: 0}  # Increased 4-bit rank from 12 to 64
+        self.lora_alpha_per_bit = {4: 128, 6: 64, 8: 32, 16: 32, 32: 0}  # Increased 4-bit alpha accordingly
 
         # Activation bits per weight precision
-        self.activation_bits_per_bit = {6: 6, 8: 8, 16: 16}  # Match weight precision
+        self.activation_bits_per_bit = {4: 4, 6: 6, 8: 8, 16: 16}  # Match weight precision
 
         # Quantization mode
         self.per_channel_quantization = True  # Use per-channel for training, False for evaluation
