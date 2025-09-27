@@ -91,7 +91,7 @@
   "perplexity": {
     "stride": 256,
     "max_length": 256,
-    "max_samples": 100000,
+    "max_samples": 500,
     "batch_size": 1,
     "datasets": {
       "WikiText2": {

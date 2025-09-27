@@ -75,7 +75,7 @@ class PerplexityEvaluator:
                 dataset = load_dataset(dataset_name_str, config_str, split=split_str, streaming=use_streaming)
 
                 texts = []
-                max_docs = min(self.config.get('max_samples', 100), 100)
+                max_docs = self.config.get('max_samples', 100)
                 for i, item in enumerate(dataset):
                     if i >= max_docs:
                         break

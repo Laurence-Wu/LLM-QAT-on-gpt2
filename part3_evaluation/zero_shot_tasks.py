@@ -45,8 +45,9 @@ class ZeroShotEvaluator:
         try:
             wino_cfg = dataset_configs['WinoGrande']
             tasks['WinoGrande'] = load_dataset(wino_cfg['dataset_name'], wino_cfg['config'], split=wino_cfg['split'])
-        except:
-            print("Warning: Could not load WinoGrande dataset")
+        except Exception as e:
+            print(f"Warning: Could not load WinoGrande dataset: {e}")
+            tasks['WinoGrande'] = None
 
         try:
             arce_cfg = dataset_configs['ARC-e']
@@ -131,45 +132,36 @@ class ZeroShotEvaluator:
             passage = example['passage']
             answer = example['answer']
 
-            if is_limited_context:
-                # Truncate passage for limited context models
-                passage = passage[:truncation['passage_limit']]
-                question = question[:truncation['question_limit']]
-                prompt = f"Passage: {passage}\nQ: {question}\nTrue/False:"
-            else:
-                prompt = f"Passage: {passage}\nQuestion: {question}\nAnswer (True/False):"
-            gen_cfg = self.config['generation']
-            predicted = self._generate_answer(prompt, max_length=gen_cfg['max_length'])
+            # Use likelihood-based scoring
+            # Truncate passage if needed to fit in context
+            max_passage_len = 150  # Conservative to leave room for question and answer
+            if len(passage) > max_passage_len:
+                passage = passage[:max_passage_len] + "..."
 
-            predicted_bool = 'true' in predicted.lower()
+            context_text = f"Passage: {passage}\nQuestion: {question}\nAnswer:"
+
+            # Compare likelihood of "True" vs "False"
+            choices = [" True", " False"]
+            predicted_idx = self._compute_choice_likelihood(context_text, choices)
+
+            # predicted_idx: 0 = True, 1 = False
+            predicted_bool = (predicted_idx == 0)
             return float(predicted_bool == answer)
 
         elif task_name == 'HellaSwag':
             context = example['ctx']
             endings = example['endings']
-            label = example['label']
+            label = int(example['label'])
 
-            if is_limited_context:
-                # Truncate for limited context
-                context = context[:truncation['context_limit']]
-                prompt = f"Context: {context}\n"
-                for i, ending in enumerate(endings[:4]):  # Limit endings
-                    ending_text = ending[:truncation['endings_limit']]  # Truncate each ending
-                    prompt += f"{chr(65+i)}: {ending_text}\n"
-                prompt += "Best:"
-            else:
-                prompt = f"Context: {context}\n"
-                for i, ending in enumerate(endings):
-                    prompt += f"{chr(65+i)}: {ending}\n"
-                prompt += "Which ending is most likely? Answer:"
+            # Use likelihood-based scoring
+            # Format: context should naturally continue with one of the endings
+            context_text = context.strip()
+            if not context_text.endswith(' '):
+                context_text += ' '
 
-            gen_cfg = self.config['generation']
-            predicted = self._generate_answer(prompt, max_length=gen_cfg['max_length'])
-
-            for i in range(len(endings)):
-                if chr(65+i).lower() in predicted.lower():
-                    return float(i == int(label))
-            return 0.0
+            # Compute likelihood for each ending
+            predicted_idx = self._compute_choice_likelihood(context_text, endings)
+            return float(predicted_idx == label)
 
         elif task_name == 'WinoGrande':
             sentence = example['sentence']
@@ -177,16 +169,23 @@ class ZeroShotEvaluator:
             option2 = example['option2']
             answer = example['answer']
 
-            if is_limited_context:
-                # More concise format
-                sentence = sentence[:truncation['context_limit']]
-                prompt = f"S: {sentence}\n1: {option1}\n2: {option2}\nBest:"
+            # Use likelihood-based scoring
+            # Replace _ with each option and compare likelihoods
+            choices = []
+            if '_' in sentence:
+                # Replace blank with each option
+                choices.append(sentence.replace('_', option1))
+                choices.append(sentence.replace('_', option2))
             else:
-                prompt = f"Sentence: {sentence}\nOption 1: {option1}\nOption 2: {option2}\nWhich option fills the blank better (1 or 2)?"
-            gen_cfg = self.config['generation']
-            predicted = self._generate_answer(prompt, max_length=gen_cfg['max_length'])
+                # If no blank, append options to sentence
+                choices.append(f"{sentence} {option1}")
+                choices.append(f"{sentence} {option2}")
 
-            predicted_answer = '1' if '1' in predicted else '2'
+            # Get most likely completion (empty context since we're scoring full sentences)
+            predicted_idx = self._compute_choice_likelihood("", choices)
+
+            # Answer is '1' or '2' (1-indexed)
+            predicted_answer = str(predicted_idx + 1)
             return float(predicted_answer == answer)
 
         elif task_name in ['ARC-e', 'ARC-c']:
@@ -194,52 +193,114 @@ class ZeroShotEvaluator:
             choices = example['choices']
             answer = example['answerKey']
 
-            if is_limited_context:
-                # Truncate question and choices
-                question = question[:truncation['context_limit']]
-                prompt = f"Q: {question}\n"
-                for i, choice in enumerate(choices['text'][:4]):  # Limit to 4 choices
-                    label = choices['label'][i]
-                    choice_text = choice[:truncation['choice_limit']]  # Truncate long choices
-                    prompt += f"{label}: {choice_text}\n"
-                prompt += "A:"
-            else:
-                prompt = f"Question: {question}\n"
-                for i, choice in enumerate(choices['text']):
-                    label = choices['label'][i]
-                    prompt += f"{label}: {choice}\n"
-                prompt += "Answer:"
+            # Use likelihood-based scoring
+            # Format context as question with "Answer:" prompt
+            context_text = f"Question: {question}\nAnswer:"
 
-            gen_cfg = self.config['generation']
-            predicted = self._generate_answer(prompt, max_length=gen_cfg['max_length'])
-            return float(answer.upper() in predicted.upper())
+            # Create choice completions with their labels
+            choice_texts = []
+            label_to_idx = {}
+            for i, (choice_text, choice_label) in enumerate(zip(choices['text'], choices['label'])):
+                # Each choice completion includes the label and text
+                choice_completion = f" {choice_label}. {choice_text}"
+                choice_texts.append(choice_completion)
+                label_to_idx[choice_label] = i
+
+            # Get predicted index
+            predicted_idx = self._compute_choice_likelihood(context_text, choice_texts)
+
+            # Check if predicted label matches answer
+            if answer in label_to_idx:
+                correct_idx = label_to_idx[answer]
+                return float(predicted_idx == correct_idx)
+            return 0.0
 
         elif task_name == 'OBQA':
             question = example['question_stem']
             choices = example['choices']
             answer = example['answerKey']
 
-            if is_limited_context:
-                # Truncate for limited context
-                question = question[:truncation['context_limit']]
-                prompt = f"Q: {question}\n"
-                for i, choice in enumerate(choices['text'][:4]):
-                    label = choices['label'][i]
-                    choice_text = choice[:truncation['choice_limit']]
-                    prompt += f"{label}: {choice_text}\n"
-                prompt += "A:"
-            else:
-                prompt = f"Question: {question}\n"
-                for i, choice in enumerate(choices['text']):
-                    label = choices['label'][i]
-                    prompt += f"{label}: {choice}\n"
-                prompt += "Answer:"
+            # Use likelihood-based scoring (same as ARC)
+            context_text = f"Question: {question}\nAnswer:"
 
-            gen_cfg = self.config['generation']
-            predicted = self._generate_answer(prompt, max_length=gen_cfg['max_length'])
-            return float(answer.upper() in predicted.upper())
+            # Create choice completions with their labels
+            choice_texts = []
+            label_to_idx = {}
+            for i, (choice_text, choice_label) in enumerate(zip(choices['text'], choices['label'])):
+                choice_completion = f" {choice_label}. {choice_text}"
+                choice_texts.append(choice_completion)
+                label_to_idx[choice_label] = i
+
+            # Get predicted index
+            predicted_idx = self._compute_choice_likelihood(context_text, choice_texts)
+
+            # Check if predicted label matches answer
+            if answer in label_to_idx:
+                correct_idx = label_to_idx[answer]
+                return float(predicted_idx == correct_idx)
+            return 0.0
 
         return 0.0
+
+    def _compute_choice_likelihood(self, context: str, choices: List[str]) -> int:
+        """
+        Compute log probabilities for each choice and return index of most likely.
+        Uses proper likelihood scoring for multiple-choice evaluation.
+        """
+        log_probs = []
+
+        for choice in choices:
+            # Tokenize context and full text (context + choice)
+            context_tokens = self.tokenizer(context, return_tensors='pt', padding=False, truncation=True, max_length=200)
+            full_text = context + choice
+            full_tokens = self.tokenizer(full_text, return_tensors='pt', padding=False, truncation=True, max_length=256)
+
+            # Move to device
+            input_ids = full_tokens['input_ids'].to(self.device)
+            context_length = context_tokens['input_ids'].shape[1]
+
+            # Get model outputs
+            with torch.no_grad():
+                outputs = self.model(input_ids)
+                if isinstance(outputs, torch.Tensor):
+                    logits = outputs
+                else:
+                    logits = outputs.logits
+
+                # Compute log probabilities for the choice tokens only
+                # We need probabilities from position (context_length-1) to predict choice tokens
+                if logits.dim() == 2:
+                    logits = logits.unsqueeze(0)  # Add batch dimension if needed
+
+                # Get log probabilities
+                log_probs_all = F.log_softmax(logits, dim=-1)
+
+                # Extract log probs for the choice tokens
+                choice_start = context_length - 1  # Start predicting from this position
+                choice_end = input_ids.shape[1] - 1  # Up to second-to-last position
+
+                if choice_start < choice_end:
+                    # Get predicted token positions
+                    predicted_tokens = input_ids[:, choice_start+1:choice_end+1]
+                    # Get corresponding log probs
+                    relevant_log_probs = log_probs_all[:, choice_start:choice_end, :]
+
+                    # Gather log probs for actual tokens
+                    token_log_probs = relevant_log_probs.gather(2, predicted_tokens.unsqueeze(-1)).squeeze(-1)
+
+                    # Sum log probabilities (or take mean to normalize for length)
+                    total_log_prob = token_log_probs.sum().item()
+                    # Normalize by number of tokens to avoid length bias
+                    avg_log_prob = total_log_prob / max(1, predicted_tokens.shape[1])
+                else:
+                    avg_log_prob = float('-inf')
+
+                log_probs.append(avg_log_prob)
+
+        # Return index of highest probability choice
+        if log_probs:
+            return max(range(len(log_probs)), key=lambda i: log_probs[i])
+        return 0  # Default to first choice if something goes wrong
 
     def _generate_answer(self, prompt: str, max_length: int) -> str:
         """Generate answer using the model with strict 256-token limit"""
