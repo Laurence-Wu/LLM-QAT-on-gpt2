@@ -370,10 +370,26 @@ def check_specific_layers(model, name):
     if hasattr(model, 'transformer') and hasattr(model.transformer, 'ln_f'):
         ln_f = model.transformer.ln_f
         print("\nFinal LayerNorm (ln_f) analysis:")
-        print(f"  Weight mean: {ln_f.weight.mean().item():.6f}")
-        print(f"  Weight std: {ln_f.weight.std().item():.6f}")
-        if hasattr(ln_f, 'bias') and ln_f.bias is not None:
-            print(f"  Bias mean: {ln_f.bias.mean().item():.6f}")
+
+        # Handle SwitchableLayerNorm which has weights per precision
+        if hasattr(ln_f, 'weights'):
+            # SwitchableLayerNorm case
+            current_precision = getattr(ln_f, 'current_precision', None)
+            print(f"  Type: SwitchableLayerNorm (current_precision: {current_precision})")
+            if current_precision and str(current_precision) in ln_f.weights:
+                weight = ln_f.weights[str(current_precision)]
+                print(f"  Weight mean: {weight.mean().item():.6f}")
+                print(f"  Weight std: {weight.std().item():.6f}")
+            if hasattr(ln_f, 'biases') and current_precision and str(current_precision) in ln_f.biases:
+                bias = ln_f.biases[str(current_precision)]
+                print(f"  Bias mean: {bias.mean().item():.6f}")
+        elif hasattr(ln_f, 'weight'):
+            # Standard LayerNorm case
+            print(f"  Type: Standard LayerNorm")
+            print(f"  Weight mean: {ln_f.weight.mean().item():.6f}")
+            print(f"  Weight std: {ln_f.weight.std().item():.6f}")
+            if hasattr(ln_f, 'bias') and ln_f.bias is not None:
+                print(f"  Bias mean: {ln_f.bias.mean().item():.6f}")
 
 
 def main():
