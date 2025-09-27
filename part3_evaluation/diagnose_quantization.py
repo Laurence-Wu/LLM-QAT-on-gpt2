@@ -19,7 +19,25 @@ def diagnose_quantization_health(model, tokenizer, device='cuda', test_text="The
     input_ids = inputs['input_ids'].to(device)
 
     results = {}
-    available_precisions = [32, 16, 8, 6] if hasattr(model, 'set_global_precision') else [8]
+
+    # Auto-detect available precisions from model
+    if hasattr(model, 'config') and hasattr(model.config, 'bit_widths'):
+        available_precisions = model.config.bit_widths
+        print(f"Detected available bit widths from model: {available_precisions}")
+    else:
+        # Try to get current precision only
+        current_precision = None
+        for module in model.modules():
+            if hasattr(module, 'current_bits'):
+                current_precision = module.current_bits
+                break
+
+        if current_precision:
+            available_precisions = [current_precision]
+            print(f"Testing current precision only: {current_precision}-bit")
+        else:
+            available_precisions = [8]  # Fallback
+            print("Warning: Could not detect bit widths, using default")
 
     print("\n" + "="*60)
     print("QUANTIZATION HEALTH DIAGNOSTIC")
@@ -27,12 +45,11 @@ def diagnose_quantization_health(model, tokenizer, device='cuda', test_text="The
 
     for precision in available_precisions:
         try:
-            if hasattr(model, 'set_global_precision'):
-                model.set_global_precision(precision)
-            elif hasattr(model, 'set_precision'):
+            # Use set_precision (the correct method)
+            if hasattr(model, 'set_precision'):
                 model.set_precision(precision)
             else:
-                print(f"Warning: Cannot set precision to {precision}-bit")
+                print(f"Warning: Model does not have set_precision method")
                 continue
 
             with torch.no_grad():
@@ -57,10 +74,19 @@ def diagnose_quantization_health(model, tokenizer, device='cuda', test_text="The
                 entropy = -torch.sum(probs * torch.log(probs + 1e-10), dim=-1).mean().item()
                 stats['entropy'] = entropy
 
-                # Get top predictions
-                top_probs, top_indices = torch.topk(probs[0, -1], k=5)
-                top_tokens = [tokenizer.decode([idx]) for idx in top_indices.cpu().numpy()]
-                stats['top_predictions'] = list(zip(top_tokens, top_probs.cpu().numpy().tolist()))
+                # Get top predictions (handle small vocab case)
+                try:
+                    vocab_size = probs.shape[-1]
+                    k = min(5, vocab_size)  # Don't request more than vocab size
+                    if probs.shape[0] > 0 and probs.shape[1] > 0:
+                        top_probs, top_indices = torch.topk(probs[0, -1], k=k)
+                        top_tokens = [tokenizer.decode([idx]) for idx in top_indices.cpu().numpy()]
+                        stats['top_predictions'] = list(zip(top_tokens, top_probs.cpu().numpy().tolist()))
+                    else:
+                        stats['top_predictions'] = []
+                except Exception as e:
+                    print(f"    Warning: Could not get top predictions: {e}")
+                    stats['top_predictions'] = []
 
                 results[f'{precision}bit'] = stats
 
@@ -214,6 +240,11 @@ def compute_simple_perplexity(model, tokenizer, text, device='cuda', max_length=
     """
     model.eval()
     model = model.to(device)
+
+    # Verify model is in eval mode
+    if model.training:
+        print("WARNING: Model was not in eval mode!")
+        model.eval()
 
     # Tokenize with truncation
     encodings = tokenizer(text, return_tensors='pt', truncation=True, max_length=max_length)
@@ -573,6 +604,54 @@ def verify_model_consistency(model, tokenizer, device='cuda', num_passes=3):
     return all_outputs
 
 
+def check_quantization_state(model):
+    """
+    Check the current quantization state of the model.
+    """
+    print("\n" + "="*60)
+    print("QUANTIZATION STATE CHECK")
+    print("="*60)
+
+    # Find current bit width
+    current_bits = None
+    quantized_layers = 0
+    total_layers = 0
+
+    for name, module in model.named_modules():
+        if hasattr(module, 'current_bits'):
+            if current_bits is None:
+                current_bits = module.current_bits
+            quantized_layers += 1
+
+        # Count linear layers
+        if 'Linear' in str(type(module)):
+            total_layers += 1
+
+    if current_bits:
+        print(f"Current precision: {current_bits}-bit")
+        print(f"Quantized layers: {quantized_layers}")
+        print(f"Total layers: {total_layers}")
+    else:
+        print("No quantization detected")
+
+    # Check if quantizers are calibrated
+    calibrated_quantizers = 0
+    total_quantizers = 0
+
+    for name, module in model.named_modules():
+        if hasattr(module, 'quantizers_input'):
+            for bit, quantizer in module.quantizers_input.items():
+                total_quantizers += 1
+                if hasattr(quantizer, 'scale') and quantizer.scale is not None:
+                    if quantizer.scale.numel() > 0:
+                        calibrated_quantizers += 1
+
+    if total_quantizers > 0:
+        print(f"Calibrated quantizers: {calibrated_quantizers}/{total_quantizers}")
+
+    return current_bits, quantized_layers, calibrated_quantizers
+
+
 def comprehensive_diagnosis(model, tokenizer, device='cuda'):
     """
     Run comprehensive diagnostics to identify evaluation issues.
@@ -582,7 +661,15 @@ def comprehensive_diagnosis(model, tokenizer, device='cuda'):
     print(" "*20 + "COMPREHENSIVE MODEL DIAGNOSTICS")
     print("="*80)
 
+    # First, check quantization state
+    current_bits, quantized_layers, calibrated = check_quantization_state(model)
+
     results = {}
+    results['quantization_state'] = {
+        'current_bits': current_bits,
+        'quantized_layers': quantized_layers,
+        'calibrated_quantizers': calibrated
+    }
 
     # 1. Basic quantization health
     print("\n[1/5] Running quantization health check...")
