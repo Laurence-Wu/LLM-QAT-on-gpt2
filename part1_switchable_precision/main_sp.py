@@ -21,15 +21,6 @@ from config_sp import ModelConfig, TrainingConfig
 from train_sp import train_sp
 
 def initialize_model(model_config, device):
-    try:
-        _ = model_config.lora_rank_per_bit
-        _ = model_config.lora_alpha_per_bit
-        _ = model_config.activation_bits_per_bit
-    except AttributeError as e:
-        print(f"Error: ModelConfig missing required attribute: {e}")
-        print("Required attributes: lora_rank_per_bit, lora_alpha_per_bit, activation_bits_per_bit")
-        print("These should be defined in ModelConfig class in config_sp.py")
-        raise AttributeError(f"ModelConfig missing required switchable precision attribute: {e}")
 
     gpt2_config = GPT2Config(
         vocab_size=model_config.vocab_size,

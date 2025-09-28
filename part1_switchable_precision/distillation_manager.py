@@ -135,11 +135,14 @@ class DistillationManager:
         self.teacher_cache[key] = entry
         self.cache_keys.append(key)
 
+
+    ## cache the teacher model loss
     def _get_from_cache(self, input_ids):
         key = self._get_batch_key(input_ids)
         result = self.teacher_cache.get(key)
 
         if result is not None:
+            # for debugging whether the teacher cache is working
             self.cache_hits += 1
         else:
             self.cache_misses += 1
@@ -148,6 +151,7 @@ class DistillationManager:
 
 
     def step(self):
+        ## track the loss step
         self.iteration_count += 1
 
     def get_cache_stats(self):
@@ -156,8 +160,6 @@ class DistillationManager:
 
         return {
             'cache_size': len(self.teacher_cache),
-            'cache_hits': self.cache_hits,
             'cache_misses': self.cache_misses,
-            'hit_rate': hit_rate,
             'total_requests': total_requests
         }
