@@ -4,6 +4,7 @@ import sys
 import torch
 import gc
 import json
+from datetime import datetime
 from transformers import GPT2Config, GPT2TokenizerFast
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -130,7 +131,7 @@ def load_pretrained_weights(model):
     del pretrained 
     torch.cuda.empty_cache()
     gc.collect()
-    # ncie summery to print out
+    # nice summary to print out
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     frozen_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
     total_params = trainable_params + frozen_params
@@ -158,9 +159,6 @@ def main():
     model_config = ModelConfig()
     training_config = TrainingConfig()
 
-    if not hasattr(training_config, 'calibration_samples'):
-        training_config.calibration_samples = 10
-
     model = initialize_model(model_config, device)
 
     tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
@@ -175,10 +173,6 @@ def main():
         max_length=training_config.max_seq_length,
         doc_stride=training_config.doc_stride
     )
-
-    print(f"GPU: {torch.cuda.get_device_name(0)}")
-    print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
-    print(f"Calibration samples per bit-width: {training_config.calibration_samples}")
 
     trained_model, training_stats = train_sp(
         model,

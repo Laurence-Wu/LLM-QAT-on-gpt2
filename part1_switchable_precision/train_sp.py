@@ -442,14 +442,12 @@ def train_sp(model, train_loader, val_loader, config, model_config):
     student_bits = [b for b in model_config.bit_widths if b < 32]
     calib_mgr.calibrate_all_precisions(student_bits)
 
-    distill_mgr = None
-    if config.use_distillation:
-        teacher_bits = model_config.teacher_bits if hasattr(model_config, 'teacher_bits') else 32
-        distill_mgr = DistillationManager(
-            model=model,
-            full_precision_bits=teacher_bits,
-            config=config
-        )
+    teacher_bits = model_config.teacher_bits
+    distill_mgr = DistillationManager(
+        model=model,
+        full_precision_bits=teacher_bits,
+        config=config
+    )
 
     optimizer = setup_optimizer(model, config)
     total_lr_steps = config.num_iterations * config.gradient_accumulation_steps

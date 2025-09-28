@@ -49,7 +49,6 @@ class TrainingConfig:
         self.eval_interval = 50
         self.empty_cache_interval = 25
         self.num_workers = 0
-        self.use_distillation = True
         self.distill_alpha_kl = 1.0
         self.distill_alpha_feature = 1e-7
         self.distill_temperature = 3.0
