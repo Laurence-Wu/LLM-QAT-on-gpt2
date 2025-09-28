@@ -278,8 +278,8 @@ def main(args):
     # Total cycles = num_epochs * steps_per_epoch * cycle_length
     # This ensures LR updates for every precision change
     cycles_per_epoch = len(train_loader)
-    cycle_length = cpt_config.cycle_length
-    total_lr_cycles = training_config.num_epochs * cycles_per_epoch * cycle_length
+    steps_per_cycle = cpt_config.cycle_length
+    total_lr_cycles = training_config.num_epochs * cycles_per_epoch * steps_per_cycle
 
     # Create cosine learning rate scheduler
     lr_scheduler = CosineAnnealingLR(
@@ -288,7 +288,7 @@ def main(args):
         eta_min=1e-6  # Minimum learning rate
     )
     print(f"Created LR scheduler with {total_lr_cycles:,} total cycles")
-    print(f"  ({training_config.num_epochs} epochs * {steps_per_epoch} batches * {cycle_length} precisions)")
+    print(f"  ({training_config.num_epochs} epochs * {cycles_per_epoch} batches * {steps_per_cycle} precisions)")
 
     # Training loop
     print("Starting CPT training...")
