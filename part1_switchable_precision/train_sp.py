@@ -513,8 +513,7 @@ def train_sp(model, train_loader, val_loader, config, model_config):
             if distill_mgr:
                 cache_stats = distill_mgr.get_cache_stats()
                 print(f"[Iter {iteration}] Cache stats - Size: {cache_stats['cache_size']}, "
-                      f"Hit rate: {cache_stats['hit_rate']:.2%}, "
-                      f"Hits: {cache_stats['cache_hits']}, Misses: {cache_stats['cache_misses']}")
+                      f"Misses: {cache_stats['cache_misses']}")
 
             model.train()
 

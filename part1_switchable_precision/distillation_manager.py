@@ -156,7 +156,6 @@ class DistillationManager:
 
     def get_cache_stats(self):
         total_requests = self.cache_hits + self.cache_misses
-        hit_rate = self.cache_hits / total_requests if total_requests > 0 else 0.0
 
         return {
             'cache_size': len(self.teacher_cache),

@@ -42,13 +42,6 @@ def initialize_model(model_config, device):
     gpt2_config.quantizer_per_bit = model_config.quantizer_per_bit
     gpt2_config.bit_widths = model_config.bit_widths
 
-    print(f"Initializing SP Model with configurations:")
-    print(f"  Bit widths: {model_config.bit_widths}")
-    print(f"  LoRA rank per bit: {model_config.lora_rank_per_bit}")
-    print(f"  LoRA alpha per bit: {model_config.lora_alpha_per_bit}")
-    print(f"  Activation bits per bit: {model_config.activation_bits_per_bit}")
-    print(f"  Quantizer per bit: {gpt2_config.quantizer_per_bit}")
-
     model = SPLMHeadModel(gpt2_config)
     model.use_gradient_checkpointing = True
 
@@ -57,32 +50,22 @@ def initialize_model(model_config, device):
     model = model.to(device)
 
     model.transformer.unfreeze_weights(32)
-    print("Set initial precision to 32-bit (teacher mode) - weights unfrozen for teacher training")
-
-    print(f"SP Model: {model_config.n_layer} layers, bit-widths: {model_config.bit_widths}")
-    print(f"Gradient checkpointing: {model.use_gradient_checkpointing}")
-
     return model
 
 def load_pretrained_weights(model):
     print("Loading pretrained GPT-2 weights")
-    from transformers import GPT2LMHeadModel
+    # use the exact weight from hugginggace gpt2 https://huggingface.co/openai-community/gpt2/blob/main/config.json
+    from transformers import GPT2LMHeadModel # have to do this base on the projection layer.
     pretrained = GPT2LMHeadModel.from_pretrained('gpt2')
-    import torch.nn as nn
 
     model.transformer.wte.weight.data = pretrained.transformer.wte.weight.data.clone()
     model.transformer.wte.weight.requires_grad = False
-
-    min_positions = min(model.transformer.wpe.weight.shape[0], pretrained.transformer.wpe.weight.shape[0])
-    model.transformer.wpe.weight.data[:min_positions] = pretrained.transformer.wpe.weight.data[:min_positions].clone()
+    model.transformer.wpe.weight.data = pretrained.transformer.wpe.weight.data.clone()
     model.transformer.wpe.weight.requires_grad = False
-
-    if model.transformer.wpe.weight.shape[0] != pretrained.transformer.wpe.weight.shape[0]:
-        print(f"Adjusted position embeddings from {pretrained.transformer.wpe.weight.shape[0]} to {model.transformer.wpe.weight.shape[0]}")
 
     model.lm_head.weight.requires_grad = False
 
-    for i in range(min(len(model.transformer.h), len(pretrained.transformer.h))):
+    for i in range(len(pretrained.transformer.h)):
         for precision in model.transformer.h[i].ln_1.precision_levels:
             model.transformer.h[i].ln_1.weights[str(precision)].data = pretrained.transformer.h[i].ln_1.weight.data.clone()
             model.transformer.h[i].ln_1.biases[str(precision)].data = pretrained.transformer.h[i].ln_1.bias.data.clone()
@@ -131,6 +114,7 @@ def load_pretrained_weights(model):
 
     for name, module in model.named_modules():
         if not any(target in name for target in target_modules):
+            # these do not have LoRA
             continue
         if not hasattr(module, 'lora_adapters'):
             continue
@@ -143,10 +127,10 @@ def load_pretrained_weights(model):
 
     print(f"Enabled {lora_count} LoRA adapter pairs for training")
 
-    del pretrained
+    del pretrained 
     torch.cuda.empty_cache()
     gc.collect()
-
+    # ncie summery to print out
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     frozen_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
     total_params = trainable_params + frozen_params
