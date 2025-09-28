@@ -21,9 +21,7 @@ class ZeroShotEvaluator:
         - BoolQ: Boolean yes/no questions
         - HellaSwag: Sentence completion
         - WinoGrande: Pronoun resolution
-        - ARC-easy: Science questions (easy)
-        - ARC-challenge: Science questions (hard)
-        - OBQA: OpenBookQA
+        (QA tasks removed: ARC-e, ARC-c, OBQA)
         """
         tasks = {}
 
@@ -49,26 +47,7 @@ class ZeroShotEvaluator:
             print(f"Warning: Could not load WinoGrande dataset: {e}")
             tasks['WinoGrande'] = None
 
-        try:
-            arce_cfg = dataset_configs['ARC-e']
-            tasks['ARC-e'] = load_dataset(arce_cfg['dataset_name'], arce_cfg['config'], split=arce_cfg['split'])
-        except Exception as e:
-            print(f"Warning: Could not load ARC-Easy dataset: {e}")
-            tasks['ARC-e'] = None
-
-        try:
-            arcc_cfg = dataset_configs['ARC-c']
-            tasks['ARC-c'] = load_dataset(arcc_cfg['dataset_name'], arcc_cfg['config'], split=arcc_cfg['split'])
-        except Exception as e:
-            print(f"Warning: Could not load ARC-Challenge dataset: {e}")
-            tasks['ARC-c'] = None
-
-        try:
-            obqa_cfg = dataset_configs['OBQA']
-            tasks['OBQA'] = load_dataset(obqa_cfg['dataset_name'], obqa_cfg['config'], split=obqa_cfg['split'])
-        except Exception as e:
-            print(f"Warning: Could not load OBQA dataset: {e}")
-            tasks['OBQA'] = None
+        # QA tasks (ARC-e, ARC-c, OBQA) removed - focusing on classification tasks only
 
         return tasks
 

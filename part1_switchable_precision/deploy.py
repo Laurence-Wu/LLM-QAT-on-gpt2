@@ -159,7 +159,7 @@ def save_sp_checkpoints(model, base_filename, model_config, training_config=None
     print(f"\nSaving SP checkpoints for bit widths: {bit_widths}")
 
     for bits in bit_widths:
-        if bits != 4 and bits != 5:
+        if bits != 32 and bits != 16:
             # Skip 32-bit models as requested (not needed for quantized deployment)
             print(f"\nSkipping {bits}-bit model (not needed for quantized deployment)")
             continue

@@ -61,23 +61,7 @@ class CPTEvaluation:
             'OpenWebText': results.get('OpenWebText', float('inf'))
         }
 
-    def evaluate_few_shot(self, bit_config: Dict, num_shots: int = 5) -> Dict:
-        """
-        5-shot evaluation on MMLU (by category) and TriviaQA
-        """
-        from few_shot_eval import FewShotEvaluator
-
-        self._apply_bit_config(bit_config)
-
-        evaluator = FewShotEvaluator(self.model, self.tokenizer)
-
-        mmlu_results = evaluator.evaluate_mmlu(bit_config, num_shots)
-        triviaqa_result = evaluator.evaluate_triviaqa(bit_config, num_shots)
-
-        return {
-            'MMLU': mmlu_results,
-            'TriviaQA': triviaqa_result
-        }
+    # Few-shot QA evaluation removed - focusing on language modeling metrics
 
     def calculate_model_size(self, bit_config: Dict) -> float:
         """
@@ -183,14 +167,7 @@ class CPTEvaluation:
             print(f"   WikiText2: {perplexity_results['WikiText2']:.1f}")
             print(f"   OpenWebText: {perplexity_results.get('OpenWebText', float('inf')):.1f}")
 
-            if not skip_few_shot:
-                print("\n3. Few-shot evaluation...")
-                few_shot_results = self.evaluate_few_shot(config)
-                results['few_shot'] = few_shot_results
-                if 'MMLU' in few_shot_results:
-                    print(f"   MMLU Average: {few_shot_results['MMLU'].get('Average', 0):.1f}%")
-                if 'TriviaQA' in few_shot_results:
-                    print(f"   TriviaQA: {few_shot_results['TriviaQA']:.1f}%")
+            # Few-shot evaluation removed
 
             all_results[config_name] = results
 
@@ -202,8 +179,7 @@ class CPTEvaluation:
         table_gen.generate_table_1_zero_shot()
         table_gen.generate_table_2_perplexity()
 
-        if not skip_few_shot:
-            table_gen.generate_table_7_few_shot()
+        # Few-shot table generation removed
 
         output_dir = Path('part3_eval_cpt/results')
         output_dir.mkdir(exist_ok=True, parents=True)

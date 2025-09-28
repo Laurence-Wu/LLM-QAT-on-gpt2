@@ -10,6 +10,7 @@ import torch
 import torch.nn.functional as F
 import sys
 import os
+from datetime import datetime
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -26,7 +27,6 @@ from datasets import load_dataset
 
 from sp_metrics import SPEvaluation
 from zero_shot_tasks import ZeroShotEvaluator
-from few_shot_eval import FewShotEvaluator
 from perplexity_eval import PerplexityEvaluator
 
 
@@ -249,7 +249,6 @@ def main():
 
     evaluator = SPEvaluation(model, tokenizer)
     zero_shot_evaluator = ZeroShotEvaluator(model, tokenizer, device=device, config=eval_config.get('zero_shot', {}))
-    few_shot_evaluator = FewShotEvaluator(model, tokenizer, device=device, config=eval_config.get('few_shot', {}))
     perplexity_evaluator = PerplexityEvaluator(model, tokenizer, device=device, config=eval_config.get('perplexity', {}))
 
     # Get current bit configuration
@@ -291,28 +290,15 @@ def main():
         print(f"   Warning: Zero-shot evaluation failed: {e}")
         results['zero_shot'] = {}
 
-    # 3. Few-shot evaluation
-    print("\n3. Few-shot evaluation (5-shot)...")
-    try:
-        mmlu_scores = few_shot_evaluator.evaluate_mmlu(bit_config, num_shots=5)
-        triviaqa_score = few_shot_evaluator.evaluate_triviaqa(bit_config, num_shots=5)
+    # Few-shot evaluation removed - focusing on perplexity and zero-shot classification only
 
-        results['few_shot'] = {
-            'MMLU': mmlu_scores,
-            'TriviaQA': triviaqa_score
-        }
-
-        print(f"   MMLU Average: {mmlu_scores.get('Average', 0):.1f}%")
-        print(f"   TriviaQA: {triviaqa_score:.1f}%")
-    except Exception as e:
-        print(f"   Warning: Few-shot evaluation failed: {e}")
-        results['few_shot'] = {}
-
-    # Save results
+    # Save results with timestamp
     output_dir = Path(eval_config.get('output', {}).get('directory', 'results'))
     output_dir.mkdir(exist_ok=True, parents=True)
 
-    results_file = output_dir / f"results_{current_bits}bit.json"
+    # Generate timestamp in format YYYYMMDD_HHMMSS
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    results_file = output_dir / f"results_{current_bits}bit_{timestamp}.json"
     with open(results_file, 'w') as f:
         json.dump(results, f, indent=2)
 
@@ -335,9 +321,6 @@ def main():
         if 'Average' in results['zero_shot']:
             print(f"  Zero-shot Avg: {results['zero_shot']['Average']:.1f}%")
 
-    if results.get('few_shot'):
-        if 'MMLU' in results['few_shot']:
-            print(f"  MMLU Avg: {results['few_shot']['MMLU'].get('Average', 0):.1f}%")
 
 
 if __name__ == "__main__":

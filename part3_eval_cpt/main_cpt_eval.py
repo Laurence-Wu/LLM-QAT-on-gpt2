@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional as F
 import sys
 import os
+from datetime import datetime
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -21,7 +22,6 @@ from load_cpt_model import load_cpt_model, verify_cpt_quantization_status
 from transformers import GPT2Tokenizer
 from cpt_metrics import CPTEvaluation
 from zero_shot_tasks import ZeroShotEvaluator
-from few_shot_eval import FewShotEvaluator
 from perplexity_eval import PerplexityEvaluator
 
 
@@ -126,17 +126,11 @@ def main():
         zero_shot_config = {}
 
     try:
-        few_shot_config = eval_config['few_shot']
-    except KeyError:
-        few_shot_config = {}
-
-    try:
         perplexity_config = eval_config['perplexity']
     except KeyError:
         perplexity_config = {}
 
     zero_shot_evaluator = ZeroShotEvaluator(model, tokenizer, device=device, config=zero_shot_config)
-    few_shot_evaluator = FewShotEvaluator(model, tokenizer, device=device, config=few_shot_config)
     perplexity_evaluator = PerplexityEvaluator(model, tokenizer, device=device, config=perplexity_config)
 
     # Get current bit configuration
@@ -180,23 +174,7 @@ def main():
         print(f"   Warning: Zero-shot evaluation failed: {e}")
         results['zero_shot'] = {}
 
-    # 3. Few-shot evaluation
-    print("\n3. Few-shot evaluation (5-shot)...")
-    try:
-        mmlu_scores = few_shot_evaluator.evaluate_mmlu(bit_config, num_shots=5)
-        triviaqa_score = few_shot_evaluator.evaluate_triviaqa(bit_config, num_shots=5)
-
-        results['few_shot'] = {
-            'MMLU': mmlu_scores,
-            'TriviaQA': triviaqa_score
-        }
-
-        if 'Average' in mmlu_scores:
-            print(f"   MMLU Average: {mmlu_scores['Average']:.1f}%")
-        print(f"   TriviaQA: {triviaqa_score:.1f}%")
-    except Exception as e:
-        print(f"   Warning: Few-shot evaluation failed: {e}")
-        results['few_shot'] = {}
+    # Few-shot evaluation removed - focusing on perplexity and zero-shot classification only
 
     # Save results with CPT-specific naming
     try:
@@ -212,7 +190,9 @@ def main():
     output_dir = Path(output_dir_str)
     output_dir.mkdir(exist_ok=True, parents=True)
 
-    results_file = output_dir / f"cpt_results_{current_bits}bit.json"
+    # Generate timestamp in format YYYYMMDD_HHMMSS
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    results_file = output_dir / f"cpt_results_{current_bits}bit_{timestamp}.json"
     with open(results_file, 'w') as f:
         json.dump(results, f, indent=2)
 
@@ -236,10 +216,6 @@ def main():
         if 'Average' in results['zero_shot']:
             print(f"  Zero-shot Avg: {results['zero_shot']['Average']:.1f}%")
 
-    if results['few_shot']:
-        if 'MMLU' in results['few_shot']:
-            if 'Average' in results['few_shot']['MMLU']:
-                print(f"  MMLU Avg: {results['few_shot']['MMLU']['Average']:.1f}%")
 
 
 if __name__ == "__main__":

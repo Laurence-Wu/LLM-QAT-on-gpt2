@@ -150,7 +150,7 @@ class TrainingConfig:
 
         # Hardware settings
         self.device = 'cuda'
-        self.fp16 = False  # Use FP32 for training stability
+        self.fp16 = False  # Use FP32
 
         # Logging
         self.log_interval = 10
