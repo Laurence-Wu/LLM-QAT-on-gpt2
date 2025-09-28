@@ -1,4 +1,6 @@
 
+import os
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,12 +9,11 @@ from typing import Optional, Dict, List, Tuple
 from transformers import GPT2Config
 from torch.utils.checkpoint import checkpoint
 
-try:
-    from .lora import SPLinearWithLoRA
-    from .switchable_batchnorm import SwitchableLayerNorm
-except ImportError:
-    from lora import SPLinearWithLoRA
-    from switchable_batchnorm import SwitchableLayerNorm
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
+
+from lora import SPLinearWithLoRA
+from switchable_batchnorm import SwitchableLayerNorm
 
 class SPAttention(nn.Module):
     

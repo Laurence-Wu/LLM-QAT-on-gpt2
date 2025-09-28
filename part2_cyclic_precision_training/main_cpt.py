@@ -157,6 +157,12 @@ def load_pretrained_weights(model: CPTModel, device: str):
         if src_key in gpt2_state:
             # Get source and destination tensors
             src_tensor = gpt2_state[src_key].to(device)
+
+            # Transpose weights that need it (following part1's approach)
+            # GPT-2 stores as [in_features, out_features], nn.Linear needs [out_features, in_features]
+            if any(key in src_key for key in ['c_proj.weight', 'c_fc.weight']):
+                src_tensor = src_tensor.t().contiguous()
+
             dst_attrs = dst_key.split('.')
 
             # Navigate to the destination
@@ -171,16 +177,17 @@ def load_pretrained_weights(model: CPTModel, device: str):
             setattr(target, dst_attrs[-1], nn.Parameter(src_tensor))
             loaded_count += 1
 
-    # Handle QKV weights separately (need splitting)
+    # Handle QKV weights separately (need splitting and transposing)
     for i in range(len(model.h)):
         qkv_key = f'h.{i}.attn.c_attn.weight'
         if qkv_key in gpt2_state:
             qkv_weight = gpt2_state[qkv_key].to(device)
             # GPT-2 c_attn weight has shape [768, 2304] where 2304 = 768*3 for Q, K, V
-            # We need to split along the output dimension (dim 1)
-            model.h[i].attn.q_proj.linear.weight.data = qkv_weight[:, :d_model]
-            model.h[i].attn.k_proj.linear.weight.data = qkv_weight[:, d_model:2*d_model]
-            model.h[i].attn.v_proj.linear.weight.data = qkv_weight[:, 2*d_model:]
+            # We need to split along the output dimension (dim 1) and transpose
+            # GPT-2 stores as [in_features, out_features], nn.Linear needs [out_features, in_features]
+            model.h[i].attn.q_proj.linear.weight.data = qkv_weight[:, :d_model].t().contiguous()
+            model.h[i].attn.k_proj.linear.weight.data = qkv_weight[:, d_model:2*d_model].t().contiguous()
+            model.h[i].attn.v_proj.linear.weight.data = qkv_weight[:, 2*d_model:].t().contiguous()
             loaded_count += 3
 
     print(f"Loaded {loaded_count} weight tensors from GPT-2")

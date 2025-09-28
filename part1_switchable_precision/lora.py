@@ -1,12 +1,14 @@
+import os
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
 
-try:
-    from .quantization import LearnableFakeQuantize
-except ImportError:
-    from quantization import LearnableFakeQuantize
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
+
+from quantization import LearnableFakeQuantize
 
 class LoRALayer(nn.Module):
     

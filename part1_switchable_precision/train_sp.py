@@ -1,4 +1,6 @@
 
+import os
+import sys
 import torch
 import torch.nn.functional as F
 from torch.optim import AdamW
@@ -9,10 +11,10 @@ import json
 import time
 import random
 
-try:
-    from .distillation_manager import DistillationManager
-except ImportError:
-    from distillation_manager import DistillationManager
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
+
+from distillation_manager import DistillationManager
 
 def cleanup_memory():
     

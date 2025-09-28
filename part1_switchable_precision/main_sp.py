@@ -6,23 +6,19 @@ import gc
 import json
 from transformers import GPT2Config, GPT2TokenizerFast
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, current_dir)
+sys.path.insert(0, parent_dir)
 
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True,max_split_size_mb:512'
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
-try:
-    from .models_sp import SPLMHeadModel
-    from .dataset import create_dataloaders
-    from .deploy import save_sp_checkpoints
-    from .config_sp import ModelConfig, TrainingConfig
-    from .train_sp import train_sp
-except ImportError:
-    from models_sp import SPLMHeadModel
-    from dataset import create_dataloaders
-    from deploy import save_sp_checkpoints
-    from config_sp import ModelConfig, TrainingConfig
-    from train_sp import train_sp
+from models_sp import SPLMHeadModel
+from dataset import create_dataloaders
+from deploy import save_sp_checkpoints
+from config_sp import ModelConfig, TrainingConfig
+from train_sp import train_sp
 
 def initialize_model(model_config, device):
     try:
