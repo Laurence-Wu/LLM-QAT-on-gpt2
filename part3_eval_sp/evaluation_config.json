@@ -1,0 +1,148 @@
+{
+  "device": "cuda",
+  "calibration": {
+    "dataset": "wikitext",
+    "dataset_config": "wikitext-2-raw-v1",
+    "split": "validation",
+    "num_samples": 100000,
+    "batch_size": 32,
+    "max_length": 256,
+    "warm_up_batches": 10,
+    "truncation": true,
+    "padding": "max_length"
+  },
+  "zero_shot": {
+    "max_samples": 500,
+    "max_errors": 10,
+    "show_first_n_errors": 3,
+    "datasets": {
+      "BoolQ": {
+        "dataset_name": "boolq",
+        "split": "validation[:1000]"
+      },
+      "HellaSwag": {
+        "dataset_name": "hellaswag",
+        "split": "validation[:1000]"
+      },
+      "WinoGrande": {
+        "dataset_name": "winogrande",
+        "config": "winogrande_m",
+        "split": "validation[:1000]"
+      },
+      "ARC-e": {
+        "dataset_name": "ai2_arc",
+        "config": "ARC-Easy",
+        "split": "validation[:1000]"
+      },
+      "ARC-c": {
+        "dataset_name": "ai2_arc",
+        "config": "ARC-Challenge",
+        "split": "validation[:1000]"
+      },
+      "OBQA": {
+        "dataset_name": "openbookqa",
+        "config": "main",
+        "split": "validation[:1000]"
+      }
+    },
+    "generation": {
+      "max_length": 10,
+      "temperature": 0.1,
+      "do_sample": false
+    },
+    "prompt_truncation": {
+      "limited_context_threshold": 256,
+      "passage_limit": 200,
+      "question_limit": 100,
+      "context_limit": 150,
+      "choice_limit": 60,
+      "endings_limit": 50
+    }
+  },
+  "few_shot": {
+    "num_shots": 5,
+    "max_samples": 500,
+    "max_errors": 10,
+    "show_first_n_errors": 3,
+    "datasets": {
+      "MMLU": {
+        "dataset_name": "cais/mmlu",
+        "config": "all",
+        "split": "test[:1000]"
+      },
+      "TriviaQA": {
+        "dataset_name": "trivia_qa",
+        "config": "rc.nocontext",
+        "split": "validation[:1000]"
+      }
+    },
+    "generation": {
+      "max_length": 20,
+      "temperature": 0.1,
+      "do_sample": false
+    },
+    "mmlu_categories": {
+      "Humanities": ["history", "philosophy", "law"],
+      "STEM": ["physics", "chemistry", "biology", "computer_science", "math", "engineering"],
+      "Social Sciences": ["politics", "sociology", "psychology", "economics"],
+      "Other": ["other", "business", "health"]
+    }
+  },
+  "perplexity": {
+    "stride": 256,
+    "max_length": 256,
+    "max_samples": 500,
+    "batch_size": 1,
+    "datasets": {
+      "WikiText2": {
+        "dataset_name": "wikitext",
+        "config": "wikitext-2-raw-v1",
+        "split": "test"
+      },
+      "WikiText103": {
+        "dataset_name": "wikitext",
+        "config": "wikitext-103-raw-v1",
+        "split": "validation"
+      },
+      "C4": {
+        "dataset_name": "allenai/c4",
+        "config": "en",
+        "split": "validation",
+        "streaming": true
+      }
+    }
+  },
+  "perplexity_long_context": {
+    "stride": 512,
+    "max_length": 1024,
+    "max_samples": 10000,
+    "batch_size": 1,
+    "datasets": {
+      "WikiText2": {
+        "dataset_name": "wikitext",
+        "config": "wikitext-2-raw-v1",
+        "split": "test"
+      },
+      "WikiText103": {
+        "dataset_name": "wikitext",
+        "config": "wikitext-103-raw-v1",
+        "split": "test"
+      }
+    }
+  },
+  "output": {
+    "directory": "part3_evaluation/results",
+    "save_format": "json",
+    "results_filename": "llm_qat_results.json"
+  },
+  "model": {
+    "default_precision": 32,
+    "require_cuda": true,
+    "bit_to_config_mapping": {
+      "6": "INT6",
+      "8": "INT8",
+      "16": "FP16",
+      "32": "FP32"
+    }
+  }
+}

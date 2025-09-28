@@ -5,8 +5,8 @@ from tqdm import tqdm
 import json
 from pathlib import Path
 
-class LLMQATEvaluation:
-    """Evaluation suite following LLM-QAT paper metrics"""
+class CPTEvaluation:
+    """Evaluation suite for Cyclic Precision Training models"""
 
     def __init__(self, model, tokenizer, model_size='GPT2', device='cuda'):
         # Force CUDA
@@ -84,14 +84,32 @@ class LLMQATEvaluation:
         Calculate model size in GB based on bit configuration
         Account for weights and KV cache
         """
-        weight_bits = bit_config.get('W', 16)
-        kv_bits = bit_config.get('KV', 16)
+        try:
+            weight_bits = bit_config['W']
+        except KeyError:
+            weight_bits = 16
+
+        try:
+            kv_bits = bit_config['KV']
+        except KeyError:
+            kv_bits = 16
 
         weight_size_gb = (self.model_params * weight_bits) / (8 * 1024)
 
-        n_layers = self.model.config.n_layer
-        n_heads = self.model.config.n_head
-        d_head = self.model.config.n_embd // n_heads
+        # Handle CPT model config structure (config is a dict)
+        try:
+            # CPT model has config as dictionary
+            model_config = self.model.config['model']
+            n_layers = model_config.n_layer
+            n_heads = model_config.n_head
+            n_embd = model_config.n_embd
+        except (TypeError, KeyError, AttributeError) as e:
+            print(f"Warning: Cannot access CPT model config: {e}, using defaults")
+            n_layers = 12
+            n_heads = 12
+            n_embd = 768
+
+        d_head = n_embd // n_heads
         max_seq_len = 2048
         batch_size = 1
 
@@ -102,20 +120,25 @@ class LLMQATEvaluation:
         return round(total_size_gb, 2)
 
     def _apply_bit_config(self, bit_config: Dict):
-        """Apply W-A-KV configuration to model"""
+        """Apply W-A-KV configuration to CPT model"""
         try:
-            weight_bits = bit_config.get('W', 8)
-            layer_config = [weight_bits] * self.model.n_layer
-            self.model.set_layer_precision(layer_config)
-        except AttributeError:
-            # Model doesn't support layer-specific precision
+            weight_bits = bit_config['W']
+        except KeyError:
+            weight_bits = 8
+
+        # CPT models use set_precision method
+        try:
+            self.model.set_precision(weight_bits)
+            print(f"Set CPT model precision to {weight_bits}-bit")
+        except AttributeError as e:
+            print(f"Warning: Model does not support set_precision: {e}")
             pass
 
+        # CPT doesn't have KV cache bit setting, but keep for compatibility
         try:
-            kv_bits = bit_config.get('KV', 8)
-            self.model.set_kv_cache_bits(kv_bits)
-        except AttributeError:
-            # Model doesn't support KV cache bit setting
+            kv_bits = bit_config['KV']
+            # CPT doesn't support this, but no error needed
+        except KeyError:
             pass
 
     def run_complete_evaluation(self, configs: List[str] = None, skip_few_shot: bool = True) -> Dict:
@@ -182,12 +205,12 @@ class LLMQATEvaluation:
         if not skip_few_shot:
             table_gen.generate_table_7_few_shot()
 
-        output_dir = Path('part3_evaluation/results')
+        output_dir = Path('part3_eval_cpt/results')
         output_dir.mkdir(exist_ok=True, parents=True)
 
-        with open(output_dir / 'llm_qat_results.json', 'w') as f:
+        with open(output_dir / 'cpt_results.json', 'w') as f:
             json.dump(all_results, f, indent=2)
 
-        print(f"\nResults saved to {output_dir / 'llm_qat_results.json'}")
+        print(f"\nResults saved to {output_dir / 'cpt_results.json'}")
 
         return all_results

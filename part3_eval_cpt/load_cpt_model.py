@@ -37,15 +37,24 @@ def load_cpt_model(model_path: str):
     # Load checkpoint
     checkpoint = torch.load(model_path, map_location='cuda', weights_only=False)
 
-    # Extract saved configs
+    # Extract saved configs - no hasattr per .claude requirements
     model_config_dict = checkpoint['model_config']
     training_config_dict = checkpoint['training_config']
-    cpt_config_dict = checkpoint['cpt_config'] if 'cpt_config' in checkpoint else {}
+
+    # Check for cpt_config
+    try:
+        cpt_config_dict = checkpoint['cpt_config']
+    except KeyError:
+        cpt_config_dict = {}
+        print("Warning: No cpt_config in checkpoint, using defaults")
 
     # Get bit width from checkpoint
-    checkpoint_bit_width = checkpoint['bit_width'] if 'bit_width' in checkpoint else None
-    if checkpoint_bit_width:
+    try:
+        checkpoint_bit_width = checkpoint['bit_width']
         print(f"Checkpoint was saved at {checkpoint_bit_width}-bit precision")
+    except KeyError:
+        checkpoint_bit_width = None
+        print("Warning: No bit_width in checkpoint")
 
     # Reconstruct config objects from dicts
     model_config = SimpleNamespace(**model_config_dict)
@@ -90,10 +99,10 @@ def load_cpt_model(model_path: str):
         print(f"✅ Model set to {checkpoint_bit_width}-bit precision")
 
     # Load weights
-    if 'model_state_dict' in checkpoint:
+    try:
         model.load_state_dict(checkpoint['model_state_dict'], strict=True)
         print("✅ Model weights loaded successfully")
-    else:
+    except KeyError:
         raise ValueError("No model_state_dict found in checkpoint!")
 
     # CRITICAL: Override per-channel quantization for evaluation
@@ -103,20 +112,28 @@ def load_cpt_model(model_path: str):
 
     for name, module in model.named_modules():
         # Handle weight quantizers in CPTLinear modules
-        if hasattr(module, 'weight_quantizers'):
-            if hasattr(module.weight_quantizers, 'quantizers'):
+        try:
+            if module.weight_quantizers and module.weight_quantizers.quantizers:
                 for bit_key, quantizer in module.weight_quantizers.quantizers.items():
-                    if hasattr(quantizer, 'per_channel'):
+                    try:
                         quantizer.per_channel = False
                         override_count += 1
+                    except AttributeError:
+                        pass
+        except AttributeError:
+            pass
 
         # Handle activation quantizers in CPTLinear modules
-        if hasattr(module, 'activation_quantizers'):
-            if hasattr(module.activation_quantizers, 'quantizers'):
+        try:
+            if module.activation_quantizers and module.activation_quantizers.quantizers:
                 for bit_key, quantizer in module.activation_quantizers.quantizers.items():
-                    if hasattr(quantizer, 'per_channel'):
+                    try:
                         quantizer.per_channel = False
                         override_count += 1
+                    except AttributeError:
+                        pass
+        except AttributeError:
+            pass
 
     print(f"✅ Overrode {override_count} quantizers to per-tensor mode")
 
@@ -153,16 +170,25 @@ def verify_cpt_quantization_status(model, current_bits):
     per_tensor_count = 0
 
     for name, module in model.named_modules():
-        if hasattr(module, 'weight_quantizers') and hasattr(module, 'activation_quantizers'):
+        # Check for CPTLinear modules by checking for quantizer attributes
+        try:
             # This is likely a CPTLinear module
-            total_count += 1
+            if module.weight_quantizers and module.activation_quantizers:
+                total_count += 1
 
-            # Check if quantizers are set to per-tensor
-            if hasattr(module.weight_quantizers, 'quantizers'):
-                for quantizer in module.weight_quantizers.quantizers.values():
-                    if hasattr(quantizer, 'per_channel') and not quantizer.per_channel:
-                        per_tensor_count += 1
-                        break
+                # Check if quantizers are set to per-tensor
+                try:
+                    for quantizer in module.weight_quantizers.quantizers.values():
+                        try:
+                            if not quantizer.per_channel:
+                                per_tensor_count += 1
+                                break
+                        except AttributeError:
+                            pass
+                except AttributeError:
+                    pass
+        except AttributeError:
+            continue
 
     if total_count > 0:
         print(f"✓ {per_tensor_count}/{total_count} modules using per-tensor quantization")

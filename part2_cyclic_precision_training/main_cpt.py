@@ -235,11 +235,11 @@ def main(args):
     model = CPTModel(config).to(device)
 
     # Load pretrained weights if specified
-    if args.load_pretrained:
-        gpt2_config = load_pretrained_weights(model, device)
-        # Optionally update model config with GPT-2 config values
-        # This ensures compatibility with pretrained weights
-        print(f"GPT-2 config: hidden_size={gpt2_config.n_embd}, num_layers={gpt2_config.n_layer}, num_heads={gpt2_config.n_head}")
+
+    gpt2_config = load_pretrained_weights(model, device)
+    # Optionally update model config with GPT-2 config values
+    # This ensures compatibility with pretrained weights
+    print(f"GPT-2 config: hidden_size={gpt2_config.n_embd}, num_layers={gpt2_config.n_layer}, num_heads={gpt2_config.n_head}")
 
     # Create cyclic precision scheduler
     precision_scheduler = CyclicPrecisionScheduler(
@@ -249,21 +249,20 @@ def main(args):
     )
 
     # Run Precision Range Test (only during training, not evaluation)
-    if not args.eval_only:
-        print("Running Precision Range Test...")
-        prt = PrecisionRangeTest(
-            model,
-            start_bits=cpt_config.prt_start_bits,
-            max_bits=max(model_config.bit_widths),  # Use the maximum bit width from config
-            threshold=cpt_config.prt_threshold,
-            test_iterations=cpt_config.prt_iterations,
-            target_bits=training_config.target_bits
-        )
-        lower_bound, upper_bound = prt.find_bounds(train_loader, nn.CrossEntropyLoss())
-        print(f"PRT Results: Lower bound = {lower_bound}-bit, Upper bound = {upper_bound}-bit")
-        # Update precision scheduler with PRT results
-        precision_scheduler.min_bits = lower_bound
-        precision_scheduler.max_bits = upper_bound
+    print("Running Precision Range Test...")
+    prt = PrecisionRangeTest(
+        model,
+        start_bits=cpt_config.prt_start_bits,
+        max_bits=max(model_config.bit_widths),  # Use the maximum bit width from config
+        threshold=cpt_config.prt_threshold,
+        test_iterations=cpt_config.prt_iterations,
+        target_bits=training_config.target_bits
+    )
+    lower_bound, upper_bound = prt.find_bounds(train_loader, nn.CrossEntropyLoss())
+    print(f"PRT Results: Lower bound = {lower_bound}-bit, Upper bound = {upper_bound}-bit")
+    # Update precision scheduler with PRT results
+    precision_scheduler.min_bits = lower_bound
+    precision_scheduler.max_bits = upper_bound
 
     # Create optimizer
     optimizer = optim.AdamW(

@@ -117,7 +117,7 @@ class TrainingConfig:
     """Training configuration for CPT."""
     def __init__(self):
         # Dataset
-        self.train_split = 'train[:5000]'
+        self.train_split = 'train[:80000]'
         self.val_split = 'validation[:5000]'
         self.batch_size = 32
         self.max_seq_length = 256
@@ -131,12 +131,12 @@ class TrainingConfig:
         self.max_grad_norm = 1.0
 
         # Training schedule
-        self.num_epochs = 160
+        self.num_epochs = 550
         self.gradient_accumulation_steps = 8
 
         # Cyclic precision schedule
         self.num_cycles = 32  # Total number of complete cycles during training
-        self.target_bits = 8  # Targeted precision for training
+        self.target_bits = 6  # Targeted precision for training
 
         # Evaluation
         self.eval_interval = 50

@@ -19,7 +19,7 @@ from load_cpt_model import load_cpt_model, verify_cpt_quantization_status
 
 # Import standard evaluation components
 from transformers import GPT2Tokenizer
-from llm_qat_metrics import LLMQATEvaluation
+from cpt_metrics import CPTEvaluation
 from zero_shot_tasks import ZeroShotEvaluator
 from few_shot_eval import FewShotEvaluator
 from perplexity_eval import PerplexityEvaluator
@@ -35,7 +35,7 @@ def load_tokenizer():
 def load_evaluation_config(config_path):
     """Load evaluation configuration from JSON file"""
     if not os.path.exists(config_path):
-        # Try looking in part3_evaluation directory
+        # Try looking in part3_eval_cpt directory
         alt_path = os.path.join(os.path.dirname(__file__), config_path)
         if os.path.exists(alt_path):
             config_path = alt_path
@@ -73,7 +73,10 @@ def main():
         print(f"No quantization active (bit width: {checkpoint_bit_width})")
 
     # Initialize evaluators (same as SP evaluation)
-    device = eval_config['device'] if 'device' in eval_config else 'cuda'
+    try:
+        device = eval_config['device']
+    except KeyError:
+        device = 'cuda'
 
     # Run diagnostic if requested
     if args.diagnose:
@@ -93,8 +96,15 @@ def main():
             # Check for issues
             has_issues = False
             if 'perplexity_test' in diagnostic_results:
-                ppl = diagnostic_results['perplexity_test']['perplexity'] if 'perplexity' in diagnostic_results['perplexity_test'] else 0
-                logits_mean = diagnostic_results['perplexity_test']['logits_mean'] if 'logits_mean' in diagnostic_results['perplexity_test'] else 0
+                try:
+                    ppl = diagnostic_results['perplexity_test']['perplexity']
+                except KeyError:
+                    ppl = 0
+                try:
+                    logits_mean = diagnostic_results['perplexity_test']['logits_mean']
+                except KeyError:
+                    logits_mean = 0
+
                 if ppl > 100 or logits_mean < -50:
                     has_issues = True
                     print("\n⚠️ WARNING: Model shows severe issues!")
@@ -108,10 +118,22 @@ def main():
             print("Continuing with evaluation...\n")
 
     # Initialize evaluation modules
-    evaluator = LLMQATEvaluation(model, tokenizer)
-    zero_shot_config = eval_config['zero_shot'] if 'zero_shot' in eval_config else {}
-    few_shot_config = eval_config['few_shot'] if 'few_shot' in eval_config else {}
-    perplexity_config = eval_config['perplexity'] if 'perplexity' in eval_config else {}
+    evaluator = CPTEvaluation(model, tokenizer)
+
+    try:
+        zero_shot_config = eval_config['zero_shot']
+    except KeyError:
+        zero_shot_config = {}
+
+    try:
+        few_shot_config = eval_config['few_shot']
+    except KeyError:
+        few_shot_config = {}
+
+    try:
+        perplexity_config = eval_config['perplexity']
+    except KeyError:
+        perplexity_config = {}
 
     zero_shot_evaluator = ZeroShotEvaluator(model, tokenizer, device=device, config=zero_shot_config)
     few_shot_evaluator = FewShotEvaluator(model, tokenizer, device=device, config=few_shot_config)
@@ -177,8 +199,17 @@ def main():
         results['few_shot'] = {}
 
     # Save results with CPT-specific naming
-    output_config = eval_config['output'] if 'output' in eval_config else {}
-    output_dir = Path(output_config['directory'] if 'directory' in output_config else 'results')
+    try:
+        output_config = eval_config['output']
+    except KeyError:
+        output_config = {}
+
+    try:
+        output_dir_str = output_config['directory']
+    except KeyError:
+        output_dir_str = 'results'
+
+    output_dir = Path(output_dir_str)
     output_dir.mkdir(exist_ok=True, parents=True)
 
     results_file = output_dir / f"cpt_results_{current_bits}bit.json"
