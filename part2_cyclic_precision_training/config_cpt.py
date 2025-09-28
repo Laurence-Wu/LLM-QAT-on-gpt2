@@ -27,26 +27,68 @@ class ModelConfig:
         # LoRA settings per bit-width
         # Lower precision needs higher rank to compensate
         self.lora_rank_per_bit = {
+            2: 40,  # Very high rank for extremely low precision
+            3: 36,  # Very high rank for extremely low precision
             4: 32,  # Highest rank for lowest precision
+            5: 28,  # High rank
             6: 24,  # Medium rank
+            7: 20,  # Medium rank
             8: 16,  # Lower rank for higher precision
+            9: 12,  # Lower rank
+            10: 10,  # Lower rank
+            11: 10,  # Minimal rank
+            12: 10,  # Minimal rank
+            13: 10,  # Minimal rank
+            14: 8,  # Minimal rank
+            15: 8,  # Minimal rank
+            16: 8,  # Minimal rank
+            17: 4,  # Minimal rank
+            18: 4,  # Minimal rank
             32: 0   # No LoRA for FP32 (if used)
         }
         self.lora_alpha_per_bit = {
-            4: 64,
-            6: 48,
-            8: 32,
-            32: 0
+            2: 40,  # Very high rank for extremely low precision
+            3: 36,  # Very high rank for extremely low precision
+            4: 32,  # Highest rank for lowest precision
+            5: 28,  # High rank
+            6: 24,  # Medium rank
+            7: 20,  # Medium rank
+            8: 16,  # Lower rank for higher precision
+            9: 12,  # Lower rank
+            10: 10,  # Lower rank
+            11: 10,  # Minimal rank
+            12: 10,  # Minimal rank
+            13: 10,  # Minimal rank
+            14: 8,  # Minimal rank
+            15: 8,  # Minimal rank
+            16: 8,  # Minimal rank
+            17: 4,  # Minimal rank
+            18: 4,  # Minimal rank
+            32: 0   # No LoRA for FP32 (if used)
         }
-
         # Quantization settings
         self.quantizer_type = 'log'  # Use log quantization
         self.use_per_channel = True  # Always use per-channel calibration
         self.gradient_bits = 8  # Static gradient precision
         self.activation_bits_per_bit = {
-            4: 4,
-            6: 6,
-            8: 8
+            2: 40,  # Very high rank for extremely low precision
+            3: 36,  # Very high rank for extremely low precision
+            4: 32,  # Highest rank for lowest precision
+            5: 28,  # High rank
+            6: 24,  # Medium rank
+            7: 20,  # Medium rank
+            8: 16,  # Lower rank for higher precision
+            9: 12,  # Lower rank
+            10: 10,  # Lower rank
+            11: 10,  # Minimal rank
+            12: 10,  # Minimal rank
+            13: 10,  # Minimal rank
+            14: 8,  # Minimal rank
+            15: 8,  # Minimal rank
+            16: 8,  # Minimal rank
+            17: 4,  # Minimal rank
+            18: 4,  # Minimal rank
+            32: 0   # No LoRA for FP32 (if used)
         }
 
         # Gradient bifurcation settings

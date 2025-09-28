@@ -277,9 +277,9 @@ def main(args):
     # Calculate total cycles for learning rate scheduler
     # Total cycles = num_epochs * steps_per_epoch * cycle_length
     # This ensures LR updates for every precision change
-    steps_per_epoch = len(train_loader)
+    cycles_per_epoch = len(train_loader)
     cycle_length = cpt_config.cycle_length
-    total_lr_cycles = training_config.num_epochs * steps_per_epoch * cycle_length
+    total_lr_cycles = training_config.num_epochs * cycles_per_epoch * cycle_length
 
     # Create cosine learning rate scheduler
     lr_scheduler = CosineAnnealingLR(
