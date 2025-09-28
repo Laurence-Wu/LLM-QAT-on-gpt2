@@ -37,18 +37,18 @@ class ModelConfig:
         self.lora_alpha = 32
 
         # Switchable precision settings
-        self.bit_widths = [4, 6, 8, 16, 32]  # Include teacher bit-width in list
+        self.bit_widths = [8, 16, 32]  # Include teacher bit-width in list
         self.teacher_bits = 32  # Teacher uses FP32 (no quantization)
 
 
         # Lower precision uses HIGHER rank to compensate for quantization errors
         # CRITICAL: 32-bit must have rank=0 (no LoRA for teacher)
         # 6-bit needs much higher rank due to quantization cliff
-        self.lora_rank_per_bit = {4: 64, 6: 32, 8: 16, 16: 16, 32: 0}  # Increased 4-bit rank from 12 to 64
-        self.lora_alpha_per_bit = {4: 128, 6: 64, 8: 32, 16: 32, 32: 0}  # Increased 4-bit alpha accordingly
+        self.lora_rank_per_bit = { 8: 16, 16: 16, 32: 0}  # Increased 4-bit rank from 12 to 64
+        self.lora_alpha_per_bit = {8: 32, 16: 32, 32: 0}  # Increased 4-bit alpha accordingly
 
         # Activation bits per weight precision
-        self.activation_bits_per_bit = {4: 4, 6: 6, 8: 8, 16: 16}  # Match weight precision
+        self.activation_bits_per_bit = {8: 8, 16: 16}  # Match weight precision
 
         # Quantization mode
         self.per_channel_quantization = True  # Use per-channel for training, False for evaluation
@@ -72,12 +72,11 @@ class TrainingConfig:
         self.max_grad_norm = 1.0
 
         # Training schedule
-        self.num_iterations = 600
+        self.num_iterations = 550
         self.gradient_accumulation_steps = 8
 
         # Evaluation
         self.eval_interval = 50
-        self.save_interval = 100
 
         # Memory optimization
         self.empty_cache_interval = 25

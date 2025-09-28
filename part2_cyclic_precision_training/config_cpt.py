@@ -98,7 +98,6 @@ class TrainingConfig:
 
         # Evaluation
         self.eval_interval = 50
-        self.save_interval = 100
 
         # Memory optimization
         self.empty_cache_interval = 25

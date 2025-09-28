@@ -345,22 +345,17 @@ def main(args):
                 print(f"Validation at {precision}-bit - Loss: {val_results['loss']:.4f}, "
                       f"Perplexity: {val_results['perplexity']:.2f}")
 
-                # Track best model at 8-bit
+                # Track best model at 8-bit (for logging only, no saving)
                 if precision == 8 and val_results['loss'] < best_val_loss:
                     best_val_loss = val_results['loss']
                     print(f"New best validation loss: {best_val_loss:.4f}")
-                    # Save best checkpoint
-                    save_cpt_checkpoint(
-                        model, optimizer, lr_scheduler, epoch, global_cycle,
-                        best_val_loss, config, 'checkpoints/best_model.pth'
-                    )
 
-        # Save checkpoint
-        if (epoch + 1) % training_config.save_interval == 0:
-            save_cpt_checkpoint(
-                model, optimizer, lr_scheduler, epoch, global_cycle,
-                avg_epoch_loss, config, f'checkpoints/checkpoint_epoch{epoch+1}.pth'
-            )
+    # Save final checkpoint after training completes
+    print("Saving final checkpoint...")
+    save_cpt_checkpoint(
+        model, optimizer, lr_scheduler, training_config.num_epochs - 1, global_cycle,
+        avg_epoch_loss, config, f'checkpoints_cpt/model_epoch_{training_config.num_epochs}_final.pth'
+    )
 
     # Save final models at all precisions
     print("Saving final models...")
