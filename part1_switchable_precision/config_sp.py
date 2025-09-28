@@ -48,7 +48,7 @@ class ModelConfig:
         self.lora_alpha_per_bit = {3: 64, 4: 64, 5: 64, 6: 64, 8: 16, 16: 8, 24: 8, 32: 0}  # Increased 4-bit alpha accordingly
 
         # Activation bits per weight precision
-        self.activation_bits_per_bit = {3: 3, 4: 4, 5: 5, 6: 6, 8: 8, 16: 16, 24: 24}  # Match weight precision
+        self.activation_bits_per_bit = {3: 3, 4: 4, 5: 5, 6: 6, 8: 8, 16: 16, 24: 24, 32: 32}  # Match weight precision
 
         # Quantization mode
         self.per_channel_quantization = True  # Use per-channel for training, False for evaluation

@@ -474,10 +474,12 @@ def train_step(model, train_iter, train_loader, optimizer, scaler,
 
         del loss
 
-    # Print precision distribution for this step (for debugging)
+    # Print precision distribution and scheduler info for this step (for debugging)
     if iteration % 100 == 0:
         precision_counts = {p: precisions_used.count(p) for p in set(precisions_used)}
-        print(f"Step {iteration} precision distribution: {precision_counts}")
+        current_lr = scheduler.get_last_lr()[0]
+        scheduler_step = iteration * config.gradient_accumulation_steps  # Total scheduler steps so far
+        print(f"Step {iteration} | LR: {current_lr:.6f} | Scheduler steps: {scheduler_step}/{config.num_iterations * config.gradient_accumulation_steps} | Precision dist: {precision_counts}")
 
     # Optimizer step happens after gradient accumulation, regardless of which precisions were used
     scaler.unscale_(optimizer)
@@ -551,7 +553,11 @@ def train_sp(model, train_loader, val_loader, config, model_config):
 
     # Setup optimizer and scheduler
     optimizer = setup_optimizer(model, config)
-    scheduler = CosineAnnealingLR(optimizer, T_max=config.num_iterations)
+    # Calculate total LR steps accounting for gradient accumulation
+    total_lr_steps = config.num_iterations * config.gradient_accumulation_steps
+    scheduler = CosineAnnealingLR(optimizer, T_max=total_lr_steps)
+    print(f"Created LR scheduler with {total_lr_steps:,} total steps")
+    print(f"  ({config.num_iterations} iterations * {config.gradient_accumulation_steps} accumulation steps)")
     scaler = torch.amp.GradScaler('cuda')  # Always use AMP for mixed precision training
 
     # Initialize statistics tracker with configured bit widths
@@ -588,14 +594,16 @@ def train_sp(model, train_loader, val_loader, config, model_config):
         # Track statistics (use max precision for tracking)
         stats.update(iteration, total_loss, 32, optimizer)  # Use 32 as default for tracking
 
-        # Update progress bar with precision distribution
+        # Update progress bar with precision distribution and learning rate
         if iteration % 20 == 0:
             allocated = torch.cuda.memory_allocated() / 1024**3
             reserved = torch.cuda.memory_reserved() / 1024**3
+            current_lr = scheduler.get_last_lr()[0]
             # Get precision distribution from stats
             precision_str = ', '.join([f"{b}:{stats.precision_counts[b]}" for b in sorted(stats.precision_counts.keys())])
             progress_bar.set_postfix({
                 'loss': f'{total_loss:.4f}',
+                'lr': f'{current_lr:.2e}',
                 'precisions': precision_str,
                 'gpu_alloc': f'{allocated:.1f}GB',
                 'gpu_res': f'{reserved:.1f}GB'
@@ -603,7 +611,8 @@ def train_sp(model, train_loader, val_loader, config, model_config):
 
         # Periodic evaluation
         if should_evaluate(iteration, config):
-            print(f"\n[Iter {iteration}] Evaluating all precisions...")
+            current_lr = scheduler.get_last_lr()[0]
+            print(f"\n[Iter {iteration}] LR: {current_lr:.6f} | Evaluating all precisions...")
             val_losses = {}
             for bits in available_precisions:
                 model.set_precision(bits)
