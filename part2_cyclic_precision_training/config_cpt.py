@@ -131,11 +131,10 @@ class TrainingConfig:
         self.max_grad_norm = 1.0
 
         # Training schedule
-        self.num_epochs = 550
+        self.num_epochs = 10
         self.gradient_accumulation_steps = 8
 
         # Cyclic precision schedule
-        self.num_cycles = 32  # Total number of complete cycles during training
         self.target_bits = 6  # Targeted precision for training
 
         # Evaluation

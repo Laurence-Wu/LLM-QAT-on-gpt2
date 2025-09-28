@@ -458,7 +458,6 @@ def train_sp(model, train_loader, val_loader, config, model_config):
 
     stats = StatsTracker(bit_widths=model_config.bit_widths)
 
-    print(f"\n{'Starting SP training with distillation' if config.use_distillation else 'Starting SP training'}")
     print(f"Iterations: {config.num_iterations}, Batch size: {config.batch_size}")
     print(f"Gradient accumulation: {config.gradient_accumulation_steps}")
 

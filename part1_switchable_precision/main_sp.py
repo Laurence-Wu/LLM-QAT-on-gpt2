@@ -184,6 +184,33 @@ def main():
     
     print("Training complete")
 
+    # Save training statistics with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stats_filename = f"training_stats_{timestamp}.json"
+
+    # Add configs to training_stats
+    try:
+        training_stats['model_config'] = {
+            attr: getattr(model_config, attr)
+            for attr in dir(model_config)
+            if not attr.startswith('_') and not callable(getattr(model_config, attr))
+        }
+        training_stats['training_config'] = {
+            attr: getattr(training_config, attr)
+            for attr in dir(training_config)
+            if not attr.startswith('_') and not callable(getattr(training_config, attr))
+        }
+    except Exception as e:
+        print(f"Warning: Could not add configs to stats: {e}")
+
+    # Save to file
+    try:
+        with open(stats_filename, 'w') as f:
+            json.dump(training_stats, f, indent=2)
+        print(f"Training statistics saved to {stats_filename}")
+    except Exception as e:
+        print(f"Error saving training statistics: {e}")
+
     try:
         saved_checkpoints = save_sp_checkpoints(
             trained_model,
