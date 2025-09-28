@@ -176,9 +176,11 @@ def load_pretrained_weights(model: CPTModel, device: str):
         qkv_key = f'h.{i}.attn.c_attn.weight'
         if qkv_key in gpt2_state:
             qkv_weight = gpt2_state[qkv_key].to(device)
-            model.h[i].attn.q_proj.linear.weight.data = qkv_weight[:d_model, :]
-            model.h[i].attn.k_proj.linear.weight.data = qkv_weight[d_model:2*d_model, :]
-            model.h[i].attn.v_proj.linear.weight.data = qkv_weight[2*d_model:, :]
+            # GPT-2 c_attn weight has shape [768, 2304] where 2304 = 768*3 for Q, K, V
+            # We need to split along the output dimension (dim 1)
+            model.h[i].attn.q_proj.linear.weight.data = qkv_weight[:, :d_model]
+            model.h[i].attn.k_proj.linear.weight.data = qkv_weight[:, d_model:2*d_model]
+            model.h[i].attn.v_proj.linear.weight.data = qkv_weight[:, 2*d_model:]
             loaded_count += 3
 
     print(f"Loaded {loaded_count} weight tensors from GPT-2")

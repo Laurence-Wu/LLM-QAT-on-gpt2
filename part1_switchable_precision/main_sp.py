@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-"""
-Part 1: Switchable Precision (SP)
-Multi-precision training with separate LoRA adapters for each bit-width.
-"""
 
 import os
 import sys
@@ -11,15 +6,11 @@ import gc
 import json
 from transformers import GPT2Config, GPT2TokenizerFast
 
-# Import fix
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-# Memory optimizations for efficient training
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True,max_split_size_mb:512'
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
-# Import shared components
-# Use the new separated model file for Switchable Precision
 try:
     from .models_sp import SPLMHeadModel
     from .dataset import create_dataloaders
@@ -33,10 +24,7 @@ except ImportError:
     from config_sp import ModelConfig, TrainingConfig
     from train_sp import train_sp
 
-
 def initialize_model(model_config, device):
-    # Validate required config attributes for switchable precision
-    # Try to access each required attribute, throw error if any are missing
     try:
         _ = model_config.lora_rank_per_bit
         _ = model_config.lora_alpha_per_bit
@@ -58,7 +46,6 @@ def initialize_model(model_config, device):
         embd_pdrop=model_config.embd_pdrop
     )
 
-
     gpt2_config.quantization_bits = model_config.quantization_bits
     gpt2_config.lora_rank = model_config.lora_rank
     gpt2_config.lora_alpha = model_config.lora_alpha
@@ -68,7 +55,6 @@ def initialize_model(model_config, device):
     gpt2_config.quantizer_per_bit = model_config.quantizer_per_bit
     gpt2_config.bit_widths = model_config.bit_widths
 
-    #debug
     print(f"Initializing SP Model with configurations:")
     print(f"  Bit widths: {model_config.bit_widths}")
     print(f"  LoRA rank per bit: {model_config.lora_rank_per_bit}")
@@ -79,17 +65,10 @@ def initialize_model(model_config, device):
     model = SPLMHeadModel(gpt2_config)
     model.use_gradient_checkpointing = True
 
-    # initialize all the layers with apply() function
-    # layerNorm
-
     load_pretrained_weights(model)
 
-    # Model should be on the GPU
     model = model.to(device)
 
-    # Set to 32-bit precision to unfreeze teacher weights after loading
-    # This is critical - load_pretrained_weights freezes everything,
-    # but 32-bit teacher needs unfrozen weights for training
     model.transformer.unfreeze_weights(32)
     print("Set initial precision to 32-bit (teacher mode) - weights unfrozen for teacher training")
 
@@ -98,18 +77,15 @@ def initialize_model(model_config, device):
 
     return model
 
-
 def load_pretrained_weights(model):
     print("Loading pretrained GPT-2 weights")
     from transformers import GPT2LMHeadModel
     pretrained = GPT2LMHeadModel.from_pretrained('gpt2')
     import torch.nn as nn
 
-    # Copy embeddings - frozen (never trained)
     model.transformer.wte.weight.data = pretrained.transformer.wte.weight.data.clone()
     model.transformer.wte.weight.requires_grad = False
 
-    # Only copy the position embeddings we need (model might have fewer positions than pretrained)
     min_positions = min(model.transformer.wpe.weight.shape[0], pretrained.transformer.wpe.weight.shape[0])
     model.transformer.wpe.weight.data[:min_positions] = pretrained.transformer.wpe.weight.data[:min_positions].clone()
     model.transformer.wpe.weight.requires_grad = False
@@ -117,13 +93,9 @@ def load_pretrained_weights(model):
     if model.transformer.wpe.weight.shape[0] != pretrained.transformer.wpe.weight.shape[0]:
         print(f"Adjusted position embeddings from {pretrained.transformer.wpe.weight.shape[0]} to {model.transformer.wpe.weight.shape[0]}")
 
-    # LM already point to the transformer embeddings without the bias
-    model.lm_head.weight.requires_grad = False  # Frozen by default
+    model.lm_head.weight.requires_grad = False
 
-    # Copy transformer blocks - frozen by default (will be unfrozen for 32-bit teacher)
     for i in range(min(len(model.transformer.h), len(pretrained.transformer.h))):
-        # Layer normalizations - load into ALL precision-specific weight and bias parameters
-        # For SwitchableLayerNorm, copy weights to each precision's private parameters
         for precision in model.transformer.h[i].ln_1.precision_levels:
             model.transformer.h[i].ln_1.weights[str(precision)].data = pretrained.transformer.h[i].ln_1.weight.data.clone()
             model.transformer.h[i].ln_1.biases[str(precision)].data = pretrained.transformer.h[i].ln_1.bias.data.clone()
@@ -136,39 +108,32 @@ def load_pretrained_weights(model):
             model.transformer.h[i].ln_2.weights[str(precision)].requires_grad = False
             model.transformer.h[i].ln_2.biases[str(precision)].requires_grad = False
 
-        # Attention QKV weights - transpose and freeze by default
         model.transformer.h[i].attn.c_attn.linear.weight.data = pretrained.transformer.h[i].attn.c_attn.weight.data.t().contiguous()
         model.transformer.h[i].attn.c_attn.linear.bias.data = pretrained.transformer.h[i].attn.c_attn.bias.data.clone()
         model.transformer.h[i].attn.c_attn.linear.weight.requires_grad = False
         model.transformer.h[i].attn.c_attn.linear.bias.requires_grad = False
 
-        # Attention projection - transpose and freeze by default
         model.transformer.h[i].attn.c_proj.linear.weight.data = pretrained.transformer.h[i].attn.c_proj.weight.data.t().contiguous()
         model.transformer.h[i].attn.c_proj.linear.bias.data = pretrained.transformer.h[i].attn.c_proj.bias.data.clone()
         model.transformer.h[i].attn.c_proj.linear.weight.requires_grad = False
         model.transformer.h[i].attn.c_proj.linear.bias.requires_grad = False
 
-        # MLP feedforward projection to higher dimension - transpose and freeze by default
         model.transformer.h[i].mlp.c_fc.linear.weight.data = pretrained.transformer.h[i].mlp.c_fc.weight.data.t().contiguous()
         model.transformer.h[i].mlp.c_fc.linear.bias.data = pretrained.transformer.h[i].mlp.c_fc.bias.data.clone()
         model.transformer.h[i].mlp.c_fc.linear.weight.requires_grad = False
         model.transformer.h[i].mlp.c_fc.linear.bias.requires_grad = False
 
-        # MLP feedforward projection from higher dimension - transpose and freeze by default
         model.transformer.h[i].mlp.c_proj.linear.weight.data = pretrained.transformer.h[i].mlp.c_proj.weight.data.t().contiguous()
         model.transformer.h[i].mlp.c_proj.linear.bias.data = pretrained.transformer.h[i].mlp.c_proj.bias.data.clone()
         model.transformer.h[i].mlp.c_proj.linear.weight.requires_grad = False
         model.transformer.h[i].mlp.c_proj.linear.bias.requires_grad = False
 
-    # Copy to all precision-specific weight and bias parameters
     for precision in model.transformer.ln_f.precision_levels:
         model.transformer.ln_f.weights[str(precision)].data = pretrained.transformer.ln_f.weight.data.clone()
         model.transformer.ln_f.biases[str(precision)].data = pretrained.transformer.ln_f.bias.data.clone()
         model.transformer.ln_f.weights[str(precision)].requires_grad = False
         model.transformer.ln_f.biases[str(precision)].requires_grad = False
 
-
-    # LoRA adapters - targeted approach
     lora_count = 0
 
     target_modules = [
@@ -182,10 +147,8 @@ def load_pretrained_weights(model):
             continue
         if not hasattr(module, 'lora_adapters'):
             continue
-        # Process each bitwidth variant
         for bit_key in module.lora_adapters.keys():
             lora_layer = module.lora_adapters[bit_key]
-            # Set trainable
             if hasattr(lora_layer, 'lora_A'):
                 lora_layer.lora_A.requires_grad = True
                 lora_layer.lora_B.requires_grad = True
@@ -193,12 +156,10 @@ def load_pretrained_weights(model):
 
     print(f"Enabled {lora_count} LoRA adapter pairs for training")
 
-    # Delete pretrained model to free memory immediately
     del pretrained
     torch.cuda.empty_cache()
     gc.collect()
 
-    # Count trainable vs frozen parameters
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     frozen_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
     total_params = trainable_params + frozen_params
@@ -215,7 +176,6 @@ def main():
                        help='Path to checkpoint to resume from')
     args = parser.parse_args()
 
-    # Check CUDA availability
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is not available. Training requires CUDA.")
 
@@ -224,22 +184,17 @@ def main():
     torch.cuda.empty_cache()
     gc.collect()
 
-    # Use configuration from config_qat.py
     model_config = ModelConfig()
     training_config = TrainingConfig()
 
-    # Add calibration configuration if not present
     if not hasattr(training_config, 'calibration_samples'):
-        training_config.calibration_samples = 10  # Default calibration samples
+        training_config.calibration_samples = 10
 
-    # Initialize model to gpu
     model = initialize_model(model_config, device)
 
-    # Setup tokenizer to cpu
     tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
-    tokenizer.pad_token = tokenizer.eos_token #use the end token as the padding to each sentences
+    tokenizer.pad_token = tokenizer.eos_token
 
-    # Create data loaders in cpu
     print("\nDatasets")
     train_loader, val_loader = create_dataloaders(
         tokenizer,
@@ -250,7 +205,6 @@ def main():
         doc_stride=training_config.doc_stride
     )
 
-    ## print the current gpu
     print(f"GPU: {torch.cuda.get_device_name(0)}")
     print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
     print(f"Calibration samples per bit-width: {training_config.calibration_samples}")
@@ -265,12 +219,7 @@ def main():
     
     print("Training complete")
 
-    # Save checkpoints for all configured bit widths
     try:
-        # Use the new save_sp_checkpoints function to save models for each bit width
-        # This will save:
-        # - INT8 checkpoints for student models (6, 8, 16-bit)
-        # - FP32 checkpoint for teacher model (32-bit)
         saved_checkpoints = save_sp_checkpoints(
             trained_model,
             base_filename="sp_gpt2",
@@ -283,7 +232,6 @@ def main():
             print(f"  {bits}-bit: {filepath}")
 
     except Exception as e:
-        # Don't silently catch - re-raise the error
         print(f"Error saving models: {e}")
         raise
 

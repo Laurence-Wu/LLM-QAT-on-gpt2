@@ -2,55 +2,17 @@
 Distillation Manager for Switchable Precision Training
 Manages teacher-student distillation where full-precision teaches low-precision models.
 Following the paper "Switchable Precision Neural Networks".
-"""
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from typing import Dict, Optional, List, Tuple, Any
-import gc
-
-
-class DistillationManager:
-    """
     Manages self-distillation for switchable precision training.
     Teacher (full-precision) outputs guide student (low-precision) learning.
-    """
-
-    def __init__(self, model, full_precision_bits, config):
-        """
+    
         Initialize distillation manager.
 
         Args:
             model: The switchable precision model
             full_precision_bits: The bit-width considered as full precision (teacher)
             config: Training configuration with distillation parameters
-        """
-        self.model = model
-        self.full_precision_bits = full_precision_bits
-        self.config = config
-
-        # Get device from model (should always be CUDA)
-        try:
-            self.device = next(model.parameters()).device
-        except StopIteration:
-            self.device = torch.device('cuda')
-
-        # Enhanced teacher output cache with per-sequence storage
-        self.teacher_cache = {}
-        self.cache_keys = []
-        self.iteration_count = 0
-
-        # Cache statistics
-        self.cache_hits = 0
-        self.cache_misses = 0
-
-        # Track when teacher was last updated
-        self.last_teacher_update = -1
-        self.pending_teacher_update = False
-
-    def update_teacher(self, input_ids, attention_mask=None):
-        """
+        
         Update teacher cache with current batch outputs.
         Should be called when model is at full precision.
 
@@ -61,12 +23,10 @@ class DistillationManager:
         Returns:
             Dictionary with cached teacher outputs
         """
-        # Ensure model is at full precision
         current_bits = self.model.get_current_precision()
         if current_bits != self.full_precision_bits:
             raise RuntimeError(f"Teacher update called at {current_bits}-bit precision, expected {self.full_precision_bits}-bit")
 
-        # Compute teacher outputs without gradients
         with torch.no_grad():
             teacher_outputs = self.model(
                 input_ids,
@@ -75,17 +35,14 @@ class DistillationManager:
                 return_dict=True
             )
 
-            # Immediately detach to prevent memory leaks
             cache_entry = {
                 'logits': teacher_outputs['logits'].detach().clone(),
                 'hidden_states': []
             }
 
-            # Store hidden states if available
             if teacher_outputs.get('hidden_states'):
                 cache_entry['hidden_states'] = [h.detach().clone() for h in teacher_outputs['hidden_states']]
 
-            # Store in cache with input hash as key
             batch_key = self._get_batch_key(input_ids)
             self._add_to_cache(batch_key, cache_entry)
 
@@ -95,11 +52,8 @@ class DistillationManager:
         return cache_entry
 
     def compute_distillation_loss(self, student_outputs, input_ids):
-        # Get cached teacher outputs
         teacher = self._get_from_cache(input_ids)
         if teacher is None:
-            # No teacher outputs available - fall back to standard loss
-            # This should rarely happen if teacher updates are managed properly
             print(f"Warning: No teacher outputs in cache for batch")
             logits = student_outputs['logits']
             shift_logits = logits[..., :-1, :].contiguous()
@@ -109,16 +63,13 @@ class DistillationManager:
                 shift_labels.view(-1)
             )
 
-        # 1. Output distillation (KL divergence)
         T = self.config.distill_temperature
         teacher_logits = teacher['logits'][..., :-1, :].contiguous()
         student_logits = student_outputs['logits'][..., :-1, :].contiguous()
 
-        # Temperature-scaled softmax
         teacher_log_probs = F.log_softmax(teacher_logits / T, dim=-1)
         student_log_probs = F.log_softmax(student_logits / T, dim=-1)
 
-        # KL divergence with temperature scaling
         kl_loss = F.kl_div(
             student_log_probs.view(-1, student_log_probs.size(-1)),
             teacher_log_probs.view(-1, teacher_log_probs.size(-1)),
@@ -126,12 +77,10 @@ class DistillationManager:
             log_target=True
         ) * (T * T)
 
-        # 2. Feature matching (MSE on hidden states)
         feature_loss = torch.tensor(0.0, device=self.device)
         if student_outputs.get('hidden_states') and teacher.get('hidden_states'):
             num_layers = min(len(teacher['hidden_states']), len(student_outputs['hidden_states']))
 
-            # Match all layers or specified layers
             layers_to_match = getattr(self.config, 'feature_layers', None) or list(range(num_layers))
             layers_to_match = [l for l in layers_to_match if l < num_layers]
 
@@ -140,17 +89,14 @@ class DistillationManager:
                     teacher_features = teacher['hidden_states'][layer_idx]
                     student_features = student_outputs['hidden_states'][layer_idx]
 
-                    # MSE loss for feature matching
                     feature_loss = feature_loss + F.mse_loss(
                         student_features,
                         teacher_features,
                         reduction='mean'
                     )
 
-                # Average across layers
                 feature_loss = feature_loss / len(layers_to_match)
 
-        # Combine losses with weights from config
         total_loss = (
             self.config.distill_alpha_kl * kl_loss +
             self.config.distill_alpha_feature * feature_loss
@@ -159,23 +105,20 @@ class DistillationManager:
         return total_loss
 
     def _get_batch_key(self, input_ids):
-        """Generate hash key for batch."""
-        # Use shape and first few tokens to create unique key
+        
         shape_key = tuple(input_ids.shape)
         sample_tokens = input_ids.flatten()[:min(32, input_ids.numel())].cpu().numpy()
         return hash((shape_key, sample_tokens.tobytes()))
 
     def _add_to_cache(self, key, entry):
-        """Add entry to cache with LRU eviction."""
+        
         cache_size_limit = getattr(self.config, 'cache_size', 32)
 
         if len(self.cache_keys) >= cache_size_limit:
-            # Remove oldest entry (LRU)
             oldest_key = self.cache_keys.pop(0)
             if oldest_key in self.teacher_cache:
                 del self.teacher_cache[oldest_key]
 
-            # Force garbage collection to free memory
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -184,7 +127,7 @@ class DistillationManager:
         self.cache_keys.append(key)
 
     def _get_from_cache(self, input_ids):
-        """Retrieve teacher outputs from cache."""
+        
         key = self._get_batch_key(input_ids)
         result = self.teacher_cache.get(key)
 
@@ -195,13 +138,12 @@ class DistillationManager:
 
         return result
 
-
     def step(self):
-        """Increment iteration counter."""
+        
         self.iteration_count += 1
 
     def get_cache_stats(self):
-        """Get cache statistics."""
+        
         total_requests = self.cache_hits + self.cache_misses
         hit_rate = self.cache_hits / total_requests if total_requests > 0 else 0.0
 

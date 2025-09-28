@@ -4,12 +4,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, List, Optional, Union
 
-
 class SwitchableLayerNorm(nn.Module):
-    """
-    Ensure privacy for each bit width by maintaining separate
-    """
-
+    
     def __init__(
         self,
         normalized_shape: Union[int, List[int], torch.Size],
@@ -27,21 +23,18 @@ class SwitchableLayerNorm(nn.Module):
         self.biases = nn.ParameterDict()
 
         for precision in self.precision_levels:
-            # Initialize with dict keys to ensure privacy.
             self.weights[str(precision)] = nn.Parameter(
                 torch.ones(normalized_shape)
             )
             self.biases[str(precision)] = nn.Parameter(
                 torch.zeros(normalized_shape)
             )
-        # Default to highest precision
         self.current_precision = max(self.precision_levels)
 
-        # Create compatibility layer for models_sp.py which expects ln_layers
         self._create_ln_layers_compatibility()
 
     def _create_ln_layers_compatibility(self):
-        """Create a compatibility layer that mimics ln_layers structure."""
+        
         class LayerNormCompat:
             def __init__(self, parent, key):
                 self.parent = parent
@@ -95,7 +88,6 @@ class SwitchableLayerNorm(nn.Module):
 
                 return BiasWrapper(self.parent.biases[self.key])
 
-        # Create ln_layers dict-like object
         self.ln_layers = {}
         for precision in self.precision_levels:
             key = str(precision)
