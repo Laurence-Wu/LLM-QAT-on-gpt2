@@ -1,17 +1,16 @@
 
+import os
+import sys
 import torch
 import torch.nn as nn
 
-try:
-    from .quantization_methods import (
-        apply_minmax_quantization,
-        apply_log_quantization
-    )
-except ImportError:
-    from quantization_methods import (
-        apply_minmax_quantization,
-        apply_log_quantization
-    )
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
+
+from quantization_methods import (
+    apply_minmax_quantization,
+    apply_log_quantization
+)
 
 class LearnableFakeQuantize(nn.Module):
     def __init__(self, num_bits,

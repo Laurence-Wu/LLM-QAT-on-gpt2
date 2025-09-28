@@ -1,28 +1,36 @@
-"""
-Distillation Manager for Switchable Precision Training
-Manages teacher-student distillation where full-precision teaches low-precision models.
-Following the paper "Switchable Precision Neural Networks".
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from typing import Dict, Optional, List, Tuple, Any
+import gc
 
-    Manages self-distillation for switchable precision training.
-    Teacher (full-precision) outputs guide student (low-precision) learning.
-    
-        Initialize distillation manager.
 
-        Args:
-            model: The switchable precision model
-            full_precision_bits: The bit-width considered as full precision (teacher)
-            config: Training configuration with distillation parameters
-        
-        Update teacher cache with current batch outputs.
-        Should be called when model is at full precision.
+class DistillationManager:
+    def __init__(self, model, full_precision_bits, config):
+        self.model = model
+        self.full_precision_bits = full_precision_bits
+        self.config = config
 
-        Args:
-            input_ids: Input token IDs [batch_size, seq_length]
-            attention_mask: Optional attention mask
+        # Get device from model (should always be CUDA)
+        try:
+            self.device = next(model.parameters()).device
+        except StopIteration:
+            self.device = torch.device('cuda')
 
-        Returns:
-            Dictionary with cached teacher outputs
-        """
+        # Enhanced teacher output cache with per-sequence storage
+        self.teacher_cache = {}
+        self.cache_keys = []
+        self.iteration_count = 0
+
+        # Cache statistics
+        self.cache_hits = 0
+        self.cache_misses = 0
+
+        # Track when teacher was last updated
+        self.last_teacher_update = -1
+        self.pending_teacher_update = False
+
+    def update_teacher(self, input_ids, attention_mask=None):
         current_bits = self.model.get_current_precision()
         if current_bits != self.full_precision_bits:
             raise RuntimeError(f"Teacher update called at {current_bits}-bit precision, expected {self.full_precision_bits}-bit")
@@ -35,6 +43,7 @@ Following the paper "Switchable Precision Neural Networks".
                 return_dict=True
             )
 
+ 
             cache_entry = {
                 'logits': teacher_outputs['logits'].detach().clone(),
                 'hidden_states': []
@@ -105,20 +114,20 @@ Following the paper "Switchable Precision Neural Networks".
         return total_loss
 
     def _get_batch_key(self, input_ids):
-        
         shape_key = tuple(input_ids.shape)
         sample_tokens = input_ids.flatten()[:min(32, input_ids.numel())].cpu().numpy()
         return hash((shape_key, sample_tokens.tobytes()))
 
     def _add_to_cache(self, key, entry):
-        
         cache_size_limit = getattr(self.config, 'cache_size', 32)
 
         if len(self.cache_keys) >= cache_size_limit:
+            # Remove oldest entry (LRU)
             oldest_key = self.cache_keys.pop(0)
             if oldest_key in self.teacher_cache:
                 del self.teacher_cache[oldest_key]
 
+            # Force garbage collection to free memory
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -127,7 +136,6 @@ Following the paper "Switchable Precision Neural Networks".
         self.cache_keys.append(key)
 
     def _get_from_cache(self, input_ids):
-        
         key = self._get_batch_key(input_ids)
         result = self.teacher_cache.get(key)
 
@@ -138,12 +146,11 @@ Following the paper "Switchable Precision Neural Networks".
 
         return result
 
+
     def step(self):
-        
         self.iteration_count += 1
 
     def get_cache_stats(self):
-        
         total_requests = self.cache_hits + self.cache_misses
         hit_rate = self.cache_hits / total_requests if total_requests > 0 else 0.0
 
