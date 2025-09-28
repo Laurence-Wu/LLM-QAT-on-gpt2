@@ -25,7 +25,9 @@ class ModelConfig:
         # Quantizer type: 'minmax', 'relu_clip', 'tanh', or 'log'
         self.quantizer_type = 'log'  # Default to log quantization
         self.quantizer_per_bit = {
+            3: 'log',    # Use log for 3-bit (non-uniform quantization)
             4: 'log',    # Use log for 4-bit (non-uniform quantization)
+            5: 'log',    # Use log for 5-bit (non-uniform quantization)
             6: 'log',    # Use log for 6-bit (non-uniform quantization)
             8: 'log',    # Use log for 8-bit (non-uniform quantization)
             16: 'log',   # Use log for 16-bit (non-uniform quantization)
