@@ -309,10 +309,8 @@ def main():
         results['few_shot'] = {}
 
     # Save results
-    output_dir = Path(eval_config.get('output', {}).get('directory', 'results'))
-    output_dir.mkdir(exist_ok=True, parents=True)
 
-    results_file = output_dir / f"results_{current_bits}bit.json"
+    results_file = f"results_{current_bits}bit.json"
     with open(results_file, 'w') as f:
         json.dump(results, f, indent=2)
 
