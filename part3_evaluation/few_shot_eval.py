@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 import numpy as np
 from datasets import load_dataset
 from typing import Dict, List, Tuple
@@ -66,10 +67,15 @@ class FewShotEvaluator:
                     prompt = self._create_mmlu_prompt(example, num_shots)
                     answer = example['answer']
 
-                    predicted = self._generate_answer(prompt)
+                    # Use likelihood-based scoring for better accuracy
+                    # Create choices for likelihood comparison
+                    choices = []
+                    for i in range(len(example['choices'])):
+                        choices.append(f" {chr(65+i)}")
 
-                    predicted_answer = self._extract_answer_choice(predicted)
-                    correct = predicted_answer == str(answer)
+                    # Get most likely choice
+                    predicted_idx = self._compute_choice_likelihood(prompt, choices)
+                    correct = predicted_idx == int(answer)
 
                     results_by_category[category].append(float(correct))
                 except Exception as e:
@@ -167,32 +173,75 @@ class FewShotEvaluator:
         return prompt
 
     def _create_mmlu_prompt(self, example: Dict, num_shots: int) -> str:
-        """Create MMLU prompt with few-shot examples"""
-        # For limited context models, create a more concise prompt
+        """Create MMLU prompt with actual few-shot examples"""
+        # Get the dataset to sample few-shot examples from
+        mmlu_cfg = self.config['datasets']['MMLU']
+        try:
+            # Load a small portion to sample examples from
+            sample_dataset = load_dataset(
+                mmlu_cfg['dataset_name'],
+                mmlu_cfg['config'],
+                split='test[:100]'  # Just load first 100 for sampling
+            )
+
+            # Filter examples from same subject if possible
+            subject = example.get('subject', 'general')
+            same_subject = [ex for ex in sample_dataset if ex.get('subject') == subject]
+
+            # If not enough from same subject, use any examples
+            example_pool = same_subject if len(same_subject) >= num_shots else list(sample_dataset)
+
+            # Randomly sample few-shot examples (excluding current example)
+            few_shot_examples = []
+            for ex in example_pool:
+                if ex['question'] != example['question'] and len(few_shot_examples) < num_shots:
+                    few_shot_examples.append(ex)
+
+        except:
+            # Fallback to hardcoded examples if dataset loading fails
+            few_shot_examples = [
+                {'question': 'What is 2+2?', 'choices': ['3', '4', '5', '6'], 'answer': 1},
+                {'question': 'Capital of France?', 'choices': ['London', 'Paris', 'Berlin', 'Madrid'], 'answer': 1}
+            ][:num_shots]
+
+        # Build prompt with few-shot examples
         try:
             max_positions = self.model.config.n_positions
         except AttributeError:
             max_positions = 256
-            print(f"Warning: Could not get n_positions, using {max_positions}")
+
+        prompt = ""
 
         if max_positions <= 256:
-            # Ultra-concise format for small context models
-            question = example['question'][:100]  # Truncate long questions
-            choices = example['choices']
+            # Concise format for small models
+            # Add few-shot examples (keep them very short)
+            for ex in few_shot_examples[:min(2, num_shots)]:  # Max 2 examples for small context
+                q = ex['question'][:50]  # Truncate question
+                c = ex['choices']
+                a = ex['answer']
+                prompt += f"Q: {q}\n"
+                for i, choice in enumerate(c[:4]):
+                    prompt += f"{chr(65+i)}: {choice[:30]}\n"
+                prompt += f"A: {chr(65+a)}\n\n"
 
-            prompt = f"Q: {question}\n"
-            for i, choice in enumerate(choices[:4]):  # Limit to 4 choices
-                choice_text = choice[:50]  # Truncate long choices
-                prompt += f"{chr(65+i)}: {choice_text}\n"
+            # Add target question
+            question = example['question'][:100]
+            choices = example['choices']
+            prompt += f"Q: {question}\n"
+            for i, choice in enumerate(choices[:4]):
+                prompt += f"{chr(65+i)}: {choice[:50]}\n"
             prompt += "A:"
         else:
-            # Original format for larger models
-            prompt = f"The following are multiple choice questions about {example.get('subject', 'general knowledge')}.\n\n"
-            question = example['question']
-            choices = example['choices']
+            # Fuller format for larger models
+            for ex in few_shot_examples[:num_shots]:
+                prompt += f"Question: {ex['question']}\n"
+                for i, choice in enumerate(ex['choices']):
+                    prompt += f"{chr(65+i)}. {choice}\n"
+                prompt += f"Answer: {chr(65+ex['answer'])}\n\n"
 
-            prompt += f"Question: {question}\n"
-            for i, choice in enumerate(choices):
+            # Add target question
+            prompt += f"Question: {example['question']}\n"
+            for i, choice in enumerate(example['choices']):
                 prompt += f"{chr(65+i)}. {choice}\n"
             prompt += "Answer:"
 
@@ -244,6 +293,65 @@ class FewShotEvaluator:
             prompt += "A:"
 
         return prompt
+
+    def _compute_choice_likelihood(self, context: str, choices: List[str]) -> int:
+        """
+        Compute log probabilities for each choice and return index of most likely.
+        This is for few-shot evaluation with proper likelihood scoring.
+        """
+        log_probs = []
+
+        for choice in choices:
+            # Tokenize context and full text
+            full_text = context + choice
+            context_tokens = self.tokenizer(context, return_tensors='pt', padding=False, truncation=True, max_length=240)
+            full_tokens = self.tokenizer(full_text, return_tensors='pt', padding=False, truncation=True, max_length=256)
+
+            # Move to device
+            input_ids = full_tokens['input_ids'].to(self.device)
+            context_length = context_tokens['input_ids'].shape[1]
+
+            # Get model outputs
+            with torch.no_grad():
+                outputs = self.model(input_ids)
+                if isinstance(outputs, torch.Tensor):
+                    logits = outputs
+                else:
+                    try:
+                        logits = outputs.logits
+                    except:
+                        logits = outputs[0] if hasattr(outputs, '__getitem__') else outputs
+
+                # Handle different dimensions
+                if logits.dim() == 2:
+                    logits = logits.unsqueeze(0)
+
+                # Get log probabilities
+                log_probs_all = F.log_softmax(logits, dim=-1)
+
+                # Score the choice tokens
+                choice_start = max(0, context_length - 1)
+                choice_end = input_ids.shape[1] - 1
+
+                if choice_start < choice_end and choice_end > 0:
+                    predicted_tokens = input_ids[:, choice_start+1:choice_end+1]
+                    relevant_log_probs = log_probs_all[:, choice_start:choice_end, :]
+
+                    if predicted_tokens.shape[1] > 0 and relevant_log_probs.shape[1] > 0:
+                        token_log_probs = relevant_log_probs.gather(2, predicted_tokens.unsqueeze(-1)).squeeze(-1)
+                        total_log_prob = token_log_probs.sum().item()
+                        avg_log_prob = total_log_prob / max(1, predicted_tokens.shape[1])
+                    else:
+                        avg_log_prob = float('-inf')
+                else:
+                    avg_log_prob = float('-inf')
+
+                log_probs.append(avg_log_prob)
+
+        # Return index of highest probability choice
+        if log_probs:
+            return max(range(len(log_probs)), key=lambda i: log_probs[i])
+        return 0
 
     def _generate_answer(self, prompt: str, max_length: int = None) -> str:
         """Generate answer using the model with smart truncation for 256 token limit"""
