@@ -543,11 +543,12 @@ class CPTModelValidator:
             for bits in bit_widths:
                 if bits == 32:
                     continue
-                key = f'{bits}bit'
-                if key in ln_f.ln_dict:
+                key = str(bits)  # SwitchableLayerNorm uses string keys
+                # Check if parameters exist for this precision
+                if key in ln_f.weights and key in ln_f.biases:
                     self.test_results['passed'] += 1
                 else:
-                    ln_issues.append(f"ln_f missing {key}")
+                    ln_issues.append(f"ln_f missing parameters for {bits}-bit")
         else:
             print(f"[FAIL] Final layer norm is not SwitchableLayerNorm: {type(ln_f)}")
             self.test_results['failed'] += 1
