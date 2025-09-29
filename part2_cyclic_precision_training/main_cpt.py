@@ -408,20 +408,19 @@ def main(args):
                     best_val_loss = val_results['loss']
                     print(f"New best validation loss: {best_val_loss:.4f}")
 
-    # Save final checkpoint after training completes
-    print("Saving final checkpoint...")
-    cpt_deploy.save_cpt_checkpoint(
-        model, optimizer, lr_scheduler, training_config.num_epochs - 1, global_cycle,
-        avg_epoch_loss, config, f'checkpoints_cpt/model_epoch_{training_config.num_epochs}_final.pth'
-    )
-
     # Save final model at target precision only (6-bit)
-    print("Saving final model at target precision...")
+    # No intermediate checkpoints - only save the target model
+    print("\n" + "="*60)
+    print("Training completed! Saving target model...")
     target_bits = training_config.target_bits
     print(f"Target precision for CPT: {target_bits}-bit")
-    cpt_deploy.save_target_model(model, config, target_bits, 'final_models')
 
-    print("Training completed!")
+    saved_path = cpt_deploy.save_target_model(model, config, target_bits, 'final_models')
+    if saved_path:
+        print(f"✅ Model saved successfully at: {saved_path}")
+    else:
+        print("❌ Failed to save model")
+    print("="*60)
 
 
 if __name__ == '__main__':
@@ -430,8 +429,7 @@ if __name__ == '__main__':
                         help='Load pretrained GPT-2 weights')
     parser.add_argument('--skip_prt', action='store_true',
                         help='Skip Precision Range Test')
-    parser.add_argument('--checkpoint', type=str, default=None,
-                        help='Resume from checkpoint')
+    # No checkpoint functionality - CPT only saves final target model
     parser.add_argument('--eval_only', action='store_true',
                         help='Only evaluate the model without training')
 
