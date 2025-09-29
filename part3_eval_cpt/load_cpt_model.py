@@ -111,29 +111,18 @@ def load_cpt_model(model_path: str):
     override_count = 0
 
     for name, module in model.named_modules():
-        # Handle weight quantizers in CPTLinear modules
-        try:
-            if module.weight_quantizers and module.weight_quantizers.quantizers:
-                for bit_key, quantizer in module.weight_quantizers.quantizers.items():
-                    try:
-                        quantizer.per_channel = False
-                        override_count += 1
-                    except AttributeError:
-                        pass
-        except AttributeError:
-            pass
+        # Check if this is a CPTLinear module by class name
+        if module.__class__.__name__ == 'CPTLinear':
+            # Direct attribute access - will raise error if attributes don't exist
+            # Handle weight quantizers
+            for bit_key, quantizer in module.quantizers_weight.items():
+                quantizer.per_channel = False
+                override_count += 1
 
-        # Handle activation quantizers in CPTLinear modules
-        try:
-            if module.activation_quantizers and module.activation_quantizers.quantizers:
-                for bit_key, quantizer in module.activation_quantizers.quantizers.items():
-                    try:
-                        quantizer.per_channel = False
-                        override_count += 1
-                    except AttributeError:
-                        pass
-        except AttributeError:
-            pass
+            # Handle input quantizers
+            for bit_key, quantizer in module.quantizers_input.items():
+                quantizer.per_channel = False
+                override_count += 1
 
     print(f"✅ Overrode {override_count} quantizers to per-tensor mode")
 
@@ -170,25 +159,16 @@ def verify_cpt_quantization_status(model, current_bits):
     per_tensor_count = 0
 
     for name, module in model.named_modules():
-        # Check for CPTLinear modules by checking for quantizer attributes
-        try:
-            # This is likely a CPTLinear module
-            if module.weight_quantizers and module.activation_quantizers:
-                total_count += 1
+        # Check if this is a CPTLinear module by class name
+        if module.__class__.__name__ == 'CPTLinear':
+            total_count += 1
 
-                # Check if quantizers are set to per-tensor
-                try:
-                    for quantizer in module.weight_quantizers.quantizers.values():
-                        try:
-                            if not quantizer.per_channel:
-                                per_tensor_count += 1
-                                break
-                        except AttributeError:
-                            pass
-                except AttributeError:
-                    pass
-        except AttributeError:
-            continue
+            # Direct attribute access - check weight quantizers
+            # Will raise AttributeError if quantizers_weight doesn't exist
+            for bit_key, quantizer in module.quantizers_weight.items():
+                if not quantizer.per_channel:
+                    per_tensor_count += 1
+                    break
 
     if total_count > 0:
         print(f"✓ {per_tensor_count}/{total_count} modules using per-tensor quantization")

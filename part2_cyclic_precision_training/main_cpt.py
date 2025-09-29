@@ -415,9 +415,11 @@ def main(args):
         avg_epoch_loss, config, f'checkpoints_cpt/model_epoch_{training_config.num_epochs}_final.pth'
     )
 
-    # Save final models at all precisions
-    print("Saving final models...")
-    cpt_deploy.save_final_models(model, config, 'final_models')
+    # Save final model at target precision only (6-bit)
+    print("Saving final model at target precision...")
+    target_bits = training_config.target_bits
+    print(f"Target precision for CPT: {target_bits}-bit")
+    cpt_deploy.save_target_model(model, config, target_bits, 'final_models')
 
     print("Training completed!")
 

@@ -55,6 +55,136 @@ def save_cpt_checkpoint(
     print(f"Checkpoint saved to {filepath}")
 
 
+def save_target_model(model: CPTModel, config: dict, target_bits: int, output_dir: str):
+    """
+    Save CPT model at the target precision only.
+    This is used for CPT which optimizes for a specific target bit width.
+
+    Args:
+        model: CPT model
+        config: Configuration dictionary
+        target_bits: Target precision to save (e.g., 6 for 6-bit)
+        output_dir: Directory to save the model
+    """
+    import traceback
+    os.makedirs(output_dir, exist_ok=True)
+    timestamp = time.strftime('%Y%m%d_%H%M%S')
+
+    print(f"\n{'='*60}")
+    print(f"Saving CPT Model at Target Precision")
+    print(f"{'='*60}")
+    print(f"Target precision: {target_bits}-bit")
+
+    # Set model to target precision
+    model.set_precision(target_bits)
+    state_dict = model.state_dict()
+
+    # Debug: Print state dict size
+    state_dict_size = sum(p.numel() * p.element_size() for p in state_dict.values())
+    print(f"State dict size: {state_dict_size / (1024*1024):.2f} MB")
+    print(f"Number of parameters: {sum(p.numel() for p in state_dict.values()):,}")
+
+    # Create filename
+    filename = os.path.join(output_dir, f"cpt_model_{target_bits}bit_target_{timestamp}.pth")
+    print(f"Saving to: {filename}")
+
+    # Save checkpoint with integer bit_width (NOT string)
+    checkpoint = {
+        'model_state_dict': state_dict,
+        'model_config': config['model'].__dict__,
+        'training_config': config['training'].__dict__,
+        'cpt_config': config['cpt'].__dict__,
+        'bit_width': target_bits,  # CRITICAL: Save as integer for Part 3
+        'target_precision': target_bits,  # Explicitly mark this as target
+        'timestamp': timestamp,
+        'lora_rank': config['model'].lora_rank_per_bit.get(target_bits, 0),
+        'lora_alpha': config['model'].lora_alpha_per_bit.get(target_bits, 0),
+        'checkpoint_version': '1.1',
+        'pytorch_version': torch.__version__,
+        'model_type': 'CPT_TARGET'  # Mark as CPT target model
+    }
+
+    # Save with error handling
+    max_retries = 3
+    retry_count = 0
+    save_successful = False
+
+    while retry_count < max_retries and not save_successful:
+        try:
+            # Clear any GPU cache before saving
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            # Save checkpoint
+            torch.save(checkpoint, filename, pickle_protocol=4)
+
+            # Verify saved file
+            time.sleep(0.5)
+            file_size = os.path.getsize(filename)
+            print(f"File saved, size: {file_size / (1024*1024):.2f} MB")
+
+            # Verify integrity
+            print("Verifying checkpoint integrity...")
+            test_load = torch.load(filename, map_location='cpu', weights_only=False)
+
+            # Check critical fields
+            assert 'model_state_dict' in test_load, "Missing model_state_dict"
+            assert 'bit_width' in test_load, "Missing bit_width"
+            assert test_load['bit_width'] == target_bits, f"Bit width mismatch: {test_load['bit_width']} != {target_bits}"
+
+            save_successful = True
+            print(f"✅ Successfully saved {target_bits}-bit target model")
+
+            del test_load
+
+        except Exception as e:
+            retry_count += 1
+            print(f"⚠️ Attempt {retry_count} failed: {str(e)}")
+            if retry_count < max_retries:
+                print(f"Retrying... ({retry_count}/{max_retries})")
+                time.sleep(1.0)
+            else:
+                print(f"❌ ERROR saving {target_bits}-bit model after {max_retries} attempts")
+                traceback.print_exc()
+                # Try to remove corrupted file
+                if os.path.exists(filename):
+                    try:
+                        os.remove(filename)
+                        print(f"Removed corrupted file: {filename}")
+                    except:
+                        print(f"WARNING: Could not remove corrupted file: {filename}")
+
+    print(f"{'='*60}\n")
+
+    if save_successful:
+        # Save summary file
+        summary_file = os.path.join(output_dir, f"cpt_target_model_summary_{timestamp}.txt")
+        with open(summary_file, 'w') as f:
+            f.write("CPT Target Model Summary\n")
+            f.write("=" * 50 + "\n")
+            f.write(f"Target Precision: {target_bits}-bit\n")
+            f.write(f"Model Type: Cyclic Precision Training (CPT)\n")
+            f.write(f"Timestamp: {timestamp}\n")
+            f.write(f"Model Path: {filename}\n")
+            f.write(f"File Size: {file_size / (1024*1024):.2f} MB\n")
+            f.write(f"Total Parameters: {sum(p.numel() for p in state_dict.values()):,}\n")
+            f.write(f"LoRA Rank: {config['model'].lora_rank_per_bit.get(target_bits, 0)}\n")
+            f.write(f"LoRA Alpha: {config['model'].lora_alpha_per_bit.get(target_bits, 0)}\n")
+            f.write(f"Training Config:\n")
+            f.write(f"  - Learning Rate: {config['training'].learning_rate}\n")
+            f.write(f"  - Batch Size: {config['training'].batch_size}\n")
+            f.write(f"  - Num Epochs: {config['training'].num_epochs}\n")
+            f.write(f"CPT Config:\n")
+            f.write(f"  - Cycle Length: {config['cpt'].cycle_length}\n")
+            f.write(f"  - Schedule Type: {config['cpt'].schedule_type}\n")
+            f.write("=" * 50 + "\n")
+        print(f"Summary saved to: {summary_file}")
+
+        return filename
+    else:
+        return None
+
+
 def save_final_models(model: CPTModel, config: dict, output_dir: str):
     """
     Save final models at each precision level for Part 3 evaluation.
