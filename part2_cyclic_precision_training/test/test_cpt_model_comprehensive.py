@@ -367,11 +367,11 @@ class CPTModelValidator:
             self.model.set_precision(bits)
 
             # Check current_bits
-            if self.model.current_bits == bits:
+            if self.model.current_precision == bits:
                 print(f"[PASS] Set precision to {bits} bits")
                 self.test_results['passed'] += 1
             else:
-                print(f"[FAIL] Failed to set precision to {bits} bits (current: {self.model.current_bits})")
+                print(f"[FAIL] Failed to set precision to {bits} bits (current: {self.model.current_precision})")
                 self.test_results['failed'] += 1
                 self.failed_tests.append(f"Precision switching failed for {bits} bits")
 
