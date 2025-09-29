@@ -44,7 +44,6 @@ def initialize_model(model_config, device):
     gpt2_config.bit_widths = model_config.bit_widths
 
     model = SPLMHeadModel(gpt2_config)
-    model.use_gradient_checkpointing = True
 
     load_pretrained_weights(model)
 

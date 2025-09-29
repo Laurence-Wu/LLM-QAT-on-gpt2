@@ -130,6 +130,10 @@ def load_cpt_model(model_path: str):
     model = model.cuda()
     model.eval()
 
+    # CRITICAL: Disable LoRA for evaluation - we want base model performance
+    model.disable_lora_for_calibration()
+    print("✅ LoRA adapters disabled for evaluation")
+
     device = torch.device('cuda')
     print(f"✅ Model ready on {device}")
 

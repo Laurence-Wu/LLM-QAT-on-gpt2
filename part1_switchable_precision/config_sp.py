@@ -10,7 +10,6 @@ class ModelConfig:
         self.embd_pdrop = 0.1
         self.quantization_bits = 8
         self.activation_bits = 8
-        self.use_gradient_checkpointing = True
         self.quantizer_type = 'log'
         self.quantizer_per_bit = {
             3: 'log',
