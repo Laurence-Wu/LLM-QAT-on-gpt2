@@ -134,20 +134,14 @@ class PerplexityEvaluator:
                     try:
                         outputs = self.model(input_ids)
 
-                        # Check if outputs is already a tensor (raw logits)
+                        # Handle different output formats properly
                         if isinstance(outputs, torch.Tensor):
-                            logits = outputs  # Use directly, preserves batch dimension
+                            logits = outputs  # Direct tensor output (when no labels provided)
+                        elif isinstance(outputs, dict):
+                            logits = outputs['logits']  # Dictionary output - use bracket notation
                         else:
-                            # Try to extract logits from dict/object
-                            try:
-                                logits = outputs.logits
-                            except AttributeError:
-                                try:
-                                    # Only use indexing for non-tensor outputs
-                                    logits = outputs[0]
-                                except (IndexError, TypeError):
-                                    print(f"Warning: Could not extract logits from outputs type {type(outputs)}")
-                                    continue
+                            # Handle other unexpected output types with proper error
+                            raise ValueError(f"Unexpected output type from model: {type(outputs)}")
 
                         # Calculate loss using standard next-token prediction
                         shift_logits = logits[..., :-1, :].contiguous()
