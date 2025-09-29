@@ -10,11 +10,11 @@ class ModelConfig:
         self.embd_pdrop = 0.1
         self.quantization_bits = 8
         self.activation_bits = 8
-        self.quantizer_type = 'log'
+        self.quantizer_type = 'minmax'
         self.quantizer_per_bit = {
-            3: 'log',
-            4: 'log',
-            5: 'log',
+            3: 'minmax',
+            4: 'minmax',
+            5: 'minmax',
             6: 'log',
             8: 'log',
             16: 'log',
