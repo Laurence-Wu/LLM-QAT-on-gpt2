@@ -21,6 +21,7 @@ from config_cpt import ModelConfig, TrainingConfig, CPTConfig
 from deploy import save_target_model
 from quantization import LearnableFakeQuantize
 from switchable_batchnorm import SwitchableLayerNorm
+from calibration import CalibrationManager
 
 
 class CPTModelValidator:
@@ -34,6 +35,7 @@ class CPTModelValidator:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.test_results = {'passed': 0, 'failed': 0, 'warnings': 0}
         self.failed_tests = []
+        self.calibrated = False
 
     def load_model(self):
         """Load CPT model from checkpoint or create new one."""
@@ -388,9 +390,89 @@ class CPTModelValidator:
                             self.failed_tests.append(f"Module precision mismatch")
                         break  # Check only first CPTLinear
 
+    def calibrate_model(self):
+        """Calibrate model quantizers for testing."""
+        if self.calibrated:
+            return
+
+        print("\n=== Calibrating Model Quantizers ===")
+
+        # Create dummy data for calibration
+        batch_size = 4
+        seq_len = 128
+        num_batches = 5
+
+        bit_widths = self.config['model'].bit_widths
+        student_bits = [b for b in bit_widths if b < 32]
+
+        for bits in student_bits:
+            print(f"Calibrating {bits}-bit precision...")
+            self.model.set_precision(bits)
+            bits_key = f'{bits}bit'
+
+            # Step 1: Calibrate weight quantizers
+            weight_calibrated = 0
+            for name, module in self.model.named_modules():
+                if isinstance(module, CPTLinear):
+                    if bits_key in module.quantizers_weight:
+                        weight_quantizer = module.quantizers_weight[bits_key]
+                        weight = module.linear.weight.data
+
+                        weight_quantizer.start_calibration()
+                        with torch.no_grad():
+                            _ = weight_quantizer(weight)
+                        weight_quantizer.finish_calibration(debug=False)
+                        weight_calibrated += 1
+
+            print(f"  Calibrated {weight_calibrated} weight quantizers")
+
+            # Step 2: Start calibration for input quantizers
+            input_started = 0
+            for name, module in self.model.named_modules():
+                if isinstance(module, CPTLinear):
+                    if bits_key in module.quantizers_input:
+                        module.quantizers_input[bits_key].start_calibration()
+                        input_started += 1
+
+            print(f"  Started calibration for {input_started} input quantizers")
+
+            # Step 3: Disable LoRA during input calibration
+            self.model.disable_lora_for_calibration()
+
+            # Step 4: Run forward passes with dummy data
+            with torch.no_grad():
+                for i in range(num_batches):
+                    dummy_input = torch.randint(0, self.config['model'].vocab_size,
+                                               (batch_size, seq_len)).to(self.device)
+                    _ = self.model(dummy_input)
+                    del dummy_input
+
+            # Step 5: Re-enable LoRA
+            self.model.enable_lora_after_calibration()
+
+            # Step 6: Finish calibration for input quantizers
+            input_calibrated = 0
+            for name, module in self.model.named_modules():
+                if isinstance(module, CPTLinear):
+                    if bits_key in module.quantizers_input:
+                        module.quantizers_input[bits_key].finish_calibration(debug=False)
+                        input_calibrated += 1
+
+            print(f"  Calibrated {input_calibrated} input quantizers")
+
+        # Clear cache
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        self.calibrated = True
+        print("✅ Model calibration complete")
+
     def test_forward_pass(self):
         """Test 6: Validate forward pass and output format."""
         print("\n=== Test 6: Forward Pass Validation ===")
+
+        # Ensure model is calibrated
+        self.calibrate_model()
 
         # Create sample input
         batch_size = 2
@@ -542,6 +624,9 @@ class CPTModelValidator:
         if not torch.cuda.is_available():
             print("[SKIP] CUDA not available for memory tests")
             return
+
+        # Ensure model is calibrated
+        self.calibrate_model()
 
         # Clear cache
         torch.cuda.empty_cache()
