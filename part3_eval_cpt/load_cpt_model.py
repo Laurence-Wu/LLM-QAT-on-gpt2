@@ -92,6 +92,9 @@ def load_cpt_model(model_path: str):
     print("\nCreating CPT model...")
     model = CPTModel(config)
 
+    # Store config for evaluation code to access
+    model.config = config
+
     # CRITICAL: Set precision BEFORE loading weights
     # This ensures the model is in the correct state for weight loading
     if checkpoint_bit_width:

@@ -73,62 +73,40 @@ def main():
         print(f"No quantization active (bit width: {checkpoint_bit_width})")
 
     # Initialize evaluators (same as SP evaluation)
-    try:
-        device = eval_config['device']
-    except KeyError:
-        device = 'cuda'
+    device = eval_config['device']
 
     # Run diagnostic if requested
     if args.diagnose:
         print("\n" + "="*70)
         print("Running Comprehensive Quantization Diagnostics...")
         print("="*70)
-        try:
-            from diagnose_quantization import (
-                comprehensive_diagnosis,
-                test_sliding_window_perplexity,
-                track_batch_degradation
-            )
+        from diagnose_quantization import (
+            comprehensive_diagnosis,
+            test_sliding_window_perplexity,
+            track_batch_degradation
+        )
 
-            # Run comprehensive diagnosis
-            diagnostic_results = comprehensive_diagnosis(model, tokenizer, device)
+        # Run comprehensive diagnosis
+        diagnostic_results = comprehensive_diagnosis(model, tokenizer, device)
 
-            # Check for issues
-            has_issues = False
-            if 'perplexity_test' in diagnostic_results:
-                try:
-                    ppl = diagnostic_results['perplexity_test']['perplexity']
-                except KeyError:
-                    ppl = 0
-                try:
-                    logits_mean = diagnostic_results['perplexity_test']['logits_mean']
-                except KeyError:
-                    logits_mean = 0
+        # Check for issues
+        if 'perplexity_test' in diagnostic_results:
+            ppl = diagnostic_results['perplexity_test']['perplexity']
+            logits_mean = diagnostic_results['perplexity_test']['logits_mean']
 
-                if ppl > 100 or logits_mean < -50:
-                    has_issues = True
-                    print("\n⚠️ WARNING: Model shows severe issues!")
-                    print(f"   Perplexity: {ppl:.2f}")
-                    print(f"   Logits mean: {logits_mean:.2f}")
-                    print("   Model may have quantization failure or other critical issues.")
+            if ppl > 100 or logits_mean < -50:
+                print("\n⚠️ WARNING: Model shows severe issues!")
+                print(f"   Perplexity: {ppl:.2f}")
+                print(f"   Logits mean: {logits_mean:.2f}")
+                print("   Model may have quantization failure or other critical issues.")
 
-            print("\nDiagnostic complete. Proceeding with evaluation...\n")
-        except Exception as e:
-            print(f"Warning: Diagnostic failed with error: {e}")
-            print("Continuing with evaluation...\n")
+        print("\nDiagnostic complete. Proceeding with evaluation...\n")
 
     # Initialize evaluation modules
     evaluator = CPTEvaluation(model, tokenizer)
 
-    try:
-        zero_shot_config = eval_config['zero_shot']
-    except KeyError:
-        zero_shot_config = {}
-
-    try:
-        perplexity_config = eval_config['perplexity']
-    except KeyError:
-        perplexity_config = {}
+    zero_shot_config = eval_config['zero_shot']
+    perplexity_config = eval_config['perplexity']
 
     zero_shot_evaluator = ZeroShotEvaluator(model, tokenizer, device=device, config=zero_shot_config)
     perplexity_evaluator = PerplexityEvaluator(model, tokenizer, device=device, config=perplexity_config)
@@ -151,41 +129,26 @@ def main():
 
     # 1. Perplexity evaluation
     print("\n1. Perplexity evaluation...")
-    try:
-        perplexity_results = perplexity_evaluator.evaluate_all_datasets(bit_config)
-        results['perplexity'] = perplexity_results
-        for dataset, ppl in perplexity_results.items():
-            print(f"   {dataset}: {ppl:.1f}")
-    except Exception as e:
-        print(f"   Warning: Perplexity evaluation failed: {e}")
-        results['perplexity'] = {}
+    perplexity_results = perplexity_evaluator.evaluate_all_datasets(bit_config)
+    results['perplexity'] = perplexity_results
+    for dataset, ppl in perplexity_results.items():
+        print(f"   {dataset}: {ppl:.1f}")
 
     # 2. Zero-shot evaluation
     print("\n2. Zero-shot evaluation...")
-    try:
-        zero_shot_results = zero_shot_evaluator.evaluate_all_tasks(bit_config)
-        results['zero_shot'] = zero_shot_results
-        for task, score in zero_shot_results.items():
-            if task != 'Average':
-                print(f"   {task}: {score:.1f}%")
-        if 'Average' in zero_shot_results:
-            print(f"   Average: {zero_shot_results['Average']:.1f}%")
-    except Exception as e:
-        print(f"   Warning: Zero-shot evaluation failed: {e}")
-        results['zero_shot'] = {}
+    zero_shot_results = zero_shot_evaluator.evaluate_all_tasks(bit_config)
+    results['zero_shot'] = zero_shot_results
+    for task, score in zero_shot_results.items():
+        if task != 'Average':
+            print(f"   {task}: {score:.1f}%")
+    if 'Average' in zero_shot_results:
+        print(f"   Average: {zero_shot_results['Average']:.1f}%")
 
     # Few-shot evaluation removed - focusing on perplexity and zero-shot classification only
 
     # Save results with CPT-specific naming
-    try:
-        output_config = eval_config['output']
-    except KeyError:
-        output_config = {}
-
-    try:
-        output_dir_str = output_config['directory']
-    except KeyError:
-        output_dir_str = 'results'
+    output_config = eval_config['output']
+    output_dir_str = output_config['directory']
 
     output_dir = Path(output_dir_str)
     output_dir.mkdir(exist_ok=True, parents=True)

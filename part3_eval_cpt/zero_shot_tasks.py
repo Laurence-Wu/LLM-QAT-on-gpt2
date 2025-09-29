@@ -97,11 +97,8 @@ class ZeroShotEvaluator:
     def _evaluate_single_example(self, task_name: str, example) -> float:
         """Evaluate a single example based on task type"""
         # Get max positions for prompt construction
-        try:
-            max_positions = self.model.config.n_positions
-        except AttributeError:
-            max_positions = 256
-            print(f"Warning: Could not get n_positions from model config, using {max_positions}")
+        # Direct access - will throw error if missing (per project rule #2)
+        max_positions = self.model.config['model'].n_positions
 
         truncation = self.config['prompt_truncation']
         is_limited_context = max_positions <= truncation['limited_context_threshold']

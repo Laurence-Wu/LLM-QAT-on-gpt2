@@ -131,49 +131,39 @@ class PerplexityEvaluator:
                 input_ids = encodings.input_ids[:, begin_loc:end_loc].to(self.device)
 
                 with torch.no_grad():
-                    try:
-                        outputs = self.model(input_ids)
+                    outputs = self.model(input_ids)
 
-                        # Handle different output formats properly
-                        if isinstance(outputs, torch.Tensor):
-                            logits = outputs  # Direct tensor output (when no labels provided)
-                        elif isinstance(outputs, dict):
-                            logits = outputs['logits']  # Dictionary output - use bracket notation
-                        else:
-                            # Handle other unexpected output types with proper error
-                            raise ValueError(f"Unexpected output type from model: {type(outputs)}")
+                    # CPT model returns CausalLMOutputWithPast with .logits attribute
+                    logits = outputs.logits
 
-                        # Calculate loss using standard next-token prediction
-                        shift_logits = logits[..., :-1, :].contiguous()
-                        shift_labels = input_ids[..., 1:].contiguous()
+                    # Calculate loss using standard next-token prediction
+                    shift_logits = logits[..., :-1, :].contiguous()
+                    shift_labels = input_ids[..., 1:].contiguous()
 
-                        # CRITICAL: Only score tokens AFTER the context prefix
-                        if window_idx == 0:
-                            # First window: skip initial tokens (they have no context)
-                            skip_tokens = min(32, window_size // 4)  # Skip first 32 tokens or 25% of window
-                        else:
-                            # Subsequent windows: skip the context portion (first half)
-                            skip_tokens = context_size
+                    # CRITICAL: Only score tokens AFTER the context prefix
+                    if window_idx == 0:
+                        # First window: skip initial tokens (they have no context)
+                        skip_tokens = min(32, window_size // 4)  # Skip first 32 tokens or 25% of window
+                    else:
+                        # Subsequent windows: skip the context portion (first half)
+                        skip_tokens = context_size
 
-                        # Only calculate loss on tokens with sufficient context
-                        if shift_logits.size(1) > skip_tokens:
-                            shift_logits = shift_logits[:, skip_tokens:, :]
-                            shift_labels = shift_labels[:, skip_tokens:]
-                        else:
-                            continue  # Window too small after skipping context
+                    # Only calculate loss on tokens with sufficient context
+                    if shift_logits.size(1) > skip_tokens:
+                        shift_logits = shift_logits[:, skip_tokens:, :]
+                        shift_labels = shift_labels[:, skip_tokens:]
+                    else:
+                        continue  # Window too small after skipping context
 
-                        loss_fct = torch.nn.CrossEntropyLoss()
-                        loss = loss_fct(
-                            shift_logits.view(-1, shift_logits.size(-1)),
-                            shift_labels.view(-1)
-                        )
+                    loss_fct = torch.nn.CrossEntropyLoss()
+                    loss = loss_fct(
+                        shift_logits.view(-1, shift_logits.size(-1)),
+                        shift_labels.view(-1)
+                    )
 
-                        if not torch.isnan(loss) and not torch.isinf(loss):
-                            loss_value = loss.item()
-                            all_losses.append(loss_value)
-
-                    except Exception as e:
-                        continue
+                    if not torch.isnan(loss) and not torch.isinf(loss):
+                        loss_value = loss.item()
+                        all_losses.append(loss_value)
 
         if not all_losses:
             return float('inf')
