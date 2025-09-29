@@ -102,6 +102,9 @@ class CPTLinear(nn.Module):
         # Current precision
         self.current_bits = max(bit_widths)
 
+        # Calibration mode flag (like part1)
+        self.calibration_mode = False
+
     def set_precision(self, num_bits: int):
         """Set current precision for forward pass."""
         if num_bits not in self.bit_widths:
@@ -124,6 +127,10 @@ class CPTLinear(nn.Module):
 
         # Base linear operation
         out = F.linear(x_quant, weight_quant, self.linear.bias)
+
+        # Skip LoRA in calibration mode (like part1)
+        if self.calibration_mode:
+            return out
 
         # Add LoRA adaptation for current precision (using original input like part1)
         lora_key = f'lora_{self.current_bits}bit'
@@ -398,6 +405,24 @@ class CPTModel(nn.Module):
             hidden_states=hidden_states,
             attentions=None
         )
+
+    def disable_lora_for_calibration(self):
+        """
+        Disable LoRA during calibration to get clean statistics.
+        Sets calibration_mode=True on all CPTLinear layers.
+        """
+        for module in self.modules():
+            if isinstance(module, CPTLinear):
+                module.calibration_mode = True
+
+    def enable_lora_after_calibration(self):
+        """
+        Re-enable LoRA after calibration.
+        Sets calibration_mode=False on all CPTLinear layers.
+        """
+        for module in self.modules():
+            if isinstance(module, CPTLinear):
+                module.calibration_mode = False
 
     def replace_quantizers_for_evaluation(self):
         """

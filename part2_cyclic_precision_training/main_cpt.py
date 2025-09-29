@@ -31,6 +31,7 @@ from typing import Dict, Optional
 from config_cpt import get_config
 from cpt_model import CPTModel
 from cyclic_scheduler import CyclicPrecisionScheduler, PrecisionRangeTest
+from calibration import CalibrationManager
 import deploy as cpt_deploy
 import dataset as cpt_dataset
 
@@ -41,7 +42,9 @@ def train_cycle_with_cyclic_precision(
     optimizer: optim.Optimizer,
     precision_scheduler: CyclicPrecisionScheduler,
     lr_scheduler: optim.lr_scheduler._LRScheduler,
-    device: str
+    calib_mgr: CalibrationManager,
+    device: str,
+    iteration: int
 ) -> Dict[str, float]:
     """
     Single training step with cyclic precision.
@@ -66,6 +69,10 @@ def train_cycle_with_cyclic_precision(
     for i, precision in enumerate(cycle_precisions):
         # Set model to current precision
         model.set_precision(precision)
+
+        # Recalibrate LoRA during training (like part1)
+        if iteration >= 0 and precision < 32:
+            calib_mgr.calibrate_lora_only(precision, num_batches=2)
 
         # Forward pass with current precision
         outputs = model(input_ids=input_ids, labels=labels)
@@ -280,6 +287,13 @@ def main(args):
     # Load pretrained weights if specified
     load_pretrained_weights(model, model_config)
 
+    # Create calibration manager and calibrate all precisions
+    print("\nInitializing calibration manager...")
+    calib_mgr = CalibrationManager(model, train_loader, device)
+    student_bits = [b for b in model_config.bit_widths if b < 32]
+    print("Calibrating all precision levels...")
+    calib_mgr.calibrate_all_precisions(student_bits)
+
     # Create cyclic precision scheduler
     precision_scheduler = CyclicPrecisionScheduler(
         bit_widths=model_config.bit_widths,
@@ -344,7 +358,7 @@ def main(args):
         for batch_idx, batch in enumerate(progress_bar):
             # CRITICAL: Train with cyclic precision
             cycle_results = train_cycle_with_cyclic_precision(
-                model, batch, optimizer, precision_scheduler, lr_scheduler, device
+                model, batch, optimizer, precision_scheduler, lr_scheduler, calib_mgr, device, global_cycle
             )
 
             epoch_losses.append(cycle_results['total_loss'])
@@ -379,6 +393,8 @@ def main(args):
             print("Running validation...")
             # Evaluate at different precisions
             for precision in model_config.bit_widths:
+                # Ensure calibration before evaluation
+                calib_mgr.ensure_calibrated(precision)
                 val_results = evaluate(model, val_loader, device, precision)
                 print(f"Validation at {precision}-bit - Loss: {val_results['loss']:.4f}, "
                       f"Perplexity: {val_results['perplexity']:.2f}")
