@@ -117,7 +117,7 @@ class CPTLinear(nn.Module):
         # Add LoRA adaptation for current precision
         lora_key = f'lora_{self.current_bits}bit'
         if lora_key in self.lora_adapters:
-            lora_out = self.lora_adapters[lora_key](x)
+            lora_out = self.lora_adapters[lora_key](x_quant)
             out = out + lora_out
 
         return out
