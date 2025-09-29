@@ -11,11 +11,7 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from typing import Optional, Dict, Tuple
 import math
 
-from quantization_methods import (
-    PerChannelLogQuantization,
-    MultiPrecisionQuantizer,
-    GradientBifurcation
-)
+from quantization import LearnableFakeQuantize
 from switchable_batchnorm import SwitchableLayerNorm
 
 
@@ -80,19 +76,28 @@ class CPTLinear(nn.Module):
                 in_features, out_features, rank, alpha
             )
 
-        # Per-channel quantizers for weights (use per-channel during training)
-        self.weight_quantizers = MultiPrecisionQuantizer(
-            bit_widths=bit_widths,
-            quantizer_type='log',
-            per_channel=True  # Use per-channel calibration during training
-        )
+        # Quantizers for weights - using nn.ModuleDict like part1
+        self.weight_quantizers = nn.ModuleDict({
+            f'{bits}bit': LearnableFakeQuantize(
+                num_bits=bits,
+                quantizer_type='log',
+                channel_dim=0,  # Weight quantization along output channel
+                per_channel=True
+            )
+            for bits in bit_widths if bits < 32
+        })
 
-        # Per-channel quantizers for activations (use per-channel during training)
-        self.activation_quantizers = MultiPrecisionQuantizer(
-            bit_widths=bit_widths,
-            quantizer_type='log',
-            per_channel=True  # Use per-channel calibration during training
-        )
+        # Quantizers for activations - using nn.ModuleDict like part1
+        self.activation_quantizers = nn.ModuleDict({
+            f'{bits}bit': LearnableFakeQuantize(
+                num_bits=bits,
+                quantizer_type='log',
+                channel_dim=-1,  # Activation quantization along hidden dim
+                per_channel=True,
+                is_input=True
+            )
+            for bits in bit_widths if bits < 32
+        })
 
         # Current precision
         self.current_bits = max(bit_widths)
@@ -105,19 +110,25 @@ class CPTLinear(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass with current precision."""
-        # Quantize activations with per-channel calibration
-        x_quant = self.activation_quantizers.quantize(x, self.current_bits)
+        # Handle 32-bit precision (no quantization)
+        if self.current_bits >= 32:
+            out = F.linear(x, self.linear.weight, self.linear.bias)
+            return out
 
-        # Quantize weights with per-channel calibration
-        weight_quant = self.weight_quantizers.quantize(self.linear.weight, self.current_bits)
+        # Get quantizers for current bit width
+        bits_key = f'{self.current_bits}bit'
+
+        # Quantize activations and weights
+        x_quant = self.activation_quantizers[bits_key](x)
+        weight_quant = self.weight_quantizers[bits_key](self.linear.weight)
 
         # Base linear operation
         out = F.linear(x_quant, weight_quant, self.linear.bias)
 
-        # Add LoRA adaptation for current precision
+        # Add LoRA adaptation for current precision (using original input like part1)
         lora_key = f'lora_{self.current_bits}bit'
         if lora_key in self.lora_adapters:
-            lora_out = self.lora_adapters[lora_key](x_quant)
+            lora_out = self.lora_adapters[lora_key](x)
             out = out + lora_out
 
         return out
@@ -310,12 +321,6 @@ class CPTModel(nn.Module):
         # Initialize weights
         self.apply(self._init_weights)
 
-        # Gradient bifurcation
-        self.gradient_bifurcation = GradientBifurcation(
-            weight_grad_bits=model_config.weight_gradient_bits,
-            activation_grad_bits=model_config.activation_gradient_bits
-        )
-
         # Current precision
         self.current_precision = model_config.default_bits
 
@@ -442,15 +447,6 @@ class CPTModel(nn.Module):
                     new_quantizer = new_quantizer.to(old_quantizer.channel_scales.device if old_quantizer.channel_scales is not None else 'cpu')
                     module.activation_quantizers.quantizers[bits] = new_quantizer
 
-        # Replace gradient bifurcation quantizers if present
-        try:
-            self.gradient_bifurcation = GradientBifurcation(
-                weight_grad_bits=self.gradient_bifurcation.weight_grad_bits,
-                activation_grad_bits=self.gradient_bifurcation.activation_grad_bits,
-                per_channel=False  # Use per-tensor for evaluation
-            )
-        except AttributeError:
-            pass  # No gradient bifurcation to replace
 
     def generate(self, input_ids, max_length=100, temperature=1.0, do_sample=True, **kwargs):
         """Simple generation method."""
