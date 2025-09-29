@@ -144,9 +144,6 @@ class TrainingConfig:
         self.empty_cache_interval = 25
         self.num_workers = 0
 
-        # Loss settings
-        self.use_distillation = False  # NO distillation for CPT
-
         # Hardware settings
         self.device = 'cuda'
         self.fp16 = False  # Use FP32

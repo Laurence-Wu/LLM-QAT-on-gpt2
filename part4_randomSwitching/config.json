@@ -1,0 +1,51 @@
+{
+  "dataset": {
+    "name": "wikitext-2",
+    "num_samples": 100,
+    "max_length": 256,
+    "min_length": 50
+  },
+
+  "attack_settings": {
+    "textfooler": {
+      "max_candidates": 50,
+      "min_similarity": 0.5,
+      "max_iterations": 20,
+      "use_synonyms": true
+    },
+    "gradient": {
+      "epsilon": 0.01,
+      "alpha": 0.001,
+      "num_steps": 10,
+      "targeted": false
+    }
+  },
+
+  "defense_settings": {
+    "switch_probabilities": [0.2, 0.3, 0.4],
+    "evaluation_mode": "random_switching",
+    "num_trials": 3,
+    "warmup_steps": 0
+  },
+
+  "model_settings": {
+    "device": "cuda",
+    "batch_size": 1,
+    "max_seq_length": 256,
+    "use_fp16": false
+  },
+
+  "output_settings": {
+    "output_dir": ".",
+    "save_intermediate": true,
+    "report_format": "json",
+    "verbose": true,
+    "save_precision_distribution": true
+  },
+
+  "evaluation": {
+    "metrics": ["attack_success_rate", "defense_rate", "clean_accuracy", "robustness_gap"],
+    "compare_with_baseline": true,
+    "statistical_significance": false
+  }
+}

@@ -17,6 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from simplified_random_switching import (
     load_sp_model_with_bit_config,
+    load_cpt_model_with_bit_config,
     SimplifiedRandomSwitching,
     DefenseEvaluator
 )
@@ -310,6 +311,26 @@ def generate_report(fixed_results: Dict, switching_results: Dict,
     return report
 
 
+def load_model_by_type(checkpoint_path, model_type, device):
+    """
+    Load model based on type (SP or CPT).
+
+    Args:
+        checkpoint_path: Path to model checkpoint
+        model_type: 'sp' or 'cpt'
+        device: Device to load model to
+
+    Returns:
+        model, tokenizer, bit_widths, saved_precision
+    """
+    if model_type.lower() == 'sp':
+        return load_sp_model_with_bit_config(checkpoint_path, device)
+    elif model_type.lower() == 'cpt':
+        return load_cpt_model_with_bit_config(checkpoint_path, device)
+    else:
+        raise ValueError(f"Unknown model type: {model_type}. Must be 'sp' or 'cpt'")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Evaluate GPT-2 adversarial robustness with random switching"
@@ -318,67 +339,102 @@ def main():
         "--checkpoint",
         type=str,
         required=True,
-        help="Path to trained SP model checkpoint (.pth file)"
+        help="Path to trained model checkpoint (.pth file)"
     )
     parser.add_argument(
-        "--num_samples",
-        type=int,
-        default=100,
-        help="Number of WikiText-2 samples to evaluate"
-    )
-    parser.add_argument(
-        "--switch_probs",
-        nargs="+",
-        type=float,
-        default=[0.2, 0.3, 0.4],
-        help="Switching probabilities to test"
-    )
-    parser.add_argument(
-        "--output_dir",
+        "--model_type",
         type=str,
-        default="part4_randomSwitching/results",
-        help="Directory to save results"
+        required=True,
+        choices=['sp', 'cpt'],
+        help="Model type: 'sp' for Switchable Precision or 'cpt' for Cyclic Precision Training"
     )
     parser.add_argument(
-        "--device",
+        "--config",
         type=str,
-        default="cuda" if torch.cuda.is_available() else "cpu",
-        help="Device for computation"
+        default="part4_randomSwitching/config.json",
+        help="Path to configuration JSON file"
     )
 
     args = parser.parse_args()
 
-    output_path = Path(args.output_dir)
+    # Load configuration from JSON
+    config_path = Path(args.config)
+    if not config_path.exists():
+        print(f"Error: Config file not found at {config_path}")
+        sys.exit(1)
+
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+
+    # Ensure CUDA is available and set device
+    if not torch.cuda.is_available():
+        print("Error: CUDA is not available. This evaluation requires GPU.")
+        sys.exit(1)
+
+    device = "cuda"
+
+    # Set output directory from config
+    output_dir = config['output_settings'].get('output_dir', '.')
+    output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
+
+    # Get parameters from config
+    num_samples = config['dataset']['num_samples']
+    switch_probs = config['defense_settings']['switch_probabilities']
 
     print("="*60)
     print("ADVERSARIAL ROBUSTNESS EVALUATION WITH RANDOM SWITCHING")
     print("="*60)
+    print(f"\nModel Type: {args.model_type.upper()}")
+    print(f"Checkpoint: {args.checkpoint}")
+    print(f"Config: {args.config}")
+    print(f"Output Directory: {output_path}")
 
-    model, tokenizer, bit_widths, saved_precision = load_sp_model_with_bit_config(
-        args.checkpoint, args.device
+    # Load model based on type
+    model, tokenizer, bit_widths, saved_precision = load_model_by_type(
+        args.checkpoint, args.model_type, device
     )
 
-    print("\nPreparing WikiText-2 dataset...")
+    print(f"\nLoaded {args.model_type.upper()} model with bit widths: {bit_widths}")
+    if saved_precision:
+        print(f"Model was saved at {saved_precision}-bit precision")
+
+    print(f"\nPreparing {config['dataset']['name']} dataset...")
     test_samples = prepare_wikitext2_samples(
-        tokenizer, num_samples=args.num_samples
+        tokenizer, num_samples=num_samples
     )
     print(f"Prepared {len(test_samples)} samples for evaluation")
 
     fixed_results = evaluate_fixed_precision_baseline(
-        model, tokenizer, test_samples, bit_widths, args.device
+        model, tokenizer, test_samples, bit_widths, device
     )
 
     switching_results = evaluate_random_switching_defense(
         model, tokenizer, test_samples, bit_widths,
-        args.switch_probs, args.device
+        switch_probs, device
     )
 
     comparison = compare_results(fixed_results, switching_results)
 
+    # Add model info and config to report
     report = generate_report(
         fixed_results, switching_results, comparison, output_path
     )
+
+    # Enhance report with model and config info
+    report['model_info'] = {
+        'type': args.model_type,
+        'checkpoint': args.checkpoint,
+        'bit_widths': bit_widths,
+        'saved_precision': saved_precision
+    }
+    report['config'] = config
+
+    # Save enhanced report
+    report_file = output_path / f'evaluation_results_{args.model_type}.json'
+    with open(report_file, 'w') as f:
+        json.dump(report, f, indent=2)
+    print(f"\nEnhanced report saved to: {report_file}")
 
     print("\n" + "="*60)
     print("EVALUATION COMPLETE")

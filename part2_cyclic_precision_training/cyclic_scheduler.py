@@ -170,7 +170,7 @@ class PrecisionRangeTest:
 
     def find_lower_bound(self, dataloader, criterion) -> int:
         """
-        Find optimal lower precision bound.
+        Find optimal lower precision bound using Precision Range Test (PRT).
 
         Args:
             dataloader: Training dataloader
@@ -180,57 +180,108 @@ class PrecisionRangeTest:
             Optimal lower bound bit-width
         """
         self.model.train()
-        previous_acc = 0.0
 
-        # Get device from model
+        # Store metrics for each precision
+        precision_metrics = {}
         device = next(self.model.parameters()).device
 
+        print(f"\n{'='*50}")
+        print(f"Precision Range Test: {self.start_bits} to {self.max_bits} bits")
+        print(f"{'='*50}")
+
+        # Evaluate each precision
         for bits in range(self.start_bits, self.max_bits + 1):
-            # Set model to current precision
             self.model.set_precision(bits)
 
-            # Track accuracy for this precision
             correct = 0
             total = 0
             total_loss = 0
+            num_batches = 0
 
-            # Test for specified iterations
-            for i, batch in enumerate(dataloader):
-                if i >= self.test_iterations:
-                    break
+            with torch.no_grad():
+                for i, batch in enumerate(dataloader):
+                    if i >= self.test_iterations:
+                        break
 
-                # Move batch to device
-                input_ids = batch['input_ids'].to(device)
-                labels = batch['labels'].to(device)
+                    # Prepare inputs
+                    input_ids = batch['input_ids'].to(device)
+                    labels = batch['labels'].to(device)
+                    attention_mask = batch.get('attention_mask')
+                    if attention_mask is not None:
+                        attention_mask = attention_mask.to(device)
 
-                with torch.no_grad():
-                    outputs = self.model(input_ids)
-                    # Reshape logits from [batch, seq, vocab] to [batch*seq, vocab]
-                    logits = outputs.logits.view(-1, outputs.logits.size(-1))
-                    # Reshape labels from [batch, seq] to [batch*seq]
-                    labels_flat = labels.view(-1)
-                    loss = criterion(logits, labels_flat)
+                    # Forward pass with attention mask
+                    outputs = self.model(
+                        input_ids,
+                        labels=labels,
+                        attention_mask=attention_mask
+                    )
+
+                    # Use the loss from model output (already handles shifting)
+                    loss = outputs['loss']
                     total_loss += loss.item()
+                    num_batches += 1
 
-                    # Calculate accuracy
-                    predictions = outputs.logits.argmax(dim=-1)
-                    correct += (predictions == labels).sum().item()
-                    total += labels.numel()
+                    # Calculate accuracy on valid tokens only
+                    logits = outputs['logits']
+                    predictions = logits.argmax(dim=-1)
 
+                    # Shift for comparison (language modeling)
+                    shift_preds = predictions[..., :-1].contiguous()
+                    shift_labels = labels[..., 1:].contiguous()
+
+                    # Mask out padding tokens
+                    mask = (shift_labels != -100)
+                    correct += ((shift_preds == shift_labels) * mask).sum().item()
+                    total += mask.sum().item()
+
+            # Store metrics
             current_acc = correct / total if total > 0 else 0
-            avg_loss = total_loss / min(i + 1, self.test_iterations)
+            avg_loss = total_loss / num_batches if num_batches > 0 else float('inf')
+            precision_metrics[bits] = {
+                'accuracy': current_acc,
+                'loss': avg_loss
+            }
 
-            print(f"PRT: {bits}-bit -> Acc: {current_acc:.4f}, Loss: {avg_loss:.4f}")
+            print(f"  {bits:2d}-bit: Acc={current_acc:.4f}, Loss={avg_loss:.4f}")
 
-            # Check if accuracy improvement exceeds threshold
-            if current_acc - previous_acc > self.threshold:
-                print(f"Lower bound found: {bits}-bit")
-                return bits
+        # Find optimal lower bound
+        # Look for the first precision where accuracy improvement is significant
+        optimal_lower = self.start_bits
 
-            previous_acc = current_acc
+        for bits in range(self.start_bits + 1, self.max_bits + 1):
+            prev_acc = precision_metrics[bits - 1]['accuracy']
+            curr_acc = precision_metrics[bits]['accuracy']
 
-        # Default to start_bits if no significant improvement found
-        return self.start_bits
+            # Calculate relative improvement
+            if prev_acc > 0:
+                relative_improvement = (curr_acc - prev_acc) / prev_acc
+            else:
+                relative_improvement = curr_acc
+
+            # Find significant jump in accuracy
+            if relative_improvement > self.threshold:
+                optimal_lower = bits
+                print(f"\n✓ Optimal lower bound: {optimal_lower}-bit")
+                print(f"  (Improvement: {relative_improvement:.2%})")
+                break
+
+        # If no significant improvement found, use a sharpest jump heuristic
+        if optimal_lower == self.start_bits:
+            max_improvement = 0
+            for bits in range(self.start_bits + 1, min(self.start_bits + 4, self.max_bits + 1)):
+                if bits in precision_metrics and bits - 1 in precision_metrics:
+                    prev_acc = precision_metrics[bits - 1]['accuracy']
+                    curr_acc = precision_metrics[bits]['accuracy']
+                    improvement = curr_acc - prev_acc
+                    if improvement > max_improvement:
+                        max_improvement = improvement
+                        optimal_lower = bits
+
+            if optimal_lower != self.start_bits:
+                print(f"\n✓ Optimal lower bound (heuristic): {optimal_lower}-bit")
+
+        return optimal_lower
 
     def find_bounds(self, dataloader, criterion) -> Tuple[int, int]:
         """

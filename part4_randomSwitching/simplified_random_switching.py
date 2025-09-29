@@ -14,6 +14,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from part1_switchable_precision.models_sp import SPLMHeadModel
 from transformers import GPT2Tokenizer
 
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'part2_cyclic_precision_training'))
+from part2_cyclic_precision_training.load_cpt_model import load_cpt_model
+
 
 def load_sp_model_with_bit_config(checkpoint_path: str, device: str = 'cuda'):
     """
@@ -77,6 +80,41 @@ def load_sp_model_with_bit_config(checkpoint_path: str, device: str = 'cuda'):
     print(f"  Model was saved at {saved_precision}-bit precision")
 
     return model, tokenizer, bit_widths, saved_precision
+
+
+def load_cpt_model_with_bit_config(checkpoint_path: str, device: str = 'cuda'):
+    """
+    Load CPT model and extract bit width configuration from checkpoint.
+
+    Args:
+        checkpoint_path: Path to the saved model checkpoint
+        device: Device to load model on
+
+    Returns:
+        model: Loaded CPT model
+        tokenizer: GPT2 tokenizer
+        bit_widths: List of available bit widths
+        saved_precision: Precision the model was saved at
+    """
+    print(f"Loading CPT model from {checkpoint_path}")
+
+    model, checkpoint_bit_width, model_config, training_config = load_cpt_model(checkpoint_path)
+
+    bit_widths = model_config.get('bit_schedule', [4, 8, 16, 32])
+    if not isinstance(bit_widths, list):
+        bit_widths = [4, 8, 16, 32]
+
+    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    tokenizer.pad_token = tokenizer.eos_token
+
+    model = model.to(device)
+    model.eval()
+
+    print(f"CPT Model loaded successfully")
+    print(f"  Available bit widths: {bit_widths}")
+    print(f"  Model was saved at {checkpoint_bit_width}-bit precision")
+
+    return model, tokenizer, bit_widths, checkpoint_bit_width
 
 
 class SimplifiedRandomSwitching:

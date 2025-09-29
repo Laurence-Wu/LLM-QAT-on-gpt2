@@ -51,8 +51,7 @@ class CalibrationManager:
         if bits >= 32:
             print(f"  Skipping calibration for {bits}-bit (no quantization needed)")
             return
-
-        print(f"  Step 1: Calibrating weight quantizers for {bits}-bit...")
+        
         weight_calibrated = 0
         weight_errors = []
 
@@ -83,13 +82,10 @@ class CalibrationManager:
             except Exception as e:
                 weight_errors.append(f"{name}: {str(e)}")
 
-        print(f"    ✓ Calibrated {weight_calibrated} weight quantizers")
         if weight_errors:
             print(f"    ⚠️ {len(weight_errors)} warnings (showing first 3):")
             for err in weight_errors[:3]:
                 print(f"      - {err}")
-
-        print(f"  Step 2: Calibrating input quantizers for {bits}-bit...")
 
         input_started = 0
         for name, module in self.model.named_modules():
@@ -182,7 +178,6 @@ class CalibrationManager:
     def _print_calibration_stats(self, bits):
         
         bits_key = f'{bits}bit'
-        print(f"\n  📊 Calibration Statistics for {bits}-bit:")
 
         weight_stats = []
         for name, module in self.model.named_modules():
