@@ -16,7 +16,7 @@ from pathlib import Path
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
-from cpt_model import CPTModel, CPTLinear, CPTSelfAttention, CPTMLP
+from cpt_model import CPTModel, CPTLinear, CPTSelfAttention, CPTBlock
 from config_cpt import ModelConfig, TrainingConfig, CPTConfig
 from deploy import save_target_model
 from quantization import LearnableFakeQuantize
