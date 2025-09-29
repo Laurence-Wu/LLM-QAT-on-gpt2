@@ -47,8 +47,8 @@ class CalibrationManager:
         weight_errors = []
 
         for name, module in self.model.named_modules():
-            if hasattr(module, 'weight_quantizers') and bits_key in module.weight_quantizers:
-                weight_quantizer = module.weight_quantizers[bits_key]
+            if hasattr(module, 'quantizers_weight') and bits_key in module.quantizers_weight:
+                weight_quantizer = module.quantizers_weight[bits_key]
 
                 # Get the weight tensor
                 if hasattr(module, 'linear') and hasattr(module.linear, 'weight'):
@@ -76,18 +76,15 @@ class CalibrationManager:
             for err in weight_errors[:3]:
                 print(f"      - {err}")
 
-        # Step 2: Start calibration for input/activation quantizers
+        # Step 2: Start calibration for input quantizers
         input_started = 0
         for name, module in self.model.named_modules():
-            # Handle both naming conventions (activation_quantizers from part2, input from part1 style)
-            quantizers_attr = 'activation_quantizers' if hasattr(module, 'activation_quantizers') else 'input_quantizers'
-            if hasattr(module, quantizers_attr):
-                quantizers = getattr(module, quantizers_attr)
-                if bits_key in quantizers:
-                    quantizers[bits_key].start_calibration()
-                    input_started += 1
+            # Use consistent naming with part1
+            if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].start_calibration()
+                input_started += 1
 
-        print(f"    Started calibration for {input_started} input/activation quantizers")
+        print(f"    Started calibration for {input_started} input quantizers")
 
         # Step 3: Disable LoRA during input calibration (like part1)
         self.model.disable_lora_for_calibration()
@@ -108,17 +105,15 @@ class CalibrationManager:
         # Step 5: Re-enable LoRA after calibration
         self.model.enable_lora_after_calibration()
 
-        # Step 6: Finish calibration for input/activation quantizers
+        # Step 6: Finish calibration for input quantizers
         input_calibrated = 0
         for name, module in self.model.named_modules():
-            quantizers_attr = 'activation_quantizers' if hasattr(module, 'activation_quantizers') else 'input_quantizers'
-            if hasattr(module, quantizers_attr):
-                quantizers = getattr(module, quantizers_attr)
-                if bits_key in quantizers:
-                    quantizers[bits_key].finish_calibration(debug=False)
-                    input_calibrated += 1
+            # Use consistent naming with part1
+            if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
+                module.quantizers_input[bits_key].finish_calibration(debug=False)
+                input_calibrated += 1
 
-        print(f"    ✓ Calibrated {input_calibrated} input/activation quantizers")
+        print(f"    ✓ Calibrated {input_calibrated} input quantizers")
 
         # Clean up memory
         torch.cuda.empty_cache()
@@ -133,7 +128,8 @@ class CalibrationManager:
             return
 
         bits_key = f'{bits}bit'
-        lora_key = f'lora_{bits}bit'
+        # Use same naming as part1 (without 'lora_' prefix)
+        lora_key = f'{bits}bit'
 
         lora_calibrated = 0
         for name, module in self.model.named_modules():
@@ -192,8 +188,8 @@ class CalibrationManager:
 
         weight_stats = []
         for name, module in self.model.named_modules():
-            if hasattr(module, 'weight_quantizers') and bits_key in module.weight_quantizers:
-                q = module.weight_quantizers[bits_key]
+            if hasattr(module, 'quantizers_weight') and bits_key in module.quantizers_weight:
+                q = module.quantizers_weight[bits_key]
                 if q.calibrated:
                     weight_stats.append({
                         'name': f"{name}.weight",

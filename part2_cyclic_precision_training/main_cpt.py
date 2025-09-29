@@ -282,10 +282,14 @@ def main(args):
 
     # model
     print("Creating CPT model...")
-    model = CPTModel(config).to(device)
+    model = CPTModel(config)  # Create model on CPU first
 
-    # Load pretrained weights if specified
+    # Load pretrained weights if specified (while model is on CPU)
     load_pretrained_weights(model, model_config)
+
+    # Move model to device AFTER loading pretrained weights (like part1)
+    model = model.to(device)
+    print(f"Model moved to {device}")
 
     # Create calibration manager and calibrate all precisions
     print("\nInitializing calibration manager...")

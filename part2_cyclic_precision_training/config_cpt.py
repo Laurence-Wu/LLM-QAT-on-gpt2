@@ -66,8 +66,28 @@ class ModelConfig:
             18: 4,  # Minimal rank
             32: 0   # No LoRA for FP32 (if used)
         }
-        # Quantization settings
-        self.quantizer_type = 'log'  # Use log quantization
+        # Quantization settings (matching part1 structure)
+        self.quantizer_type = 'log'  # Default quantization type
+        self.quantizer_per_bit = {
+            2: 'log',
+            3: 'log',
+            4: 'log',
+            5: 'log',
+            6: 'log',
+            7: 'log',
+            8: 'minmax',  # Use minmax for 8-bit like part1
+            9: 'minmax',
+            10: 'minmax',
+            11: 'minmax',
+            12: 'minmax',
+            13: 'minmax',
+            14: 'minmax',
+            15: 'minmax',
+            16: 'minmax',
+            17: 'minmax',
+            18: 'minmax',
+            32: None  # No quantization for 32-bit
+        }
         self.use_per_channel = True  # Always use per-channel calibration
         self.gradient_bits = 8  # Static gradient precision
         self.activation_bits_per_bit = {

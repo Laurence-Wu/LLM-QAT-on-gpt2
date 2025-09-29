@@ -52,6 +52,7 @@ class CPTLinear(nn.Module):
         bit_widths: list = [4, 6, 8],
         lora_rank_per_bit: dict = None,
         lora_alpha_per_bit: dict = None,
+        quantizer_per_bit: dict = None,
         bias: bool = True
     ):
         super().__init__()
@@ -72,31 +73,38 @@ class CPTLinear(nn.Module):
         for bits in bit_widths:
             rank = lora_rank_per_bit.get(bits, 16)
             alpha = lora_alpha_per_bit.get(bits, 32)
-            self.lora_adapters[f'lora_{bits}bit'] = LoRAAdapter(
+            # Use same naming as part1 (without 'lora_' prefix)
+            self.lora_adapters[f'{bits}bit'] = LoRAAdapter(
                 in_features, out_features, rank, alpha
             )
 
-        # Quantizers for weights - using nn.ModuleDict like part1
-        self.weight_quantizers = nn.ModuleDict({
+        # Default quantizer types if not provided
+        if quantizer_per_bit is None:
+            quantizer_per_bit = {bits: 'log' for bits in bit_widths}
+
+        student_bits = [b for b in bit_widths if b < 32]
+
+        # Quantizers for weights - matching part1 naming
+        self.quantizers_weight = nn.ModuleDict({
             f'{bits}bit': LearnableFakeQuantize(
                 num_bits=bits,
-                quantizer_type='log',
+                quantizer_type=quantizer_per_bit.get(bits, 'log'),
                 channel_dim=0,  # Weight quantization along output channel
                 per_channel=True
             )
-            for bits in bit_widths if bits < 32
+            for bits in student_bits
         })
 
-        # Quantizers for activations - using nn.ModuleDict like part1
-        self.activation_quantizers = nn.ModuleDict({
+        # Quantizers for inputs - matching part1 naming
+        self.quantizers_input = nn.ModuleDict({
             f'{bits}bit': LearnableFakeQuantize(
                 num_bits=bits,
-                quantizer_type='log',
-                channel_dim=-1,  # Activation quantization along hidden dim
+                quantizer_type=quantizer_per_bit.get(bits, 'log'),
+                channel_dim=-1,  # Input quantization along hidden dim
                 per_channel=True,
                 is_input=True
             )
-            for bits in bit_widths if bits < 32
+            for bits in student_bits
         })
 
         # Current precision
@@ -121,9 +129,9 @@ class CPTLinear(nn.Module):
         # Get quantizers for current bit width
         bits_key = f'{self.current_bits}bit'
 
-        # Quantize activations and weights
-        x_quant = self.activation_quantizers[bits_key](x)
-        weight_quant = self.weight_quantizers[bits_key](self.linear.weight)
+        # Quantize inputs and weights (matching part1 naming)
+        x_quant = self.quantizers_input[bits_key](x)
+        weight_quant = self.quantizers_weight[bits_key](self.linear.weight)
 
         # Base linear operation
         out = F.linear(x_quant, weight_quant, self.linear.bias)
@@ -133,7 +141,7 @@ class CPTLinear(nn.Module):
             return out
 
         # Add LoRA adaptation for current precision (using original input like part1)
-        lora_key = f'lora_{self.current_bits}bit'
+        lora_key = f'{self.current_bits}bit'  # Match part1 naming
         if lora_key in self.lora_adapters:
             lora_out = self.lora_adapters[lora_key](x)
             out = out + lora_out
@@ -146,7 +154,7 @@ class CPTSelfAttention(nn.Module):
     Self-attention module with cyclic precision support.
     """
 
-    def __init__(self, config, bit_widths: list, lora_rank_per_bit: dict, lora_alpha_per_bit: dict):
+    def __init__(self, config, bit_widths: list, lora_rank_per_bit: dict, lora_alpha_per_bit: dict, quantizer_per_bit: dict = None):
         super().__init__()
         self.n_head = config.n_head
         self.n_embd = config.n_embd
@@ -155,12 +163,12 @@ class CPTSelfAttention(nn.Module):
         # Combined QKV projection (like GPT-2 and part1)
         self.c_attn = CPTLinear(
             self.n_embd, 3 * self.n_embd,
-            bit_widths, lora_rank_per_bit, lora_alpha_per_bit
+            bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit
         )
         # Output projection
         self.c_proj = CPTLinear(
             self.n_embd, self.n_embd,
-            bit_widths, lora_rank_per_bit, lora_alpha_per_bit
+            bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit
         )
 
         # Attention dropout
@@ -228,7 +236,7 @@ class CPTBlock(nn.Module):
     Transformer block with CPT support and Range LayerNorm.
     """
 
-    def __init__(self, config, bit_widths: list, lora_rank_per_bit: dict, lora_alpha_per_bit: dict):
+    def __init__(self, config, bit_widths: list, lora_rank_per_bit: dict, lora_alpha_per_bit: dict, quantizer_per_bit: dict = None):
         super().__init__()
 
         # Switchable LayerNorm with bit widths
@@ -237,17 +245,17 @@ class CPTBlock(nn.Module):
         self.bit_widths = bit_widths
 
         # Self-attention with CPT
-        self.attn = CPTSelfAttention(config, bit_widths, lora_rank_per_bit, lora_alpha_per_bit)
+        self.attn = CPTSelfAttention(config, bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit)
 
         # Feed-forward with CPT
         self.mlp = nn.ModuleDict({
             'fc_in': CPTLinear(
                 config.n_embd, 4 * config.n_embd,
-                bit_widths, lora_rank_per_bit, lora_alpha_per_bit
+                bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit
             ),
             'fc_out': CPTLinear(
                 4 * config.n_embd, config.n_embd,
-                bit_widths, lora_rank_per_bit, lora_alpha_per_bit
+                bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit
             )
         })
         self.mlp_dropout = nn.Dropout(config.embd_pdrop)
@@ -308,7 +316,8 @@ class CPTModel(nn.Module):
                 model_config,
                 model_config.bit_widths,
                 model_config.lora_rank_per_bit,
-                model_config.lora_alpha_per_bit
+                model_config.lora_alpha_per_bit,
+                model_config.quantizer_per_bit
             )
             for _ in range(model_config.n_layer)
         ])
@@ -322,6 +331,7 @@ class CPTModel(nn.Module):
             model_config.bit_widths,
             model_config.lora_rank_per_bit,
             model_config.lora_alpha_per_bit,
+            model_config.quantizer_per_bit,
             bias=False
         )
 
