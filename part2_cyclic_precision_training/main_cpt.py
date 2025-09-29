@@ -32,7 +32,7 @@ from config_cpt import get_config
 from cpt_model import CPTModel
 from cyclic_scheduler import CyclicPrecisionScheduler, PrecisionRangeTest
 import deploy as cpt_deploy
-from dataset import WikiTextDataset
+import dataset as cpt_dataset
 
 
 def train_cycle_with_cyclic_precision(
@@ -266,13 +266,13 @@ def main(args):
 
     # datasets
     print("Loading datasets...")
-    train_dataset = WikiTextDataset(
+    train_dataset = cpt_dataset.WikiTextDataset(
         training_config.train_split,
         tokenizer,
         training_config.max_seq_length,
         training_config.doc_stride
     )
-    val_dataset = WikiTextDataset(
+    val_dataset = cpt_dataset.WikiTextDataset(
         training_config.val_split,
         tokenizer,
         training_config.max_seq_length,

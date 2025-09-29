@@ -16,10 +16,7 @@ from quantization_methods import (
     MultiPrecisionQuantizer,
     GradientBifurcation
 )
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from part1_switchable_precision.switchable_batchnorm import SwitchableLayerNorm
+from switchable_batchnorm import SwitchableLayerNorm
 
 
 class LoRAAdapter(nn.Module):
