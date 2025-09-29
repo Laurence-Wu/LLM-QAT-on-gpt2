@@ -13,6 +13,7 @@ import numpy as np
 from tqdm import tqdm
 import time
 import os
+import gc
 import argparse
 from typing import Dict, Optional
 
@@ -116,82 +117,123 @@ def evaluate(model: CPTModel, dataloader: DataLoader, device: str, precision: in
     }
 
 
-def load_pretrained_weights(model: CPTModel, device: str):
-    """Load pretrained GPT-2 weights into CPT model and return GPT-2 config."""
+def load_pretrained_weights(model):
+    """Load pretrained GPT-2 weights into CPT model and freeze all except LoRA adapters."""
     print("Loading pretrained GPT-2 weights...")
 
-    # Load GPT-2 model and config
-    gpt2 = GPT2Model.from_pretrained('gpt2')
-    gpt2_config = GPT2Config.from_pretrained('gpt2')
-    gpt2_state = gpt2.state_dict()
-    d_model = gpt2_config.n_embd
+    import gc
+    from transformers import GPT2LMHeadModel
+    pretrained = GPT2LMHeadModel.from_pretrained('gpt2')
 
-    # Direct weight mapping
-    weight_mapping = {
-        # Embeddings
-        'wte.weight': 'wte.weight',
-        'wpe.weight': 'wpe.weight',
-        # Final layer norm
-        'ln_f.weight': 'ln_f.weight',
-        'ln_f.bias': 'ln_f.bias'
-    }
+    # Load embeddings and freeze them
+    model.wte.weight.data = pretrained.transformer.wte.weight.data.clone()
+    model.wte.weight.requires_grad = False
+    model.wpe.weight.data = pretrained.transformer.wpe.weight.data.clone()
+    model.wpe.weight.requires_grad = False
 
-    # Add transformer block mappings
-    for i in range(len(model.h)):
-        # Layer norms
-        weight_mapping.update({
-            f'h.{i}.ln_1.weight': f'h.{i}.ln_1.weight',
-            f'h.{i}.ln_1.bias': f'h.{i}.ln_1.bias',
-            f'h.{i}.ln_2.weight': f'h.{i}.ln_2.weight',
-            f'h.{i}.ln_2.bias': f'h.{i}.ln_2.bias',
-            # Output projection
-            f'h.{i}.attn.c_proj.weight': f'h.{i}.attn.out_proj.linear.weight',
-            # MLP weights
-            f'h.{i}.mlp.c_fc.weight': f'h.{i}.mlp.fc_in.linear.weight',
-            f'h.{i}.mlp.c_proj.weight': f'h.{i}.mlp.fc_out.linear.weight'
-        })
+    # Load layer-specific weights for each transformer block
+    for i in range(len(pretrained.transformer.h)):
+        # Layer normalization weights - same for all bit widths, freeze them
+        for bit_width in model.h[i].ln_1.bit_widths:
+            model.h[i].ln_1.weights[bit_width].data = pretrained.transformer.h[i].ln_1.weight.data.clone()
+            model.h[i].ln_1.biases[bit_width].data = pretrained.transformer.h[i].ln_1.bias.data.clone()
+            model.h[i].ln_1.weights[bit_width].requires_grad = False
+            model.h[i].ln_1.biases[bit_width].requires_grad = False
 
-    # Load weights
-    loaded_count = 0
-    for src_key, dst_key in weight_mapping.items():
-        if src_key in gpt2_state:
-            # Get source and destination tensors
-            src_tensor = gpt2_state[src_key].to(device)
+        for bit_width in model.h[i].ln_2.bit_widths:
+            model.h[i].ln_2.weights[bit_width].data = pretrained.transformer.h[i].ln_2.weight.data.clone()
+            model.h[i].ln_2.biases[bit_width].data = pretrained.transformer.h[i].ln_2.bias.data.clone()
+            model.h[i].ln_2.weights[bit_width].requires_grad = False
+            model.h[i].ln_2.biases[bit_width].requires_grad = False
 
-            # Transpose weights that need it (following part1's approach)
-            # GPT-2 stores as [in_features, out_features], nn.Linear needs [out_features, in_features]
-            if any(key in src_key for key in ['c_proj.weight', 'c_fc.weight']):
-                src_tensor = src_tensor.t().contiguous()
+        # Attention weights - extract Q, K, V from combined projection and freeze
+        # GPT-2 stores QKV in a single weight matrix [3*d_model, d_model]
+        qkv_weight = pretrained.transformer.h[i].attn.c_attn.weight.data  # [d_model, 3*d_model]
+        qkv_bias = pretrained.transformer.h[i].attn.c_attn.bias.data      # [3*d_model]
 
-            dst_attrs = dst_key.split('.')
+        d_model = qkv_weight.size(0)
 
-            # Navigate to the destination
-            target = model
-            for attr in dst_attrs[:-1]:
-                if attr.isdigit():
-                    target = target[int(attr)]
-                else:
-                    target = getattr(target, attr)
+        # Split the weight matrix - note the transpose!
+        # GPT-2 weight is [in_features, out_features] but we need [out_features, in_features]
+        model.h[i].attn.q_proj.linear.weight.data = qkv_weight[:, :d_model].t().contiguous()
+        model.h[i].attn.k_proj.linear.weight.data = qkv_weight[:, d_model:2*d_model].t().contiguous()
+        model.h[i].attn.v_proj.linear.weight.data = qkv_weight[:, 2*d_model:].t().contiguous()
 
-            # Set the weight
-            setattr(target, dst_attrs[-1], nn.Parameter(src_tensor))
-            loaded_count += 1
+        # Split the bias
+        model.h[i].attn.q_proj.linear.bias.data = qkv_bias[:d_model].clone()
+        model.h[i].attn.k_proj.linear.bias.data = qkv_bias[d_model:2*d_model].clone()
+        model.h[i].attn.v_proj.linear.bias.data = qkv_bias[2*d_model:].clone()
 
-    # Handle QKV weights separately (need splitting and transposing)
-    for i in range(len(model.h)):
-        qkv_key = f'h.{i}.attn.c_attn.weight'
-        if qkv_key in gpt2_state:
-            qkv_weight = gpt2_state[qkv_key].to(device)
-            # GPT-2 c_attn weight has shape [768, 2304] where 2304 = 768*3 for Q, K, V
-            # We need to split along the output dimension (dim 1) and transpose
-            # GPT-2 stores as [in_features, out_features], nn.Linear needs [out_features, in_features]
-            model.h[i].attn.q_proj.linear.weight.data = qkv_weight[:, :d_model].t().contiguous()
-            model.h[i].attn.k_proj.linear.weight.data = qkv_weight[:, d_model:2*d_model].t().contiguous()
-            model.h[i].attn.v_proj.linear.weight.data = qkv_weight[:, 2*d_model:].t().contiguous()
-            loaded_count += 3
+        # Freeze all base linear weights
+        model.h[i].attn.q_proj.linear.weight.requires_grad = False
+        model.h[i].attn.q_proj.linear.bias.requires_grad = False
+        model.h[i].attn.k_proj.linear.weight.requires_grad = False
+        model.h[i].attn.k_proj.linear.bias.requires_grad = False
+        model.h[i].attn.v_proj.linear.weight.requires_grad = False
+        model.h[i].attn.v_proj.linear.bias.requires_grad = False
 
-    print(f"Loaded {loaded_count} weight tensors from GPT-2")
-    return gpt2_config
+        # Output projection - also needs transpose and freeze
+        model.h[i].attn.out_proj.linear.weight.data = pretrained.transformer.h[i].attn.c_proj.weight.data.t().contiguous()
+        model.h[i].attn.out_proj.linear.bias.data = pretrained.transformer.h[i].attn.c_proj.bias.data.clone()
+        model.h[i].attn.out_proj.linear.weight.requires_grad = False
+        model.h[i].attn.out_proj.linear.bias.requires_grad = False
+
+        # MLP weights - also need transpose and freeze
+        model.h[i].mlp.fc1.linear.weight.data = pretrained.transformer.h[i].mlp.c_fc.weight.data.t().contiguous()
+        model.h[i].mlp.fc1.linear.bias.data = pretrained.transformer.h[i].mlp.c_fc.bias.data.clone()
+        model.h[i].mlp.fc1.linear.weight.requires_grad = False
+        model.h[i].mlp.fc1.linear.bias.requires_grad = False
+
+        model.h[i].mlp.fc2.linear.weight.data = pretrained.transformer.h[i].mlp.c_proj.weight.data.t().contiguous()
+        model.h[i].mlp.fc2.linear.bias.data = pretrained.transformer.h[i].mlp.c_proj.bias.data.clone()
+        model.h[i].mlp.fc2.linear.weight.requires_grad = False
+        model.h[i].mlp.fc2.linear.bias.requires_grad = False
+
+    # Load final layer norm and freeze
+    for bit_width in model.ln_f.bit_widths:
+        model.ln_f.weights[bit_width].data = pretrained.transformer.ln_f.weight.data.clone()
+        model.ln_f.biases[bit_width].data = pretrained.transformer.ln_f.bias.data.clone()
+        model.ln_f.weights[bit_width].requires_grad = False
+        model.ln_f.biases[bit_width].requires_grad = False
+
+    # Load language modeling head and freeze
+    model.lm_head.weight.data = pretrained.lm_head.weight.data.clone()
+    model.lm_head.weight.requires_grad = False
+
+    # Now enable only LoRA adapter parameters
+    lora_count = 0
+    target_modules = ['q_proj', 'k_proj', 'v_proj', 'out_proj', 'fc1', 'fc2']
+
+    for name, module in model.named_modules():
+        # Check if this is a module with LoRA adapters
+        if not any(target in name for target in target_modules):
+            continue
+        if not hasattr(module, 'lora_adapters'):
+            continue
+
+        # Enable gradients for LoRA adapters across all bit widths
+        for bit_key in module.lora_adapters.keys():
+            lora_layer = module.lora_adapters[bit_key]
+            if hasattr(lora_layer, 'lora_A'):
+                lora_layer.lora_A.requires_grad = True
+                lora_layer.lora_B.requires_grad = True
+                lora_count += 1
+
+    print(f"Enabled {lora_count} LoRA adapter pairs for training")
+
+    del pretrained
+    torch.cuda.empty_cache()
+    gc.collect()
+
+    # Print summary of parameter counts
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    frozen_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
+    total_params = trainable_params + frozen_params
+
+    print("Pretrained weights loaded and frozen successfully")
+    print(f"  Total parameters: {total_params:,}")
+    print(f"  Frozen parameters: {frozen_params:,} ({100*frozen_params/total_params:.1f}%)")
+    print(f"  Trainable (LoRA) parameters: {trainable_params:,} ({100*trainable_params/total_params:.1f}%)")
 
 
 def main(args):
@@ -244,11 +286,7 @@ def main(args):
     model = CPTModel(config).to(device)
 
     # Load pretrained weights if specified
-
-    gpt2_config = load_pretrained_weights(model, device)
-    # Optionally update model config with GPT-2 config values
-    # This ensures compatibility with pretrained weights
-    print(f"GPT-2 config: hidden_size={gpt2_config.n_embd}, num_layers={gpt2_config.n_layer}, num_heads={gpt2_config.n_head}")
+    load_pretrained_weights(model)
 
     # Create cyclic precision scheduler
     precision_scheduler = CyclicPrecisionScheduler(
