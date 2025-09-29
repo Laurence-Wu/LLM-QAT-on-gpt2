@@ -134,20 +134,13 @@ class CPTSelfAttention(nn.Module):
         self.n_embd = config.n_embd
         self.head_dim = self.n_embd // self.n_head
 
-        # Q, K, V projections with CPT
-        self.q_proj = CPTLinear(
-            self.n_embd, self.n_embd,
+        # Combined QKV projection (like GPT-2 and part1)
+        self.c_attn = CPTLinear(
+            self.n_embd, 3 * self.n_embd,
             bit_widths, lora_rank_per_bit, lora_alpha_per_bit
         )
-        self.k_proj = CPTLinear(
-            self.n_embd, self.n_embd,
-            bit_widths, lora_rank_per_bit, lora_alpha_per_bit
-        )
-        self.v_proj = CPTLinear(
-            self.n_embd, self.n_embd,
-            bit_widths, lora_rank_per_bit, lora_alpha_per_bit
-        )
-        self.out_proj = CPTLinear(
+        # Output projection
+        self.c_proj = CPTLinear(
             self.n_embd, self.n_embd,
             bit_widths, lora_rank_per_bit, lora_alpha_per_bit
         )
@@ -158,10 +151,8 @@ class CPTSelfAttention(nn.Module):
 
     def set_precision(self, num_bits: int):
         """Set precision for all layers."""
-        self.q_proj.set_precision(num_bits)
-        self.k_proj.set_precision(num_bits)
-        self.v_proj.set_precision(num_bits)
-        self.out_proj.set_precision(num_bits)
+        self.c_attn.set_precision(num_bits)
+        self.c_proj.set_precision(num_bits)
 
     def forward(
         self,
@@ -171,10 +162,9 @@ class CPTSelfAttention(nn.Module):
     ) -> Tuple[torch.Tensor, Optional[Tuple[torch.Tensor]]]:
         batch_size, seq_len, _ = hidden_states.shape
 
-        # Compute Q, K, V
-        query = self.q_proj(hidden_states)
-        key = self.k_proj(hidden_states)
-        value = self.v_proj(hidden_states)
+        # Compute combined QKV and split
+        qkv = self.c_attn(hidden_states)
+        query, key, value = qkv.split(self.n_embd, dim=-1)
 
         # Reshape for multi-head attention
         query = query.view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1, 2)
@@ -209,7 +199,7 @@ class CPTSelfAttention(nn.Module):
         )
 
         # Output projection
-        attn_output = self.out_proj(attn_output)
+        attn_output = self.c_proj(attn_output)
         attn_output = self.resid_dropout(attn_output)
 
         return attn_output, present_key_value

@@ -157,48 +157,28 @@ def load_pretrained_weights(model, model_config):
             model.h[i].ln_2.weights[bit_key].requires_grad = False
             model.h[i].ln_2.biases[bit_key].requires_grad = False
 
-        # Attention weights - extract Q, K, V from combined projection and freeze
-        # GPT-2 stores QKV in a single weight matrix [3*d_model, d_model]
-        qkv_weight = pretrained.transformer.h[i].attn.c_attn.weight.data  # [d_model, 3*d_model]
-        qkv_bias = pretrained.transformer.h[i].attn.c_attn.bias.data      # [3*d_model]
-
-        d_model = qkv_weight.size(0)
-
-        # Split the weight matrix - note the transpose!
-        # GPT-2 weight is [in_features, out_features] but we need [out_features, in_features]
-        model.h[i].attn.q_proj.linear.weight.data = qkv_weight[:, :d_model].t().contiguous()
-        model.h[i].attn.k_proj.linear.weight.data = qkv_weight[:, d_model:2*d_model].t().contiguous()
-        model.h[i].attn.v_proj.linear.weight.data = qkv_weight[:, 2*d_model:].t().contiguous()
-
-        # Split the bias
-        model.h[i].attn.q_proj.linear.bias.data = qkv_bias[:d_model].clone()
-        model.h[i].attn.k_proj.linear.bias.data = qkv_bias[d_model:2*d_model].clone()
-        model.h[i].attn.v_proj.linear.bias.data = qkv_bias[2*d_model:].clone()
-
-        # Freeze all base linear weights
-        model.h[i].attn.q_proj.linear.weight.requires_grad = False
-        model.h[i].attn.q_proj.linear.bias.requires_grad = False
-        model.h[i].attn.k_proj.linear.weight.requires_grad = False
-        model.h[i].attn.k_proj.linear.bias.requires_grad = False
-        model.h[i].attn.v_proj.linear.weight.requires_grad = False
-        model.h[i].attn.v_proj.linear.bias.requires_grad = False
+        # Attention weights - load combined QKV projection directly (like part1)
+        model.h[i].attn.c_attn.linear.weight.data = pretrained.transformer.h[i].attn.c_attn.weight.data.t().contiguous()
+        model.h[i].attn.c_attn.linear.bias.data = pretrained.transformer.h[i].attn.c_attn.bias.data.clone()
+        model.h[i].attn.c_attn.linear.weight.requires_grad = False
+        model.h[i].attn.c_attn.linear.bias.requires_grad = False
 
         # Output projection - also needs transpose and freeze
-        model.h[i].attn.out_proj.linear.weight.data = pretrained.transformer.h[i].attn.c_proj.weight.data.t().contiguous()
-        model.h[i].attn.out_proj.linear.bias.data = pretrained.transformer.h[i].attn.c_proj.bias.data.clone()
-        model.h[i].attn.out_proj.linear.weight.requires_grad = False
-        model.h[i].attn.out_proj.linear.bias.requires_grad = False
+        model.h[i].attn.c_proj.linear.weight.data = pretrained.transformer.h[i].attn.c_proj.weight.data.t().contiguous()
+        model.h[i].attn.c_proj.linear.bias.data = pretrained.transformer.h[i].attn.c_proj.bias.data.clone()
+        model.h[i].attn.c_proj.linear.weight.requires_grad = False
+        model.h[i].attn.c_proj.linear.bias.requires_grad = False
 
         # MLP weights - also need transpose and freeze
-        model.h[i].mlp.fc1.linear.weight.data = pretrained.transformer.h[i].mlp.c_fc.weight.data.t().contiguous()
-        model.h[i].mlp.fc1.linear.bias.data = pretrained.transformer.h[i].mlp.c_fc.bias.data.clone()
-        model.h[i].mlp.fc1.linear.weight.requires_grad = False
-        model.h[i].mlp.fc1.linear.bias.requires_grad = False
+        model.h[i].mlp['fc_in'].linear.weight.data = pretrained.transformer.h[i].mlp.c_fc.weight.data.t().contiguous()
+        model.h[i].mlp['fc_in'].linear.bias.data = pretrained.transformer.h[i].mlp.c_fc.bias.data.clone()
+        model.h[i].mlp['fc_in'].linear.weight.requires_grad = False
+        model.h[i].mlp['fc_in'].linear.bias.requires_grad = False
 
-        model.h[i].mlp.fc2.linear.weight.data = pretrained.transformer.h[i].mlp.c_proj.weight.data.t().contiguous()
-        model.h[i].mlp.fc2.linear.bias.data = pretrained.transformer.h[i].mlp.c_proj.bias.data.clone()
-        model.h[i].mlp.fc2.linear.weight.requires_grad = False
-        model.h[i].mlp.fc2.linear.bias.requires_grad = False
+        model.h[i].mlp['fc_out'].linear.weight.data = pretrained.transformer.h[i].mlp.c_proj.weight.data.t().contiguous()
+        model.h[i].mlp['fc_out'].linear.bias.data = pretrained.transformer.h[i].mlp.c_proj.bias.data.clone()
+        model.h[i].mlp['fc_out'].linear.weight.requires_grad = False
+        model.h[i].mlp['fc_out'].linear.bias.requires_grad = False
 
     # Load final layer norm and freeze
     for bit_width in model_config.bit_widths:
@@ -209,12 +189,12 @@ def load_pretrained_weights(model, model_config):
         model.ln_f.biases[bit_key].requires_grad = False
 
     # Load language modeling head and freeze
-    model.lm_head.weight.data = pretrained.lm_head.weight.data.clone()
-    model.lm_head.weight.requires_grad = False
+    model.lm_head.linear.weight.data = pretrained.lm_head.weight.data.clone()
+    model.lm_head.linear.weight.requires_grad = False
 
     # Now enable only LoRA adapter parameters
     lora_count = 0
-    target_modules = ['q_proj', 'k_proj', 'v_proj', 'out_proj', 'fc1', 'fc2']
+    target_modules = ['c_attn', 'c_proj', 'fc_in', 'fc_out', 'lm_head']
 
     for name, module in model.named_modules():
         # Check if this is a module with LoRA adapters
