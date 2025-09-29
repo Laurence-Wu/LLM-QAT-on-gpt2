@@ -8,7 +8,7 @@ import math
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
-from quantization import LearnableFakeQuantize
+from part1_switchable_precision.quantization import LearnableFakeQuantize
 
 class LoRALayer(nn.Module):
     

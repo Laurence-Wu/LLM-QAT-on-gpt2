@@ -117,7 +117,7 @@ def evaluate(model: CPTModel, dataloader: DataLoader, device: str, precision: in
     }
 
 
-def load_pretrained_weights(model):
+def load_pretrained_weights(model, model_config):
     """Load pretrained GPT-2 weights into CPT model and freeze all except LoRA adapters."""
     print("Loading pretrained GPT-2 weights...")
 
@@ -134,17 +134,17 @@ def load_pretrained_weights(model):
     # Load layer-specific weights for each transformer block
     for i in range(len(pretrained.transformer.h)):
         # Layer normalization weights - same for all bit widths, freeze them
-        for bit_width in model.h[i].ln_1.bit_widths:
-            model.h[i].ln_1.weights[bit_width].data = pretrained.transformer.h[i].ln_1.weight.data.clone()
-            model.h[i].ln_1.biases[bit_width].data = pretrained.transformer.h[i].ln_1.bias.data.clone()
-            model.h[i].ln_1.weights[bit_width].requires_grad = False
-            model.h[i].ln_1.biases[bit_width].requires_grad = False
+        for bit_width in model.h[i].bit_widths:
+            bit_key = str(bit_width)
+            model.h[i].ln_1.weights[bit_key].data = pretrained.transformer.h[i].ln_1.weight.data.clone()
+            model.h[i].ln_1.biases[bit_key].data = pretrained.transformer.h[i].ln_1.bias.data.clone()
+            model.h[i].ln_1.weights[bit_key].requires_grad = False
+            model.h[i].ln_1.biases[bit_key].requires_grad = False
 
-        for bit_width in model.h[i].ln_2.bit_widths:
-            model.h[i].ln_2.weights[bit_width].data = pretrained.transformer.h[i].ln_2.weight.data.clone()
-            model.h[i].ln_2.biases[bit_width].data = pretrained.transformer.h[i].ln_2.bias.data.clone()
-            model.h[i].ln_2.weights[bit_width].requires_grad = False
-            model.h[i].ln_2.biases[bit_width].requires_grad = False
+            model.h[i].ln_2.weights[bit_key].data = pretrained.transformer.h[i].ln_2.weight.data.clone()
+            model.h[i].ln_2.biases[bit_key].data = pretrained.transformer.h[i].ln_2.bias.data.clone()
+            model.h[i].ln_2.weights[bit_key].requires_grad = False
+            model.h[i].ln_2.biases[bit_key].requires_grad = False
 
         # Attention weights - extract Q, K, V from combined projection and freeze
         # GPT-2 stores QKV in a single weight matrix [3*d_model, d_model]
@@ -190,11 +190,12 @@ def load_pretrained_weights(model):
         model.h[i].mlp.fc2.linear.bias.requires_grad = False
 
     # Load final layer norm and freeze
-    for bit_width in model.ln_f.bit_widths:
-        model.ln_f.weights[bit_width].data = pretrained.transformer.ln_f.weight.data.clone()
-        model.ln_f.biases[bit_width].data = pretrained.transformer.ln_f.bias.data.clone()
-        model.ln_f.weights[bit_width].requires_grad = False
-        model.ln_f.biases[bit_width].requires_grad = False
+    for bit_width in model_config.bit_widths:
+        bit_key = str(bit_width)
+        model.ln_f.weights[bit_key].data = pretrained.transformer.ln_f.weight.data.clone()
+        model.ln_f.biases[bit_key].data = pretrained.transformer.ln_f.bias.data.clone()
+        model.ln_f.weights[bit_key].requires_grad = False
+        model.ln_f.biases[bit_key].requires_grad = False
 
     # Load language modeling head and freeze
     model.lm_head.weight.data = pretrained.lm_head.weight.data.clone()
@@ -286,7 +287,7 @@ def main(args):
     model = CPTModel(config).to(device)
 
     # Load pretrained weights if specified
-    load_pretrained_weights(model)
+    load_pretrained_weights(model, model_config)
 
     # Create cyclic precision scheduler
     precision_scheduler = CyclicPrecisionScheduler(

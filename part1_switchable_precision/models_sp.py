@@ -12,8 +12,8 @@ from torch.utils.checkpoint import checkpoint
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
-from lora import SPLinearWithLoRA
-from switchable_batchnorm import SwitchableLayerNorm
+from part1_switchable_precision.lora import SPLinearWithLoRA
+from part1_switchable_precision.switchable_batchnorm import SwitchableLayerNorm
 
 class SPAttention(nn.Module):
     

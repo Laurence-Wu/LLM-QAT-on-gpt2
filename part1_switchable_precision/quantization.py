@@ -7,7 +7,7 @@ import torch.nn as nn
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
-from quantization_methods import (
+from part1_switchable_precision.quantization_methods import (
     apply_minmax_quantization,
     apply_log_quantization
 )

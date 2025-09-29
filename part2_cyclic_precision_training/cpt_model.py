@@ -16,7 +16,10 @@ from quantization_methods import (
     MultiPrecisionQuantizer,
     GradientBifurcation
 )
-from sbm_batchnorm import RangeLayerNorm, replace_layernorm_with_rangeln
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from part1_switchable_precision.switchable_batchnorm import SwitchableLayerNorm
 
 
 class LoRAAdapter(nn.Module):
@@ -223,9 +226,10 @@ class CPTBlock(nn.Module):
     def __init__(self, config, bit_widths: list, lora_rank_per_bit: dict, lora_alpha_per_bit: dict):
         super().__init__()
 
-        # Range LayerNorm
-        self.ln_1 = RangeLayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
-        self.ln_2 = RangeLayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
+        # Switchable LayerNorm with bit widths
+        self.ln_1 = SwitchableLayerNorm(config.n_embd, precision_levels=bit_widths, eps=config.layer_norm_epsilon)
+        self.ln_2 = SwitchableLayerNorm(config.n_embd, precision_levels=bit_widths, eps=config.layer_norm_epsilon)
+        self.bit_widths = bit_widths
 
         # Self-attention with CPT
         self.attn = CPTSelfAttention(config, bit_widths, lora_rank_per_bit, lora_alpha_per_bit)
@@ -245,6 +249,8 @@ class CPTBlock(nn.Module):
 
     def set_precision(self, num_bits: int):
         """Set precision for all layers."""
+        self.ln_1.set_precision(num_bits)
+        self.ln_2.set_precision(num_bits)
         self.attn.set_precision(num_bits)
         self.mlp['fc_in'].set_precision(num_bits)
         self.mlp['fc_out'].set_precision(num_bits)
@@ -303,7 +309,7 @@ class CPTModel(nn.Module):
         ])
 
         # Final layer norm
-        self.ln_f = RangeLayerNorm(model_config.n_embd, eps=model_config.layer_norm_epsilon)
+        self.ln_f = SwitchableLayerNorm(model_config.n_embd, precision_levels=model_config.bit_widths, eps=model_config.layer_norm_epsilon)
 
         # Language modeling head
         self.lm_head = CPTLinear(
@@ -340,6 +346,7 @@ class CPTModel(nn.Module):
         self.current_precision = num_bits
         for block in self.h:
             block.set_precision(num_bits)
+        self.ln_f.set_precision(num_bits)
         self.lm_head.set_precision(num_bits)
 
     def forward(
