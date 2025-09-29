@@ -3,6 +3,18 @@ Main training script for Cyclic Precision Training (CPT).
 Implements the key CPT training loop with precision cycling within each step.
 """
 
+import os
+import sys
+
+# Fix import path to ensure we use part2 modules
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+# Remove parent directory from path if it exists to avoid importing from part1
+if parent_dir in sys.path:
+    sys.path.remove(parent_dir)
+# Insert current directory at the beginning to prioritize local imports
+sys.path.insert(0, current_dir)
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -12,7 +24,6 @@ from transformers import GPT2Tokenizer, GPT2Model, GPT2Config
 import numpy as np
 from tqdm import tqdm
 import time
-import os
 import gc
 import argparse
 from typing import Dict, Optional
@@ -20,7 +31,7 @@ from typing import Dict, Optional
 from config_cpt import get_config
 from cpt_model import CPTModel
 from cyclic_scheduler import CyclicPrecisionScheduler, PrecisionRangeTest
-from deploy import save_cpt_checkpoint, save_final_models
+import deploy as cpt_deploy
 from dataset import WikiTextDataset
 
 
@@ -399,14 +410,14 @@ def main(args):
 
     # Save final checkpoint after training completes
     print("Saving final checkpoint...")
-    save_cpt_checkpoint(
+    cpt_deploy.save_cpt_checkpoint(
         model, optimizer, lr_scheduler, training_config.num_epochs - 1, global_cycle,
         avg_epoch_loss, config, f'checkpoints_cpt/model_epoch_{training_config.num_epochs}_final.pth'
     )
 
     # Save final models at all precisions
     print("Saving final models...")
-    save_final_models(model, config, 'final_models')
+    cpt_deploy.save_final_models(model, config, 'final_models')
 
     print("Training completed!")
 
