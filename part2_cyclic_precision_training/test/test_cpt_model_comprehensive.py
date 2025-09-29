@@ -601,7 +601,8 @@ class CPTModelValidator:
 
         for name, module in self.model.named_modules():
             if isinstance(module, CPTLinear):
-                if module.lora_disabled:
+                # calibration_mode=True means LoRA is disabled
+                if module.calibration_mode:
                     continue
                 else:
                     lora_disabled = False
