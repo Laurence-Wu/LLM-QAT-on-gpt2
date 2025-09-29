@@ -96,11 +96,12 @@ class CPTModelValidator:
         ]
 
         for attr_name, description in components_to_check:
-            if hasattr(self.model, attr_name):
+            # Direct attribute access - will throw AttributeError if missing
+            try:
                 component = getattr(self.model, attr_name)
                 print(f"[PASS] {description} ({attr_name}): {type(component).__name__}")
                 self.test_results['passed'] += 1
-            else:
+            except AttributeError:
                 print(f"[FAIL] Missing {description} ({attr_name})")
                 self.test_results['failed'] += 1
                 self.failed_tests.append(f"Missing {attr_name}")
@@ -117,20 +118,29 @@ class CPTModelValidator:
             self.failed_tests.append(f"Wrong transformer block count")
 
         # Check each transformer block structure
+        print(f"\nChecking {len(self.model.h)} transformer blocks...")
+        blocks_validated = 0
         for i, block in enumerate(self.model.h):
-            has_ln1 = hasattr(block, 'ln_1')
-            has_attn = hasattr(block, 'attn')
-            has_ln2 = hasattr(block, 'ln_2')
-            has_mlp = hasattr(block, 'mlp')
-
-            if has_ln1 and has_attn and has_ln2 and has_mlp:
-                if i == 0:  # Only print for first block
-                    print(f"[PASS] Block structure validated (ln_1, attn, ln_2, mlp)")
-                self.test_results['passed'] += 1
-            else:
-                print(f"[FAIL] Block {i} missing components")
+            # Direct attribute access
+            has_all = True
+            try:
+                _ = block.ln_1
+                _ = block.attn
+                _ = block.ln_2
+                _ = block.mlp
+            except AttributeError as e:
+                has_all = False
+                print(f"[FAIL] Block {i} missing component: {e}")
                 self.test_results['failed'] += 1
                 self.failed_tests.append(f"Block {i} structure issue")
+
+            if has_all:
+                blocks_validated += 1
+                self.test_results['passed'] += 1
+
+        print(f"[INFO] {blocks_validated}/{len(self.model.h)} blocks have correct structure")
+        if blocks_validated == len(self.model.h):
+            print(f"[PASS] All blocks validated")
 
     def test_quantization_setup(self):
         """Test 2: Validate quantization configuration."""
@@ -147,14 +157,12 @@ class CPTModelValidator:
             if isinstance(module, CPTLinear):
                 cpt_linear_count += 1
 
-                # Check weight quantizers
-                if not hasattr(module, 'quantizers_weight'):
-                    quantizer_issues.append(f"{name}: missing quantizers_weight")
-                    continue
-
-                # Check input quantizers
-                if not hasattr(module, 'quantizers_input'):
-                    quantizer_issues.append(f"{name}: missing quantizers_input")
+                # Direct access to quantizers - no hasattr
+                try:
+                    weight_quantizers = module.quantizers_weight
+                    input_quantizers = module.quantizers_input
+                except AttributeError as e:
+                    quantizer_issues.append(f"{name}: {e}")
                     continue
 
                 # Validate quantizers for each bit width
@@ -162,26 +170,30 @@ class CPTModelValidator:
                     key = f'{bits}bit'
 
                     # Check weight quantizer
-                    if key not in module.quantizers_weight:
+                    if key not in weight_quantizers:
                         quantizer_issues.append(f"{name}: missing weight quantizer for {bits}bit")
                     else:
-                        wq = module.quantizers_weight[key]
+                        wq = weight_quantizers[key]
                         if not isinstance(wq, LearnableFakeQuantize):
                             quantizer_issues.append(f"{name}: wrong type for weight quantizer {bits}bit")
                         elif wq.num_bits != bits:
                             quantizer_issues.append(f"{name}: weight quantizer {bits}bit has wrong num_bits: {wq.num_bits}")
 
                     # Check input quantizer
-                    if key not in module.quantizers_input:
+                    if key not in input_quantizers:
                         quantizer_issues.append(f"{name}: missing input quantizer for {bits}bit")
                     else:
-                        iq = module.quantizers_input[key]
+                        iq = input_quantizers[key]
                         if not isinstance(iq, LearnableFakeQuantize):
                             quantizer_issues.append(f"{name}: wrong type for input quantizer {bits}bit")
                         elif iq.num_bits != bits:
                             quantizer_issues.append(f"{name}: input quantizer {bits}bit has wrong num_bits: {iq.num_bits}")
 
-        print(f"Found {cpt_linear_count} CPTLinear modules")
+        print(f"\n[INFO] Statistics:")
+        print(f"  - Total CPTLinear modules: {cpt_linear_count}")
+        print(f"  - Bit widths tested: {student_bits}")
+        print(f"  - Quantizers per module: {len(student_bits) * 2} (weight + input)")
+        print(f"  - Total quantizers expected: {cpt_linear_count * len(student_bits) * 2}")
 
         if not quantizer_issues:
             print(f"[PASS] All quantizers properly configured for bits: {student_bits}")
@@ -210,7 +222,10 @@ class CPTModelValidator:
             if isinstance(module, CPTLinear):
                 modules_checked += 1
 
-                if not hasattr(module, 'lora_adapters'):
+                # Direct access - no hasattr
+                try:
+                    lora_adapters = module.lora_adapters
+                except AttributeError:
                     lora_issues.append(f"{name}: missing lora_adapters")
                     continue
 
@@ -222,10 +237,10 @@ class CPTModelValidator:
                     expected_rank = lora_rank_per_bit.get(bits, 16)
                     expected_alpha = lora_alpha_per_bit.get(bits, 32)
 
-                    if key not in module.lora_adapters:
+                    if key not in lora_adapters:
                         lora_issues.append(f"{name}: missing LoRA adapter for {bits}bit")
                     else:
-                        adapter = module.lora_adapters[key]
+                        adapter = lora_adapters[key]
 
                         # Check rank
                         if adapter.rank != expected_rank:
@@ -249,7 +264,10 @@ class CPTModelValidator:
                                 if adapter.lora_B.shape != expected_B_shape:
                                     lora_issues.append(f"{name}: {bits}bit lora_B shape is {adapter.lora_B.shape}, expected {expected_B_shape}")
 
-        print(f"Checked {modules_checked} CPTLinear modules for LoRA adapters")
+        print(f"\n[INFO] LoRA Statistics:")
+        print(f"  - Modules checked: {modules_checked}")
+        print(f"  - LoRA configurations: {len([b for b in bit_widths if b < 32])}")
+        print(f"  - Total LoRA adapters expected: {modules_checked * len([b for b in bit_widths if b < 32])}")
 
         if not lora_issues:
             print(f"[PASS] All LoRA adapters properly configured")
@@ -396,6 +414,8 @@ class CPTModelValidator:
             return
 
         print("\n=== Calibrating Model Quantizers ===")
+        print(f"[INFO] Device: {self.device}")
+        print(f"[INFO] Model precision levels: {self.config['model'].bit_widths}")
 
         # Create dummy data for calibration
         batch_size = 4
@@ -424,7 +444,7 @@ class CPTModelValidator:
                         weight_quantizer.finish_calibration(debug=False)
                         weight_calibrated += 1
 
-            print(f"  Calibrated {weight_calibrated} weight quantizers")
+            print(f"  ✓ Weight quantizers calibrated: {weight_calibrated}")
 
             # Step 2: Start calibration for input quantizers
             input_started = 0
@@ -434,7 +454,7 @@ class CPTModelValidator:
                         module.quantizers_input[bits_key].start_calibration()
                         input_started += 1
 
-            print(f"  Started calibration for {input_started} input quantizers")
+            print(f"  ✓ Input quantizers started: {input_started}")
 
             # Step 3: Disable LoRA during input calibration
             self.model.disable_lora_for_calibration()
@@ -458,14 +478,16 @@ class CPTModelValidator:
                         module.quantizers_input[bits_key].finish_calibration(debug=False)
                         input_calibrated += 1
 
-            print(f"  Calibrated {input_calibrated} input quantizers")
+            print(f"  ✓ Input quantizers calibrated: {input_calibrated}")
+            print(f"  [DEBUG] Memory cleared after {bits}-bit calibration")
 
         # Clear cache
         torch.cuda.empty_cache()
         gc.collect()
 
         self.calibrated = True
-        print("✅ Model calibration complete")
+        print(f"\n✅ Model calibration complete")
+        print(f"[INFO] Total calibrations performed: {len(student_bits)} bit-widths")
 
     def test_forward_pass(self):
         """Test 6: Validate forward pass and output format."""
@@ -514,16 +536,21 @@ class CPTModelValidator:
                 self.failed_tests.append(f"Wrong logits shape at {bits} bits")
 
             # Check for NaN or Inf
-            if torch.isnan(outputs.logits).any():
-                print(f"[FAIL] {bits}-bit forward pass contains NaN values")
+            nan_count = torch.isnan(outputs.logits).sum().item()
+            inf_count = torch.isinf(outputs.logits).sum().item()
+
+            if nan_count > 0:
+                print(f"[FAIL] {bits}-bit forward pass contains {nan_count} NaN values")
                 self.test_results['failed'] += 1
                 self.failed_tests.append(f"NaN values at {bits} bits")
-            elif torch.isinf(outputs.logits).any():
-                print(f"[FAIL] {bits}-bit forward pass contains Inf values")
+            elif inf_count > 0:
+                print(f"[FAIL] {bits}-bit forward pass contains {inf_count} Inf values")
                 self.test_results['failed'] += 1
                 self.failed_tests.append(f"Inf values at {bits} bits")
             else:
-                print(f"[PASS] {bits}-bit forward pass has valid values")
+                logits_mean = outputs.logits.mean().item()
+                logits_std = outputs.logits.std().item()
+                print(f"[PASS] {bits}-bit forward pass valid (mean={logits_mean:.3f}, std={logits_std:.3f})")
                 self.test_results['passed'] += 1
 
     def test_layer_norms(self):
@@ -630,6 +657,10 @@ class CPTModelValidator:
         # Ensure model is calibrated
         self.calibrate_model()
 
+        print(f"\n[INFO] Starting performance benchmarks...")
+        print(f"  - GPU: {torch.cuda.get_device_name(0)}")
+        print(f"  - Initial memory: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
+
         # Clear cache
         torch.cuda.empty_cache()
         gc.collect()
@@ -641,6 +672,8 @@ class CPTModelValidator:
             (4, 128),  # 4-bit, seq_len=128
         ]
 
+        performance_stats = []
+
         for bits, seq_len in test_configs:
             if bits not in self.config['model'].bit_widths:
                 continue
@@ -650,11 +683,14 @@ class CPTModelValidator:
 
             # Measure memory
             torch.cuda.reset_peak_memory_stats()
+            initial_mem = torch.cuda.memory_allocated() / 1024**3
+
             input_ids = torch.randint(0, 50257, (1, seq_len)).to(self.device)
 
             # Warmup
             with torch.no_grad():
-                _ = self.model(input_ids)
+                outputs = self.model(input_ids)
+                logits_shape = outputs.logits.shape
 
             # Time inference
             torch.cuda.synchronize()
@@ -670,17 +706,53 @@ class CPTModelValidator:
 
             # Get memory stats
             peak_memory = torch.cuda.max_memory_allocated() / 1024**3  # GB
+            current_memory = torch.cuda.memory_allocated() / 1024**3
 
-            print(f"[INFO] {bits}-bit, seq_len={seq_len}:")
-            print(f"  - Avg inference time: {avg_time*1000:.2f} ms")
-            print(f"  - Peak memory: {peak_memory:.2f} GB")
-            print(f"  - Throughput: {seq_len / avg_time:.1f} tokens/sec")
+            throughput = seq_len / avg_time
+            ms_per_token = (avg_time * 1000) / seq_len
+
+            print(f"\n[BENCHMARK] {bits}-bit precision, seq_len={seq_len}:")
+            print(f"  Timing:")
+            print(f"    - Avg inference: {avg_time*1000:.2f} ms")
+            print(f"    - Per token: {ms_per_token:.3f} ms/token")
+            print(f"    - Throughput: {throughput:.1f} tokens/sec")
+            print(f"  Memory:")
+            print(f"    - Initial: {initial_mem:.2f} GB")
+            print(f"    - Peak: {peak_memory:.2f} GB")
+            print(f"    - Current: {current_memory:.2f} GB")
+            print(f"    - Delta: {(peak_memory - initial_mem):.2f} GB")
+            print(f"  Output:")
+            print(f"    - Logits shape: {logits_shape}")
+
+            performance_stats.append({
+                'bits': bits,
+                'time_ms': avg_time * 1000,
+                'memory_gb': peak_memory,
+                'throughput': throughput
+            })
 
             if avg_time < 1.0:  # Should complete within 1 second
                 self.test_results['passed'] += 1
             else:
                 print(f"[WARN] Slow inference at {bits} bits")
                 self.test_results['warnings'] += 1
+
+        # Print performance summary
+        if performance_stats:
+            print(f"\n[SUMMARY] Performance across bit widths:")
+            print(f"{'Bits':<8} {'Time (ms)':<12} {'Memory (GB)':<12} {'Throughput':<15}")
+            print("-" * 50)
+            for stat in performance_stats:
+                print(f"{stat['bits']:<8} {stat['time_ms']:<12.2f} {stat['memory_gb']:<12.2f} {stat['throughput']:<15.1f}")
+
+            # Calculate compression ratios
+            if len(performance_stats) >= 2:
+                baseline = performance_stats[0]  # Assume first is highest precision
+                print(f"\n[INFO] Compression vs {baseline['bits']}-bit baseline:")
+                for stat in performance_stats[1:]:
+                    time_ratio = stat['time_ms'] / baseline['time_ms']
+                    mem_ratio = stat['memory_gb'] / baseline['memory_gb']
+                    print(f"  {stat['bits']}-bit: {time_ratio:.2f}x time, {mem_ratio:.2f}x memory")
 
     def test_checkpoint_saving(self):
         """Test 10: Validate checkpoint saving functionality."""
