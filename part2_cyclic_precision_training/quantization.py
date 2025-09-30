@@ -93,13 +93,12 @@ class LearnableFakeQuantize(nn.Module):
             self.calibrated = True
 
     def set_num_bits(self, value):
-        
+
         old_bits = self.num_bits
         self.num_bits = max(1, min(value, 32))
         self._update_quant_range()
 
         if old_bits != self.num_bits:
-            print(f"    Reset calibration for {self.quantizer_type} quantizer: {old_bits} -> {self.num_bits} bits")
             self.calibrated = False
 
     def _update_quant_range(self):
