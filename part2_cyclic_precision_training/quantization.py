@@ -234,7 +234,7 @@ class LearnableFakeQuantize(nn.Module):
             return x
 
         if not self.calibrated:
-            raise RuntimeError(f"Quantizer not calibrated. Please run calibration first for {self.quantizer_type} quantizer.")
+            return x
 
         if self.quantizer_type == 'minmax':
             return self._quantize_minmax(x)
