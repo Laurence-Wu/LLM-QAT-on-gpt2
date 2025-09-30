@@ -122,14 +122,14 @@ class ModelConfig:
 class CPTConfig:
     """Configuration for Cyclic Precision Training."""
     def __init__(self):
-        # Cyclic schedule settings
-        self.cycle_length = 3  # Number of steps in each cycle (len(bit_widths))
-        self.schedule_type = 'cosine'  # 'cosine', 'triangular', or 'linear'
+        # Cyclic schedule settings per CPT paper
+        self.total_cycles = 32  # N in Equation 1 (paper Section 4.1)
+        self.schedule_type = 'cosine'
 
-        # Precision Range Test (PRT) settings
-        self.prt_start_bits = 2  # Starting precision for PRT
-        self.prt_threshold = 0.01  # Accuracy improvement threshold
-        self.prt_iterations = 100  # Iterations per precision level
+        # PRT settings
+        self.prt_start_bits = 2
+        self.prt_threshold = 0.01
+        self.prt_iterations = 50  # Reduced from 100
 
 
 
@@ -152,7 +152,7 @@ class TrainingConfig:
 
         # Training schedule
         self.num_epochs = 10
-        self.gradient_accumulation_steps = 8
+        self.gradient_accumulation_steps = 1  # Standard gradient accumulation
 
         # Cyclic precision schedule
         self.target_bits = 6  # Targeted precision for training

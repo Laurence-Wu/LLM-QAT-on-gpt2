@@ -57,8 +57,7 @@ def save_cpt_checkpoint(
 
 def save_target_model(model: CPTModel, config: dict, target_bits: int, output_dir: str):
     """
-    Save CPT model at the target precision only.
-    This is used for CPT which optimizes for a specific target bit width.
+    Save CPT model at target precision only (filtered state_dict).
 
     Args:
         model: CPT model
@@ -75,33 +74,51 @@ def save_target_model(model: CPTModel, config: dict, target_bits: int, output_di
     print(f"{'='*60}")
     print(f"Target precision: {target_bits}-bit")
 
-    # Set model to target precision
     model.set_precision(target_bits)
     state_dict = model.state_dict()
 
-    # Debug: Print state dict size
-    state_dict_size = sum(p.numel() * p.element_size() for p in state_dict.values())
-    print(f"State dict size: {state_dict_size / (1024*1024):.2f} MB")
-    print(f"Number of parameters: {sum(p.numel() for p in state_dict.values()):,}")
+    # Filter: Keep only target precision quantizers and LoRA
+    filtered_state_dict = {}
+    target_key = f'{target_bits}bit'
+
+    for key, value in state_dict.items():
+        # Keep base weights/biases
+        if 'linear.weight' in key or 'linear.bias' in key:
+            filtered_state_dict[key] = value
+        # Keep embeddings, layer norms
+        elif any(x in key for x in ['wte', 'wpe', 'ln_', 'lm_head']):
+            filtered_state_dict[key] = value
+        # Keep ONLY target precision quantizers and LoRA
+        elif target_key in key:
+            filtered_state_dict[key] = value
+        # Keep gradient quantizers (8-bit BW)
+        elif 'grad_quantizer_8bit' in key:
+            filtered_state_dict[key] = value
+
+    print(f"Original: {len(state_dict)} tensors")
+    print(f"Filtered: {len(filtered_state_dict)} tensors ({100*len(filtered_state_dict)/len(state_dict):.1f}%)")
+
+    state_dict_size = sum(p.numel() * p.element_size() for p in filtered_state_dict.values())
+    print(f"Size: {state_dict_size / (1024*1024):.2f} MB")
 
     # Create filename
     filename = os.path.join(output_dir, f"cpt_model_{target_bits}bit_target_{timestamp}.pth")
     print(f"Saving to: {filename}")
 
-    # Save checkpoint with integer bit_width (NOT string)
+    # Save checkpoint with filtered state_dict
     checkpoint = {
-        'model_state_dict': state_dict,
+        'model_state_dict': filtered_state_dict,  # Filtered!
         'model_config': config['model'].__dict__,
         'training_config': config['training'].__dict__,
         'cpt_config': config['cpt'].__dict__,
-        'bit_width': target_bits,  # CRITICAL: Save as integer for Part 3
-        'target_precision': target_bits,  # Explicitly mark this as target
+        'bit_width': target_bits,
+        'target_precision': target_bits,
         'timestamp': timestamp,
         'lora_rank': config['model'].lora_rank_per_bit.get(target_bits, 0),
         'lora_alpha': config['model'].lora_alpha_per_bit.get(target_bits, 0),
-        'checkpoint_version': '1.1',
+        'checkpoint_version': '1.2',
         'pytorch_version': torch.__version__,
-        'model_type': 'CPT_TARGET'  # Mark as CPT target model
+        'model_type': 'CPT_TARGET'
     }
 
     # Save with error handling

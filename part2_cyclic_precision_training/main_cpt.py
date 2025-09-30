@@ -36,75 +36,38 @@ import deploy as cpt_deploy
 import dataset as cpt_dataset
 
 
-def train_cycle_with_cyclic_precision(
+def train_epoch_with_cpt(
     model: CPTModel,
-    batch: Dict[str, torch.Tensor],
+    train_loader: DataLoader,
     optimizer: optim.Optimizer,
-    precision_scheduler: CyclicPrecisionScheduler,
-    lr_scheduler: optim.lr_scheduler._LRScheduler,
-    calib_mgr: CalibrationManager,
+    precision: int,
     device: str,
-    iteration: int
-) -> Dict[str, float]:
-    """
-    Single training step with cyclic precision.
-    This is the KEY function that cycles through all precisions within one step.
-    """
+    max_grad_norm: float = 1.0
+) -> float:
+    """Train one epoch at specified precision (CPT paper approach)."""
     model.train()
-
-    # Move batch to device
-    input_ids = batch['input_ids'].to(device)
-    labels = batch['labels'].to(device)
-
-    # Get all precisions for this cycle
-    cycle_precisions = precision_scheduler.get_cycle_precisions()
+    model.set_precision(precision)
 
     total_loss = 0
-    losses_per_precision = {}
+    num_batches = 0
 
-    # Zero gradients once
-    optimizer.zero_grad()
+    for batch in train_loader:
+        input_ids = batch['input_ids'].to(device)
+        labels = batch['labels'].to(device)
 
-    # CRITICAL: Cycle through ALL precisions within this single training step
-    for i, precision in enumerate(cycle_precisions):
-        # Set model to current precision
-        model.set_precision(precision)
+        optimizer.zero_grad()
 
-        # Recalibrate LoRA during training (like part1)
-        if iteration >= 0 and precision < 32:
-            calib_mgr.calibrate_lora_only(precision, num_batches=2)
-
-        # Forward pass with current precision
         outputs = model(input_ids=input_ids, labels=labels)
         loss = outputs.loss
 
-        # Average loss over the cycle
-        loss_scaled = loss / len(cycle_precisions)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
+        optimizer.step()
 
-        # Backward pass - accumulate gradients
-        loss_scaled.backward()
-
-        # Track losses
         total_loss += loss.item()
-        losses_per_precision[f'{precision}bit'] = loss.item()
+        num_batches += 1
 
-    # Single optimizer step after full cycle
-    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-    optimizer.step()
-
-    # Step learning rate scheduler for EACH precision in the cycle
-    # This ensures smooth LR decay across all precision iterations
-    for _ in cycle_precisions:
-        lr_scheduler.step()
-
-    # Advance precision scheduler position
-    precision_scheduler.global_cycle += 1
-
-    return {
-        'total_loss': total_loss / len(cycle_precisions),
-        'losses_per_precision': losses_per_precision,
-        'cycle_info': precision_scheduler.get_current_cycle_info()
-    }
+    return total_loss / num_batches
 
 
 def evaluate(model: CPTModel, dataloader: DataLoader, device: str, precision: int = 8) -> Dict[str, float]:
@@ -302,8 +265,11 @@ def main(args):
     precision_scheduler = CyclicPrecisionScheduler(
         bit_widths=model_config.bit_widths,
         schedule_type=cpt_config.schedule_type,
-        cycle_length=cpt_config.cycle_length
+        total_epochs=training_config.num_epochs,
+        total_cycles=cpt_config.total_cycles
     )
+    print(f"CPT: {cpt_config.total_cycles} cycles over {training_config.num_epochs} epochs")
+    print(f"Cycle length: {precision_scheduler.cycle_length_epochs} epochs")
 
     # Run Precision Range Test (only during training, not evaluation)
     print("Running Precision Range Test...")
@@ -330,96 +296,65 @@ def main(args):
         weight_decay=training_config.weight_decay
     )
 
-    # Calculate total cycles for learning rate scheduler
-    # Total cycles = num_epochs * steps_per_epoch * cycle_length
-    # This ensures LR updates for every precision change
-    cycles_per_epoch = len(train_loader)
-    steps_per_cycle = cpt_config.cycle_length
-    total_lr_cycles = training_config.num_epochs * cycles_per_epoch * steps_per_cycle
-
-    # Create cosine learning rate scheduler
+    # Create cosine learning rate scheduler (steps once per epoch)
     lr_scheduler = CosineAnnealingLR(
         optimizer,
-        T_max=total_lr_cycles,
-        eta_min=1e-6  # Minimum learning rate
+        T_max=training_config.num_epochs,
+        eta_min=1e-6
     )
-    print(f"Created LR scheduler with {total_lr_cycles:,} total cycles")
-    print(f"  ({training_config.num_epochs} epochs * {cycles_per_epoch} batches * {steps_per_cycle} precisions)")
+    print(f"LR scheduler: T_max={training_config.num_epochs} epochs")
 
     # Training loop
     print("Starting CPT training...")
-    global_cycle = 0
     best_val_loss = float('inf')
 
     for epoch in range(training_config.num_epochs):
-        epoch_losses = []
         epoch_start_time = time.time()
 
-        # Training
-        model.train()
-        progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{training_config.num_epochs}")
+        # Calculate precision for THIS epoch using CPT
+        current_precision = precision_scheduler.get_precision_for_epoch(epoch)
+        print(f"\nEpoch {epoch+1}/{training_config.num_epochs} - Precision: {current_precision}-bit")
 
-        for batch_idx, batch in enumerate(progress_bar):
-            # CRITICAL: Train with cyclic precision
-            cycle_results = train_cycle_with_cyclic_precision(
-                model, batch, optimizer, precision_scheduler, lr_scheduler, calib_mgr, device, global_cycle
-            )
+        # Train one epoch at this precision
+        avg_epoch_loss = train_epoch_with_cpt(
+            model, train_loader, optimizer, current_precision,
+            device, training_config.max_grad_norm
+        )
 
-            epoch_losses.append(cycle_results['total_loss'])
-            global_cycle += 1
+        # Step LR scheduler once per epoch
+        lr_scheduler.step()
 
-            # Update progress bar
-            cycle_info = cycle_results['cycle_info']
-            current_lr = lr_scheduler.get_last_lr()[0]
-            progress_bar.set_postfix({
-                'loss': f"{cycle_results['total_loss']:.4f}",
-                'precision': f"{cycle_info['current_precision']}bit",
-                'cycle': cycle_info['cycle_count'],
-                'lr': f"{current_lr:.2e}"
-            })
-
-            # Log detailed info periodically
-            if global_cycle % training_config.log_interval == 0:
-                precision_losses = cycle_results['losses_per_precision']
-                print(f"\nCycle {global_cycle} - Losses per precision: {precision_losses}")
-
-            # Clear cache periodically
-            if global_cycle % training_config.empty_cache_interval == 0 and torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
-        # Epoch statistics
-        avg_epoch_loss = np.mean(epoch_losses)
         epoch_time = time.time() - epoch_start_time
-        print(f"Epoch {epoch+1} - Avg Loss: {avg_epoch_loss:.4f}, Time: {epoch_time:.2f}s")
+        current_lr = lr_scheduler.get_last_lr()[0]
+        print(f"Epoch {epoch+1} - Loss: {avg_epoch_loss:.4f}, LR: {current_lr:.2e}, Time: {epoch_time:.2f}s")
+
+        # Clear cache periodically
+        if (epoch + 1) % 5 == 0 and torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         # Validation
         if (epoch + 1) % training_config.eval_interval == 0:
             print("Running validation...")
-            # Evaluate at different precisions
-            for precision in model_config.bit_widths:
-                # Ensure calibration before evaluation
-                calib_mgr.ensure_calibrated(precision)
-                val_results = evaluate(model, val_loader, device, precision)
-                print(f"Validation at {precision}-bit - Loss: {val_results['loss']:.4f}, "
-                      f"Perplexity: {val_results['perplexity']:.2f}")
+            for precision in [current_precision, training_config.target_bits]:
+                if precision in model_config.bit_widths:
+                    calib_mgr.ensure_calibrated(precision)
+                    val_results = evaluate(model, val_loader, device, precision)
+                    print(f"  {precision}-bit - Loss: {val_results['loss']:.4f}, PPL: {val_results['perplexity']:.2f}")
 
-                # Track best model at 8-bit (for logging only, no saving)
-                if precision == 8 and val_results['loss'] < best_val_loss:
-                    best_val_loss = val_results['loss']
-                    print(f"New best validation loss: {best_val_loss:.4f}")
+                    if precision == training_config.target_bits and val_results['loss'] < best_val_loss:
+                        best_val_loss = val_results['loss']
+                        print(f"  New best: {best_val_loss:.4f}")
 
-    # Save final model at target precision only (6-bit)
-    # No intermediate checkpoints - only save the target model
     print("\n" + "="*60)
     print("Training completed! Saving target model...")
     target_bits = training_config.target_bits
-    print(f"Target precision for CPT: {target_bits}-bit")
+    print(f"Target precision: {target_bits}-bit")
 
     saved_path = cpt_deploy.save_target_model(model, config, target_bits, 'final_models')
     if saved_path:
-        print(f"✅ Model saved successfully at: {saved_path}")
+        print(f"✅ Saved: {saved_path}")
     else:
-        print("❌ Failed to save model")
+        print("❌ Save failed")
     print("="*60)
 
 

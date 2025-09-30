@@ -10,34 +10,35 @@ from typing import List, Optional, Tuple
 
 class CyclicPrecisionScheduler:
     """
-    Scheduler that cycles through different precision levels within each training step.
-    This is the key component of CPT - it ensures the model experiences multiple
-    precision granularities in a single training step.
+    Cyclic Precision Scheduler implementing CPT paper Equation 1.
+    Precision varies across EPOCHS using cosine schedule.
     """
 
     def __init__(
         self,
         bit_widths: List[int] = [4, 6, 8],
         schedule_type: str = 'cosine',
-        cycle_length: Optional[int] = None
+        total_epochs: int = 160,
+        total_cycles: int = 32
     ):
         """
-        Initialize the cyclic precision scheduler.
+        Initialize cyclic precision scheduler per CPT paper.
 
         Args:
-            bit_widths: List of bit-widths to cycle through
-            schedule_type: Type of schedule ('cosine', 'triangular', 'linear')
-            cycle_length: Length of cycle (default: len(bit_widths))
+            bit_widths: Available bit-widths
+            schedule_type: Schedule type ('cosine', 'triangular', 'linear')
+            total_epochs: Total training epochs
+            total_cycles: Number of cycles (N in paper, default 32)
         """
-        self.bit_widths = sorted(bit_widths)  # Ensure sorted order
+        self.bit_widths = sorted(bit_widths)
         self.min_bits = min(bit_widths)
         self.max_bits = max(bit_widths)
         self.schedule_type = schedule_type
-        self.cycle_length = cycle_length or len(bit_widths)
+        self.total_epochs = total_epochs
+        self.total_cycles = total_cycles
+        self.cycle_length_epochs = max(1, total_epochs // total_cycles)
 
-        # Track current position
-        self.global_cycle = 0
-        self.cycle_count = 0
+        self.current_epoch = 0
 
     def get_precision_at_position(self, position: int) -> int:
         """
@@ -85,17 +86,18 @@ class CyclicPrecisionScheduler:
         min_idx = distances.index(min(distances))
         return self.bit_widths[min_idx]
 
-    def get_cycle_precisions(self) -> List[int]:
+    def get_precision_for_epoch(self, epoch: int) -> int:
         """
-        Get all precisions for one complete cycle.
+        Get precision for specific epoch using CPT Equation 1.
+
+        Args:
+            epoch: Current epoch number (0-indexed)
 
         Returns:
-            List of bit-widths for one complete cycle
+            Precision (bit-width) for this epoch
         """
-        precisions = []
-        for i in range(self.cycle_length):
-            precisions.append(self.get_precision_at_position(i))
-        return precisions
+        position_in_cycle = epoch % self.cycle_length_epochs
+        return self.get_precision_at_position(position_in_cycle)
 
     def cycle(self) -> int:
         """
@@ -115,25 +117,20 @@ class CyclicPrecisionScheduler:
         return precision
 
     def get_current_cycle_info(self) -> dict:
-        """
-        Get information about current cycle status.
-
-        Returns:
-            Dictionary with cycle information
-        """
-        position = self.global_cycle % self.cycle_length
+        """Get information about current cycle status."""
+        position = self.current_epoch % self.cycle_length_epochs
+        cycle_num = self.current_epoch // self.cycle_length_epochs
         return {
-            'global_cycle': self.global_cycle,
-            'cycle_count': self.cycle_count,
+            'epoch': self.current_epoch,
+            'cycle_num': cycle_num,
             'position_in_cycle': position,
-            'current_precision': self.get_precision_at_position(position),
-            'cycle_progress': position / self.cycle_length
+            'current_precision': self.get_precision_for_epoch(self.current_epoch),
+            'cycle_progress': position / self.cycle_length_epochs
         }
 
     def reset(self):
         """Reset scheduler to initial state."""
-        self.global_cycle = 0
-        self.cycle_count = 0
+        self.current_epoch = 0
 
 
 class PrecisionRangeTest:
@@ -170,7 +167,7 @@ class PrecisionRangeTest:
 
     def find_lower_bound(self, dataloader, criterion) -> int:
         """
-        Find optimal lower precision bound using Precision Range Test (PRT).
+        Find optimal lower precision bound using PRT with early stopping.
 
         Args:
             dataloader: Training dataloader
@@ -181,15 +178,14 @@ class PrecisionRangeTest:
         """
         self.model.train()
 
-        # Store metrics for each precision
         precision_metrics = {}
         device = next(self.model.parameters()).device
+        early_stop_threshold = 0.005
 
         print(f"\n{'='*50}")
-        print(f"Precision Range Test: {self.start_bits} to {self.max_bits} bits")
+        print(f"PRT: {self.start_bits} to {self.max_bits} bits")
         print(f"{'='*50}")
 
-        # Evaluate each precision
         for bits in range(self.start_bits, self.max_bits + 1):
             self.model.set_precision(bits)
 
@@ -245,42 +241,30 @@ class PrecisionRangeTest:
 
             print(f"  {bits:2d}-bit: Acc={current_acc:.4f}, Loss={avg_loss:.4f}")
 
-        # Find optimal lower bound
-        # Look for the first precision where accuracy improvement is significant
+            if bits > self.start_bits:
+                prev_acc = precision_metrics[bits - 1]['accuracy']
+                improvement = (current_acc - prev_acc) / max(prev_acc, 1e-6)
+
+                if improvement > self.threshold:
+                    print(f"\n✓ Found lower bound: {bits}-bit (improvement: {improvement:.2%})")
+                    return bits
+
+                if improvement < early_stop_threshold and bits >= self.start_bits + 3:
+                    print(f"\n✓ Early stop at {bits}-bit (no significant improvement)")
+                    return bits
+
+        max_improvement = 0
         optimal_lower = self.start_bits
+        for bits in range(self.start_bits + 1, min(self.start_bits + 4, self.max_bits + 1)):
+            if bits in precision_metrics and bits - 1 in precision_metrics:
+                prev_acc = precision_metrics[bits - 1]['accuracy']
+                curr_acc = precision_metrics[bits]['accuracy']
+                improvement = curr_acc - prev_acc
+                if improvement > max_improvement:
+                    max_improvement = improvement
+                    optimal_lower = bits
 
-        for bits in range(self.start_bits + 1, self.max_bits + 1):
-            prev_acc = precision_metrics[bits - 1]['accuracy']
-            curr_acc = precision_metrics[bits]['accuracy']
-
-            # Calculate relative improvement
-            if prev_acc > 0:
-                relative_improvement = (curr_acc - prev_acc) / prev_acc
-            else:
-                relative_improvement = curr_acc
-
-            # Find significant jump in accuracy
-            if relative_improvement > self.threshold:
-                optimal_lower = bits
-                print(f"\n✓ Optimal lower bound: {optimal_lower}-bit")
-                print(f"  (Improvement: {relative_improvement:.2%})")
-                break
-
-        # If no significant improvement found, use a sharpest jump heuristic
-        if optimal_lower == self.start_bits:
-            max_improvement = 0
-            for bits in range(self.start_bits + 1, min(self.start_bits + 4, self.max_bits + 1)):
-                if bits in precision_metrics and bits - 1 in precision_metrics:
-                    prev_acc = precision_metrics[bits - 1]['accuracy']
-                    curr_acc = precision_metrics[bits]['accuracy']
-                    improvement = curr_acc - prev_acc
-                    if improvement > max_improvement:
-                        max_improvement = improvement
-                        optimal_lower = bits
-
-            if optimal_lower != self.start_bits:
-                print(f"\n✓ Optimal lower bound (heuristic): {optimal_lower}-bit")
-
+        print(f"\n✓ Lower bound (heuristic): {optimal_lower}-bit")
         return optimal_lower
 
     def find_bounds(self, dataloader, criterion) -> Tuple[int, int]:

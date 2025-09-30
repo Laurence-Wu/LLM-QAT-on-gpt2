@@ -11,19 +11,22 @@ from tqdm import tqdm
 
 
 class CalibrationManager:
-    """
-    Manages calibration of quantizers for all precision levels.
-    Based on part1's calibration strategy.
-    """
+    """Manages calibration of quantizers for all precision levels."""
 
     def __init__(self, model, train_loader, device):
         self.model = model
         self.train_loader = train_loader
         self.device = device
         self.calibrated_bits = set()
+        self.gradient_calibrated = False
 
     def calibrate_all_precisions(self, bit_widths: List[int], num_batches: int = 10):
         """Calibrate all precision levels."""
+        # Calibrate gradient quantizers once
+        if not self.gradient_calibrated:
+            self.calibrate_gradient_quantizers()
+            self.gradient_calibrated = True
+
         for bits in bit_widths:
             if bits < 32 and bits not in self.calibrated_bits:
                 print(f"\nCalibrating {bits}-bit precision...")
@@ -107,13 +110,26 @@ class CalibrationManager:
 
         # Step 6: Finish calibration for input quantizers
         input_calibrated = 0
+        input_issues = []
         for name, module in self.model.named_modules():
             # Use consistent naming with part1
             if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
-                module.quantizers_input[bits_key].finish_calibration(debug=False)
+                q = module.quantizers_input[bits_key]
+                q.finish_calibration(debug=False)
+
+                # Verify calibration succeeded
+                if not q.calibrated:
+                    input_issues.append(f"{name}: not calibrated")
+                elif q.scale.abs().max().item() < 1e-9:
+                    input_issues.append(f"{name}: zero scale ({q.scale.mean().item():.2e})")
+
                 input_calibrated += 1
 
         print(f"    ✓ Calibrated {input_calibrated} input quantizers")
+        if input_issues:
+            print(f"    ⚠️  {len(input_issues)} input quantizers have issues (showing first 3):")
+            for issue in input_issues[:3]:
+                print(f"      - {issue}")
 
         # Clean up memory
         torch.cuda.empty_cache()
@@ -181,6 +197,50 @@ class CalibrationManager:
             self.calibrated_bits.add(bits)
 
         self._print_calibration_stats(bits)
+
+    def calibrate_gradient_quantizers(self):
+        """Calibrate 8-bit gradient quantizers once (BW8)."""
+        print("\nCalibrating 8-bit gradient quantizers...")
+
+        grad_quantizers = []
+        for name, module in self.model.named_modules():
+            if hasattr(module, 'grad_quantizer_8bit'):
+                module.grad_quantizer_8bit.start_calibration()
+                grad_quantizers.append((name, module.grad_quantizer_8bit))
+
+        if not grad_quantizers:
+            print("  No gradient quantizers found")
+            return
+
+        self.model.train()
+        self.model.disable_lora_for_calibration()
+
+        train_iter = iter(self.train_loader)
+        try:
+            batch = next(train_iter)
+            input_ids = batch['input_ids'].to(self.device)
+            labels = batch['labels'].to(self.device)
+
+            # Forward and backward to collect gradient stats
+            outputs = self.model(input_ids, labels=labels)
+            loss = outputs.loss
+            loss.backward()
+
+            # Clear gradients after calibration
+            self.model.zero_grad()
+
+        except StopIteration:
+            print("  Warning: No batches available for gradient calibration")
+
+        # Finish calibration
+        for name, quantizer in grad_quantizers:
+            quantizer.finish_calibration(debug=False)
+
+        self.model.enable_lora_after_calibration()
+        print(f"  ✓ Calibrated {len(grad_quantizers)} gradient quantizers")
+
+        torch.cuda.empty_cache()
+        gc.collect()
 
     def _print_calibration_stats(self, bits: int):
         """Print calibration statistics for debugging."""

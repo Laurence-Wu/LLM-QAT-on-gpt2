@@ -12,6 +12,24 @@ from quantization_methods import (
     apply_log_quantization
 )
 
+
+class GradientQuantizer(torch.autograd.Function):
+    """
+    Quantize gradients to 8-bit during backward pass (BW8).
+    Forward passes through unchanged, backward quantizes gradients.
+    """
+    @staticmethod
+    def forward(ctx, input, quantizer):
+        ctx.quantizer = quantizer
+        return input
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.quantizer is not None and not ctx.quantizer.training:
+            grad_quantized = ctx.quantizer(grad_output)
+            return grad_quantized, None
+        return grad_output, None
+
 class LearnableFakeQuantize(nn.Module):
     def __init__(self, num_bits,
                  channel_dim=0, quantizer_type='minmax', eps=1e-5, symmetric=True, per_channel=True, is_input=False):

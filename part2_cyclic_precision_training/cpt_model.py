@@ -11,14 +11,15 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from typing import Optional, Dict, Tuple
 import math
 
-from quantization import LearnableFakeQuantize
+from quantization import LearnableFakeQuantize, GradientQuantizer
 from switchable_batchnorm import SwitchableLayerNorm
 
 
 class LoRAAdapter(nn.Module):
-    """Low-Rank Adaptation for parameter-efficient fine-tuning."""
+    """Low-Rank Adaptation for parameter-efficient fine-tuning with quantization support."""
 
-    def __init__(self, in_features: int, out_features: int, rank: int = 16, alpha: float = 32):
+    def __init__(self, in_features: int, out_features: int, rank: int = 16, alpha: float = 32,
+                 num_bits: int = 8, quantizer_type: str = 'log'):
         super().__init__()
         self.rank = rank
         self.alpha = alpha
@@ -27,15 +28,39 @@ class LoRAAdapter(nn.Module):
         if rank > 0:
             self.lora_A = nn.Parameter(torch.randn(in_features, rank) * 0.01)
             self.lora_B = nn.Parameter(torch.zeros(rank, out_features))
+
+            # Quantizers for LoRA matrices
+            self.quantize_A = LearnableFakeQuantize(
+                num_bits=num_bits,
+                quantizer_type=quantizer_type,
+                channel_dim=0,
+                per_channel=True
+            )
+            self.quantize_B = LearnableFakeQuantize(
+                num_bits=num_bits,
+                quantizer_type=quantizer_type,
+                channel_dim=0,
+                per_channel=True
+            )
         else:
             self.lora_A = None
             self.lora_B = None
+            self.quantize_A = None
+            self.quantize_B = None
+
+        self.calibration_mode = False
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Apply LoRA adaptation."""
+        """Apply LoRA adaptation with quantization."""
         if self.lora_A is not None and self.lora_B is not None:
-            # x: [batch, seq_len, in_features]
-            lora_output = x @ self.lora_A @ self.lora_B
+            # Skip quantization in calibration mode or if quantizers not available
+            if self.calibration_mode or self.quantize_A is None:
+                lora_output = x @ self.lora_A @ self.lora_B
+            else:
+                # Quantize LoRA parameters
+                lora_A_quant = self.quantize_A(self.lora_A)
+                lora_B_quant = self.quantize_B(self.lora_B)
+                lora_output = x @ lora_A_quant @ lora_B_quant
             return lora_output * self.scaling
         return torch.zeros_like(x[..., :self.lora_B.size(1)] if self.lora_B is not None else x)
 
@@ -73,9 +98,11 @@ class CPTLinear(nn.Module):
         for bits in bit_widths:
             rank = lora_rank_per_bit.get(bits, 16)
             alpha = lora_alpha_per_bit.get(bits, 32)
+            quant_type = quantizer_per_bit.get(bits, 'log')
             # Use same naming as part1 (without 'lora_' prefix)
             self.lora_adapters[f'{bits}bit'] = LoRAAdapter(
-                in_features, out_features, rank, alpha
+                in_features, out_features, rank, alpha,
+                num_bits=bits, quantizer_type=quant_type
             )
 
         # Default quantizer types if not provided
@@ -84,33 +111,39 @@ class CPTLinear(nn.Module):
 
         student_bits = [b for b in bit_widths if b < 32]
 
-        # Quantizers for weights - matching part1 naming
+        # Quantizers for weights
         self.quantizers_weight = nn.ModuleDict({
             f'{bits}bit': LearnableFakeQuantize(
                 num_bits=bits,
                 quantizer_type=quantizer_per_bit.get(bits, 'log'),
-                channel_dim=0,  # Weight quantization along output channel
+                channel_dim=0,
                 per_channel=True
             )
             for bits in student_bits
         })
 
-        # Quantizers for inputs - matching part1 naming
+        # Quantizers for inputs
         self.quantizers_input = nn.ModuleDict({
             f'{bits}bit': LearnableFakeQuantize(
                 num_bits=bits,
                 quantizer_type=quantizer_per_bit.get(bits, 'log'),
-                channel_dim=-1,  # Input quantization along hidden dim
+                channel_dim=-1,
                 per_channel=True,
                 is_input=True
             )
             for bits in student_bits
         })
 
-        # Current precision
-        self.current_bits = max(bit_widths)
+        # Static 8-bit gradient quantizer (BW8)
+        self.grad_quantizer_8bit = LearnableFakeQuantize(
+            num_bits=8,
+            quantizer_type='minmax',
+            channel_dim=-1,
+            per_channel=True,
+            is_input=True
+        )
 
-        # Calibration mode flag (like part1)
+        self.current_bits = max(bit_widths)
         self.calibration_mode = False
 
     def set_precision(self, num_bits: int):
@@ -120,28 +153,27 @@ class CPTLinear(nn.Module):
         self.current_bits = num_bits
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass with current precision."""
-        # Handle 32-bit precision (no quantization)
+        """Forward pass with current precision and gradient quantization."""
         if self.current_bits >= 32:
             out = F.linear(x, self.linear.weight, self.linear.bias)
             return out
 
-        # Get quantizers for current bit width
         bits_key = f'{self.current_bits}bit'
 
-        # Quantize inputs and weights (matching part1 naming)
+        # Quantize inputs and weights with gradient quantization wrapper
         x_quant = self.quantizers_input[bits_key](x)
         weight_quant = self.quantizers_weight[bits_key](self.linear.weight)
 
-        # Base linear operation
+        # Apply gradient quantization (BW8) during backward pass
+        x_quant = GradientQuantizer.apply(x_quant, self.grad_quantizer_8bit)
+        weight_quant = GradientQuantizer.apply(weight_quant, self.grad_quantizer_8bit)
+
         out = F.linear(x_quant, weight_quant, self.linear.bias)
 
-        # Skip LoRA in calibration mode (like part1)
         if self.calibration_mode:
             return out
 
-        # Add LoRA adaptation for current precision (using original input like part1)
-        lora_key = f'{self.current_bits}bit'  # Match part1 naming
+        lora_key = f'{self.current_bits}bit'
         if lora_key in self.lora_adapters:
             lora_out = self.lora_adapters[lora_key](x)
             out = out + lora_out
@@ -419,19 +451,23 @@ class CPTModel(nn.Module):
     def disable_lora_for_calibration(self):
         """
         Disable LoRA during calibration to get clean statistics.
-        Sets calibration_mode=True on all CPTLinear layers.
+        Sets calibration_mode=True on all CPTLinear layers and LoRAAdapters.
         """
         for module in self.modules():
             if isinstance(module, CPTLinear):
+                module.calibration_mode = True
+            if isinstance(module, LoRAAdapter):
                 module.calibration_mode = True
 
     def enable_lora_after_calibration(self):
         """
         Re-enable LoRA after calibration.
-        Sets calibration_mode=False on all CPTLinear layers.
+        Sets calibration_mode=False on all CPTLinear layers and LoRAAdapters.
         """
         for module in self.modules():
             if isinstance(module, CPTLinear):
+                module.calibration_mode = False
+            if isinstance(module, LoRAAdapter):
                 module.calibration_mode = False
 
     def replace_quantizers_for_evaluation(self):
