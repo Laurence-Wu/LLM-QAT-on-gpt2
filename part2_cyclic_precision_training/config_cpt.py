@@ -1,198 +1,105 @@
-"""
-Configuration for Cyclic Precision Training (CPT)
-Based on the CPT paper and incorporating successful strategies from Part 1.
-"""
-
 import math
 
 
 class ModelConfig:
-    """Model architecture configuration for CPT."""
     def __init__(self):
-        # GPT-2 architecture - exact dimensions
         self.vocab_size = 50257
         self.n_positions = 1024
         self.n_embd = 768
         self.n_layer = 12
         self.n_head = 12
 
-        # Regularization
         self.layer_norm_epsilon = 1e-5
         self.embd_pdrop = 0.1
 
-        # Cyclic precision settings
-        self.bit_widths = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,13,14,15,16,17,18]  # Cycle through these precisions
-        self.default_bits = 8  # Default/upper bound precision
+        self.bit_widths = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+        self.default_bits = 8
 
-        # LoRA settings per bit-width
-        # Lower precision needs higher rank to compensate
         self.lora_rank_per_bit = {
-            2: 40,  # Very high rank for extremely low precision
-            3: 36,  # Very high rank for extremely low precision
-            4: 32,  # Highest rank for lowest precision
-            5: 28,  # High rank
-            6: 24,  # Medium rank
-            7: 20,  # Medium rank
-            8: 16,  # Lower rank for higher precision
-            9: 12,  # Lower rank
-            10: 10,  # Lower rank
-            11: 10,  # Minimal rank
-            12: 10,  # Minimal rank
-            13: 10,  # Minimal rank
-            14: 8,  # Minimal rank
-            15: 8,  # Minimal rank
-            16: 8,  # Minimal rank
-            17: 4,  # Minimal rank
-            18: 4,  # Minimal rank
-            32: 0   # No LoRA for FP32 (if used)
+            2: 40, 3: 36, 4: 32, 5: 28, 6: 24, 7: 20, 8: 16, 9: 12, 10: 10,
+            11: 10, 12: 10, 13: 10, 14: 8, 15: 8, 16: 8, 17: 4, 18: 4, 32: 0
         }
         self.lora_alpha_per_bit = {
-            2: 40,  # Very high rank for extremely low precision
-            3: 36,  # Very high rank for extremely low precision
-            4: 32,  # Highest rank for lowest precision
-            5: 28,  # High rank
-            6: 24,  # Medium rank
-            7: 20,  # Medium rank
-            8: 16,  # Lower rank for higher precision
-            9: 12,  # Lower rank
-            10: 10,  # Lower rank
-            11: 10,  # Minimal rank
-            12: 10,  # Minimal rank
-            13: 10,  # Minimal rank
-            14: 8,  # Minimal rank
-            15: 8,  # Minimal rank
-            16: 8,  # Minimal rank
-            17: 4,  # Minimal rank
-            18: 4,  # Minimal rank
-            32: 0   # No LoRA for FP32 (if used)
+            2: 40, 3: 36, 4: 32, 5: 28, 6: 24, 7: 20, 8: 16, 9: 12, 10: 10,
+            11: 10, 12: 10, 13: 10, 14: 8, 15: 8, 16: 8, 17: 4, 18: 4, 32: 0
         }
-        # Quantization settings (matching part1 structure)
-        self.quantizer_type = 'log'  # Default quantization type
+
+        self.quantizer_type = 'log'
         self.quantizer_per_bit = {
-            2: 'log',
-            3: 'log',
-            4: 'log',
-            5: 'log',
-            6: 'log',
-            7: 'log',
-            8: 'minmax',  # Use minmax for 8-bit like part1
-            9: 'minmax',
-            10: 'minmax',
-            11: 'minmax',
-            12: 'minmax',
-            13: 'minmax',
-            14: 'minmax',
-            15: 'minmax',
-            16: 'minmax',
-            17: 'minmax',
-            18: 'minmax',
-            32: None  # No quantization for 32-bit
+            2: 'minmax', 3: 'minmax',
+            4: 'log', 5: 'log', 6: 'log', 7: 'log', 8: 'log', 9: 'log',
+            10: 'log', 11: 'log', 12: 'log', 13: 'log', 14: 'log', 15: 'log',
+            16: 'log', 17: 'log', 18: 'log', 32: None
         }
-        self.use_per_channel = True  # Always use per-channel calibration
-        self.gradient_bits = 8  # Static gradient precision
+        self.use_per_channel = True
+        self.gradient_bits = 8
         self.activation_bits_per_bit = {
-            2: 40,  # Very high rank for extremely low precision
-            3: 36,  # Very high rank for extremely low precision
-            4: 32,  # Highest rank for lowest precision
-            5: 28,  # High rank
-            6: 24,  # Medium rank
-            7: 20,  # Medium rank
-            8: 16,  # Lower rank for higher precision
-            9: 12,  # Lower rank
-            10: 10,  # Lower rank
-            11: 10,  # Minimal rank
-            12: 10,  # Minimal rank
-            13: 10,  # Minimal rank
-            14: 8,  # Minimal rank
-            15: 8,  # Minimal rank
-            16: 8,  # Minimal rank
-            17: 4,  # Minimal rank
-            18: 4,  # Minimal rank
-            32: 0   # No LoRA for FP32 (if used)
+            2: 40, 3: 36, 4: 32, 5: 28, 6: 24, 7: 20, 8: 16, 9: 12, 10: 10,
+            11: 10, 12: 10, 13: 10, 14: 8, 15: 8, 16: 8, 17: 4, 18: 4, 32: 0
         }
 
-        # Gradient bifurcation settings
-        self.weight_gradient_bits = 16  # Higher precision for weight gradients
-        self.activation_gradient_bits = 8  # Lower precision for activation gradients
+        self.weight_gradient_bits = 16
+        self.activation_gradient_bits = 8
 
-        # Memory optimization
         self.use_gradient_checkpointing = True
 
 
 class CPTConfig:
-    """Configuration for Cyclic Precision Training."""
     def __init__(self):
-        # Cyclic schedule settings per CPT paper
-        self.total_cycles = 32  # N in Equation 1 (paper Section 4.1)
+        self.total_cycles = 32
         self.schedule_type = 'cosine'
 
-        # PRT settings
         self.prt_start_bits = 2
         self.prt_threshold = 0.01
-        self.prt_iterations = 50  # Reduced from 100
-
+        self.prt_iterations = 50
 
 
 class TrainingConfig:
-    """Training configuration for CPT."""
     def __init__(self):
-        # Dataset
         self.train_split = 'train[:80000]'
         self.val_split = 'validation[:5000]'
         self.batch_size = 32
         self.max_seq_length = 256
         self.doc_stride = 128
 
-        # Optimization
         self.learning_rate = 1e-4
         self.weight_decay = 0.01
         self.adam_epsilon = 1e-8
         self.adam_betas = (0.9, 0.999)
         self.max_grad_norm = 1.0
 
-        # Training schedule
         self.num_epochs = 10
-        self.gradient_accumulation_steps = 1  # Standard gradient accumulation
+        self.gradient_accumulation_steps = 1
 
-        # Cyclic precision schedule
-        self.target_bits = 6  # Targeted precision for training
+        self.target_bits = 6
 
-        # Evaluation
         self.eval_interval = 50
 
-        # Memory optimization
         self.empty_cache_interval = 25
         self.num_workers = 0
 
-        # Hardware settings
         self.device = 'cuda'
-        self.fp16 = False  # Use FP32
+        self.fp16 = False
 
-        # Logging
         self.log_interval = 10
         self.verbose = True
 
 
 class SBMConfig:
-    """Configuration for SBM-specific components."""
     def __init__(self):
-        # Range BatchNorm settings
         self.use_range_bn = True
         self.bn_momentum = 0.1
         self.bn_eps = 1e-5
 
-        # GEMMLOWP quantization settings
         self.use_stochastic_rounding = True
-        self.clamp_percentile = 99.9  # For activation clamping
+        self.clamp_percentile = 99.9
 
-        # Gradient bifurcation
         self.bifurcate_gradients = True
         self.weight_grad_bits = 16
         self.activation_grad_bits = 8
 
 
 def get_config():
-    """Get all configuration objects."""
     return {
         'model': ModelConfig(),
         'cpt': CPTConfig(),
