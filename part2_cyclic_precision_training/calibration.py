@@ -258,11 +258,6 @@ class CalibrationManager:
             print("  No gradient quantizers found")
             return
 
-        original_requires_grad = {}
-        for name, param in self.model.named_parameters():
-            original_requires_grad[name] = param.requires_grad
-            param.requires_grad = False
-
         original_mode = self.model.training
         self.model.train()
 
@@ -280,10 +275,6 @@ class CalibrationManager:
 
         except StopIteration:
             print("  Warning: No batches available for gradient calibration")
-
-        for name, param in self.model.named_parameters():
-            if name in original_requires_grad:
-                param.requires_grad = original_requires_grad[name]
 
         if not original_mode:
             self.model.eval()
