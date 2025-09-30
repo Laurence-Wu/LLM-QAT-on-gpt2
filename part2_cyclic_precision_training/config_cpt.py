@@ -85,24 +85,9 @@ class TrainingConfig:
         self.verbose = True
 
 
-class SBMConfig:
-    def __init__(self):
-        self.use_range_bn = True
-        self.bn_momentum = 0.1
-        self.bn_eps = 1e-5
-
-        self.use_stochastic_rounding = True
-        self.clamp_percentile = 99.9
-
-        self.bifurcate_gradients = True
-        self.weight_grad_bits = 16
-        self.activation_grad_bits = 8
-
-
 def get_config():
     return {
         'model': ModelConfig(),
         'cpt': CPTConfig(),
         'training': TrainingConfig(),
-        'sbm': SBMConfig()
     }

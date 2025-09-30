@@ -62,15 +62,6 @@ class DistillationManager:
 
     def compute_distillation_loss(self, student_outputs, input_ids):
         teacher = self._get_from_cache(input_ids)
-        if teacher is None:
-            print(f"Warning: No teacher outputs in cache for batch")
-            logits = student_outputs['logits']
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = input_ids[..., 1:].contiguous()
-            return F.cross_entropy(
-                shift_logits.view(-1, shift_logits.size(-1)),
-                shift_labels.view(-1)
-            )
 
         T = self.config.distill_temperature
         teacher_logits = teacher['logits'][..., :-1, :].contiguous()

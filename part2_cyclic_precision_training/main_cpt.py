@@ -42,7 +42,8 @@ def train_epoch_with_cpt(
     optimizer: optim.Optimizer,
     precision: int,
     device: str,
-    max_grad_norm: float = 1.0
+    max_grad_norm: float = 1.0,
+    lr_scheduler = None
 ) -> float:
     """Train one epoch at specified precision (CPT paper approach)."""
     model.train()
@@ -63,6 +64,7 @@ def train_epoch_with_cpt(
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
         optimizer.step()
+        lr_scheduler.step()
 
         total_loss += loss.item()
         num_batches += 1
@@ -114,18 +116,15 @@ def load_pretrained_weights(model, model_config):
 
     # Load layer-specific weights for each transformer block
     for i in range(len(pretrained.transformer.h)):
-        # Layer normalization weights - same for all bit widths, freeze them
-        for bit_width in model.h[i].bit_widths:
-            bit_key = str(bit_width)
-            model.h[i].ln_1.weights[bit_key].data = pretrained.transformer.h[i].ln_1.weight.data.clone()
-            model.h[i].ln_1.biases[bit_key].data = pretrained.transformer.h[i].ln_1.bias.data.clone()
-            model.h[i].ln_1.weights[bit_key].requires_grad = False
-            model.h[i].ln_1.biases[bit_key].requires_grad = False
+        model.h[i].ln_1.weight.data = pretrained.transformer.h[i].ln_1.weight.data.clone()
+        model.h[i].ln_1.bias.data = pretrained.transformer.h[i].ln_1.bias.data.clone()
+        model.h[i].ln_1.weight.requires_grad = True
+        model.h[i].ln_1.bias.requires_grad = True
 
-            model.h[i].ln_2.weights[bit_key].data = pretrained.transformer.h[i].ln_2.weight.data.clone()
-            model.h[i].ln_2.biases[bit_key].data = pretrained.transformer.h[i].ln_2.bias.data.clone()
-            model.h[i].ln_2.weights[bit_key].requires_grad = False
-            model.h[i].ln_2.biases[bit_key].requires_grad = False
+        model.h[i].ln_2.weight.data = pretrained.transformer.h[i].ln_2.weight.data.clone()
+        model.h[i].ln_2.bias.data = pretrained.transformer.h[i].ln_2.bias.data.clone()
+        model.h[i].ln_2.weight.requires_grad = True
+        model.h[i].ln_2.bias.requires_grad = True
 
         # Attention weights - load combined QKV projection directly (like part1)
         model.h[i].attn.c_attn.linear.weight.data = pretrained.transformer.h[i].attn.c_attn.weight.data.t().contiguous()
@@ -150,13 +149,10 @@ def load_pretrained_weights(model, model_config):
         model.h[i].mlp['fc_out'].linear.weight.requires_grad = False
         model.h[i].mlp['fc_out'].linear.bias.requires_grad = False
 
-    # Load final layer norm and freeze
-    for bit_width in model_config.bit_widths:
-        bit_key = str(bit_width)
-        model.ln_f.weights[bit_key].data = pretrained.transformer.ln_f.weight.data.clone()
-        model.ln_f.biases[bit_key].data = pretrained.transformer.ln_f.bias.data.clone()
-        model.ln_f.weights[bit_key].requires_grad = False
-        model.ln_f.biases[bit_key].requires_grad = False
+    model.ln_f.weight.data = pretrained.transformer.ln_f.weight.data.clone()
+    model.ln_f.bias.data = pretrained.transformer.ln_f.bias.data.clone()
+    model.ln_f.weight.requires_grad = True
+    model.ln_f.bias.requires_grad = True
 
     # Load language modeling head and freeze
     model.lm_head.linear.weight.data = pretrained.lm_head.weight.data.clone()
@@ -254,12 +250,14 @@ def main(args):
     model = model.to(device)
     print(f"Model moved to {device}")
 
-    # Create calibration manager and calibrate all precisions
+    # Create calibration manager (calibration will happen per-epoch)
     print("\nInitializing calibration manager...")
     calib_mgr = CalibrationManager(model, train_loader, device)
-    student_bits = [b for b in model_config.bit_widths if b < 32]
-    print("Calibrating all precision levels...")
-    calib_mgr.calibrate_all_precisions(student_bits)
+
+    # Calibrate gradient quantizers once (static 8-bit backward)
+    if not calib_mgr.gradient_calibrated:
+        calib_mgr.calibrate_gradient_quantizers()
+        calib_mgr.gradient_calibrated = True
 
     # Create cyclic precision scheduler
     precision_scheduler = CyclicPrecisionScheduler(
@@ -296,37 +294,88 @@ def main(args):
         weight_decay=training_config.weight_decay
     )
 
-    # Create cosine learning rate scheduler (steps once per epoch)
+    # Calculate total training steps for per-batch scheduling
+    total_steps = training_config.num_epochs * len(train_loader)
+
+    # Create cosine learning rate scheduler (steps per batch)
     lr_scheduler = CosineAnnealingLR(
         optimizer,
-        T_max=training_config.num_epochs,
+        T_max=total_steps,
         eta_min=1e-6
     )
-    print(f"LR scheduler: T_max={training_config.num_epochs} epochs")
+    print(f"LR scheduler: T_max={total_steps} steps ({training_config.num_epochs} epochs, {len(train_loader)} batches/epoch)")
 
     # Training loop
     print("Starting CPT training...")
     best_val_loss = float('inf')
+    prev_loss = None
+    loss_history = []
 
     for epoch in range(training_config.num_epochs):
         epoch_start_time = time.time()
 
         # Calculate precision for THIS epoch using CPT
         current_precision = precision_scheduler.get_precision_for_epoch(epoch)
-        print(f"\nEpoch {epoch+1}/{training_config.num_epochs} - Precision: {current_precision}-bit")
+        cycle_position = epoch % precision_scheduler.cycle_length_epochs
+        print(f"\n{'='*70}")
+        print(f"Epoch {epoch+1}/{training_config.num_epochs} - Precision: {current_precision}-bit (Cycle {cycle_position}/{precision_scheduler.cycle_length_epochs})")
+        print(f"{'='*70}")
+
+        # Calibrate quantizers for current precision
+        calib_mgr.calibrate_current_precision(current_precision, num_batches=10)
 
         # Train one epoch at this precision
         avg_epoch_loss = train_epoch_with_cpt(
             model, train_loader, optimizer, current_precision,
-            device, training_config.max_grad_norm
+            device, training_config.max_grad_norm, lr_scheduler
         )
-
-        # Step LR scheduler once per epoch
-        lr_scheduler.step()
 
         epoch_time = time.time() - epoch_start_time
         current_lr = lr_scheduler.get_last_lr()[0]
-        print(f"Epoch {epoch+1} - Loss: {avg_epoch_loss:.4f}, LR: {current_lr:.2e}, Time: {epoch_time:.2f}s")
+
+        loss_history.append(avg_epoch_loss)
+        loss_change = avg_epoch_loss - prev_loss if prev_loss is not None else 0.0
+        prev_loss = avg_epoch_loss
+
+        grad_norms = []
+        lora_norms = []
+        for name, param in model.named_parameters():
+            if param.requires_grad and param.grad is not None:
+                grad_norms.append(param.grad.norm().item())
+                if 'lora' in name.lower():
+                    lora_norms.append(param.norm().item())
+
+        grad_norm_mean = np.mean(grad_norms) if grad_norms else 0.0
+        grad_norm_max = np.max(grad_norms) if grad_norms else 0.0
+        lora_norm_mean = np.mean(lora_norms) if lora_norms else 0.0
+
+        if torch.cuda.is_available():
+            memory_mb = torch.cuda.max_memory_allocated() / 1024 / 1024
+        else:
+            memory_mb = 0.0
+
+        print(f"\n{'-'*70}")
+        print(f"Epoch {epoch+1} Training Summary:")
+        print(f"  Loss: {avg_epoch_loss:.4f} (Δ={loss_change:+.4f})")
+        print(f"  LR: {current_lr:.2e}")
+        print(f"  Gradient Norm: mean={grad_norm_mean:.4f}, max={grad_norm_max:.4f}")
+        print(f"  LoRA Param Norm: mean={lora_norm_mean:.4f}")
+        print(f"  Time: {epoch_time:.2f}s")
+        if memory_mb > 0:
+            print(f"  Memory: {memory_mb:.1f} MB")
+
+        if loss_change > 0 and epoch > 0:
+            print(f"  ⚠️ Loss increased by {loss_change:.4f}")
+
+        if grad_norm_max > 10.0:
+            print(f"  ⚠️ WARNING: Large gradient detected ({grad_norm_max:.2f}) - possible instability")
+
+        if len(loss_history) >= 3:
+            recent_losses = loss_history[-3:]
+            if all(recent_losses[i] < recent_losses[i+1] for i in range(len(recent_losses)-1)):
+                print(f"  ⚠️ WARNING: Loss increasing for 3 consecutive epochs - possible divergence")
+
+        print(f"{'-'*70}")
 
         # Clear cache periodically
         if (epoch + 1) % 5 == 0 and torch.cuda.is_available():
@@ -345,8 +394,38 @@ def main(args):
                         best_val_loss = val_results['loss']
                         print(f"  New best: {best_val_loss:.4f}")
 
-    print("\n" + "="*60)
-    print("Training completed! Saving target model...")
+    print("\n" + "="*70)
+    print("Training completed! Final Summary:")
+    print("="*70)
+
+    total_training_time = sum([time.time() - t for t in [epoch_start_time]])
+    avg_epoch_time = total_training_time / training_config.num_epochs if training_config.num_epochs > 0 else 0
+
+    print(f"\nTraining Statistics:")
+    print(f"  Total Epochs: {training_config.num_epochs}")
+    print(f"  Best Validation Loss: {best_val_loss:.4f}")
+    print(f"  Final Training Loss: {loss_history[-1]:.4f}")
+    print(f"  Average Epoch Time: {avg_epoch_time:.2f}s")
+
+    if len(loss_history) > 1:
+        loss_improvement = loss_history[0] - loss_history[-1]
+        print(f"  Loss Improvement: {loss_improvement:.4f} ({100*loss_improvement/loss_history[0]:.1f}%)")
+
+    print(f"\nPrecision Schedule:")
+    print(f"  Min Precision Used: {precision_scheduler.min_bits}-bit")
+    print(f"  Max Precision Used: {precision_scheduler.max_bits}-bit")
+    print(f"  Total Cycles: {cpt_config.total_cycles}")
+    print(f"  Cycle Length: {precision_scheduler.cycle_length_epochs} epochs")
+
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    frozen_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
+    print(f"\nModel Statistics:")
+    print(f"  Trainable Parameters: {trainable_params:,}")
+    print(f"  Frozen Parameters: {frozen_params:,}")
+    print(f"  Total Parameters: {trainable_params + frozen_params:,}")
+
+    print(f"\n{'='*70}")
+    print("Saving target model...")
     target_bits = training_config.target_bits
     print(f"Target precision: {target_bits}-bit")
 
@@ -355,16 +434,11 @@ def main(args):
         print(f"✅ Saved: {saved_path}")
     else:
         print("❌ Save failed")
-    print("="*60)
+    print("="*70)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Cyclic Precision Training')
-    parser.add_argument('--load_pretrained', action='store_true',
-                        help='Load pretrained GPT-2 weights')
-    parser.add_argument('--skip_prt', action='store_true',
-                        help='Skip Precision Range Test')
-    # No checkpoint functionality - CPT only saves final target model
     parser.add_argument('--eval_only', action='store_true',
                         help='Only evaluate the model without training')
 

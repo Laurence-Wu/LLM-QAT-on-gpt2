@@ -8,6 +8,7 @@ import torch.nn as nn
 import gc
 from typing import List, Set
 from tqdm import tqdm
+from cpt_model import LoRAAdapter
 
 
 class CalibrationManager:
@@ -22,17 +23,16 @@ class CalibrationManager:
 
     def calibrate_all_precisions(self, bit_widths: List[int], num_batches: int = 10):
         """Calibrate all precision levels."""
-        # Calibrate gradient quantizers once
-        if not self.gradient_calibrated:
-            self.calibrate_gradient_quantizers()
-            self.gradient_calibrated = True
-
         for bits in bit_widths:
             if bits < 32 and bits not in self.calibrated_bits:
                 print(f"\nCalibrating {bits}-bit precision...")
                 self.model.set_precision(bits)
                 self._calibrate_precision(bits, num_batches)
                 self.calibrated_bits.add(bits)
+
+        if not self.gradient_calibrated:
+            self.calibrate_gradient_quantizers()
+            self.gradient_calibrated = True
 
     def _calibrate_precision(self, bits: int, num_batches: int):
         """
@@ -50,10 +50,9 @@ class CalibrationManager:
         weight_errors = []
 
         for name, module in self.model.named_modules():
-            if hasattr(module, 'quantizers_weight') and bits_key in module.quantizers_weight:
-                weight_quantizer = module.quantizers_weight[bits_key]
+            if hasattr(module, 'quantizer_weight'):
+                weight_quantizer = module.quantizer_weight
 
-                # Get the weight tensor
                 if hasattr(module, 'linear') and hasattr(module.linear, 'weight'):
                     weight = module.linear.weight.data
                 elif hasattr(module, 'weight'):
@@ -63,7 +62,7 @@ class CalibrationManager:
                     continue
 
                 try:
-                    # Calibrate weight quantizer
+                    weight_quantizer.set_num_bits(bits)
                     weight_quantizer.start_calibration()
                     with torch.no_grad():
                         _ = weight_quantizer(weight)
@@ -79,12 +78,38 @@ class CalibrationManager:
             for err in weight_errors[:3]:
                 print(f"      - {err}")
 
+        if weight_calibrated > 0:
+            scales = []
+            zero_points = []
+            weight_mins = []
+            weight_maxs = []
+            for name, module in self.model.named_modules():
+                if hasattr(module, 'quantizer_weight'):
+                    q = module.quantizer_weight
+                    if q.calibrated and q.num_bits == bits:
+                        scale_val = q.scale.mean().item() if q.scale.numel() > 1 else q.scale.item()
+                        zp_val = q.zero_point.mean().item() if q.zero_point.numel() > 1 else q.zero_point.item()
+                        scales.append(scale_val)
+                        zero_points.append(zp_val)
+                        if hasattr(q, 'running_min'):
+                            weight_mins.append(q.running_min.min().item())
+                            weight_maxs.append(q.running_max.max().item())
+
+            if scales:
+                import numpy as np
+                print(f"    Weight Quantizer Statistics:")
+                print(f"      Scales: mean={np.mean(scales):.6f}, std={np.std(scales):.6f}, min={np.min(scales):.6f}, max={np.max(scales):.6f}")
+                print(f"      Zero Points: mean={np.mean(zero_points):.6f}, std={np.std(zero_points):.6f}")
+                if weight_mins:
+                    print(f"      Weight Range: [{np.min(weight_mins):.4f}, {np.max(weight_maxs):.4f}]")
+                print(f"      Quant Range: [{-(2**(bits-1))}, {2**(bits-1)-1}]")
+
         # Step 2: Start calibration for input quantizers
         input_started = 0
         for name, module in self.model.named_modules():
-            # Use consistent naming with part1
-            if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
-                module.quantizers_input[bits_key].start_calibration()
+            if hasattr(module, 'quantizer_input'):
+                module.quantizer_input.set_num_bits(bits)
+                module.quantizer_input.start_calibration()
                 input_started += 1
 
         print(f"    Started calibration for {input_started} input quantizers")
@@ -112,12 +137,10 @@ class CalibrationManager:
         input_calibrated = 0
         input_issues = []
         for name, module in self.model.named_modules():
-            # Use consistent naming with part1
-            if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
-                q = module.quantizers_input[bits_key]
+            if hasattr(module, 'quantizer_input'):
+                q = module.quantizer_input
                 q.finish_calibration(debug=False)
 
-                # Verify calibration succeeded
                 if not q.calibrated:
                     input_issues.append(f"{name}: not calibrated")
                 elif q.scale.abs().max().item() < 1e-9:
@@ -131,6 +154,31 @@ class CalibrationManager:
             for issue in input_issues[:3]:
                 print(f"      - {issue}")
 
+        if input_calibrated > 0:
+            inp_scales = []
+            inp_zero_points = []
+            inp_mins = []
+            inp_maxs = []
+            for name, module in self.model.named_modules():
+                if hasattr(module, 'quantizer_input'):
+                    q = module.quantizer_input
+                    if q.calibrated and q.num_bits == bits:
+                        scale_val = q.scale.mean().item() if q.scale.numel() > 1 else q.scale.item()
+                        zp_val = q.zero_point.mean().item() if q.zero_point.numel() > 1 else q.zero_point.item()
+                        inp_scales.append(scale_val)
+                        inp_zero_points.append(zp_val)
+                        if hasattr(q, 'running_min'):
+                            inp_mins.append(q.running_min.min().item())
+                            inp_maxs.append(q.running_max.max().item())
+
+            if inp_scales:
+                import numpy as np
+                print(f"    Input Quantizer Statistics:")
+                print(f"      Scales: mean={np.mean(inp_scales):.6f}, std={np.std(inp_scales):.6f}, min={np.min(inp_scales):.6f}, max={np.max(inp_scales):.6f}")
+                print(f"      Zero Points: mean={np.mean(inp_zero_points):.6f}, std={np.std(inp_zero_points):.6f}")
+                if inp_mins:
+                    print(f"      Activation Range: [{np.min(inp_mins):.4f}, {np.max(inp_maxs):.4f}]")
+
         # Clean up memory
         torch.cuda.empty_cache()
         gc.collect()
@@ -143,8 +191,6 @@ class CalibrationManager:
         if bits >= 32:
             return
 
-        bits_key = f'{bits}bit'
-        # Use same naming as part1 (without 'lora_' prefix)
         lora_key = f'{bits}bit'
 
         lora_calibrated = 0
@@ -156,9 +202,9 @@ class CalibrationManager:
 
             lora_layer = module.lora_adapters[lora_key]
 
-            # Calibrate LoRA A quantizer if it exists
             if hasattr(lora_layer, 'quantize_A') and hasattr(lora_layer, 'lora_A'):
                 try:
+                    lora_layer.quantize_A.set_num_bits(bits)
                     lora_layer.quantize_A.start_calibration()
                     with torch.no_grad():
                         _ = lora_layer.quantize_A(lora_layer.lora_A)
@@ -167,9 +213,9 @@ class CalibrationManager:
                 except Exception as e:
                     print(f"    Warning calibrating {name} quantize_A: {e}")
 
-            # Calibrate LoRA B quantizer if it exists
             if hasattr(lora_layer, 'quantize_B') and hasattr(lora_layer, 'lora_B'):
                 try:
+                    lora_layer.quantize_B.set_num_bits(bits)
                     lora_layer.quantize_B.start_calibration()
                     with torch.no_grad():
                         _ = lora_layer.quantize_B(lora_layer.lora_B)
@@ -199,12 +245,12 @@ class CalibrationManager:
         self._print_calibration_stats(bits)
 
     def calibrate_gradient_quantizers(self):
-        """Calibrate 8-bit gradient quantizers once (BW8)."""
-        print("\nCalibrating 8-bit gradient quantizers...")
+        """Calibrate 8-bit gradient quantizers on LoRA adapters (BW8)."""
+        print("\nCalibrating gradient quantizers...")
 
         grad_quantizers = []
         for name, module in self.model.named_modules():
-            if hasattr(module, 'grad_quantizer_8bit'):
+            if isinstance(module, LoRAAdapter) and hasattr(module, 'grad_quantizer_8bit') and module.grad_quantizer_8bit is not None:
                 module.grad_quantizer_8bit.start_calibration()
                 grad_quantizers.append((name, module.grad_quantizer_8bit))
 
@@ -212,8 +258,13 @@ class CalibrationManager:
             print("  No gradient quantizers found")
             return
 
+        original_requires_grad = {}
+        for name, param in self.model.named_parameters():
+            original_requires_grad[name] = param.requires_grad
+            param.requires_grad = False
+
+        original_mode = self.model.training
         self.model.train()
-        self.model.disable_lora_for_calibration()
 
         train_iter = iter(self.train_loader)
         try:
@@ -221,36 +272,46 @@ class CalibrationManager:
             input_ids = batch['input_ids'].to(self.device)
             labels = batch['labels'].to(self.device)
 
-            # Forward and backward to collect gradient stats
             outputs = self.model(input_ids, labels=labels)
             loss = outputs.loss
             loss.backward()
 
-            # Clear gradients after calibration
             self.model.zero_grad()
 
         except StopIteration:
             print("  Warning: No batches available for gradient calibration")
 
-        # Finish calibration
+        for name, param in self.model.named_parameters():
+            if name in original_requires_grad:
+                param.requires_grad = original_requires_grad[name]
+
+        if not original_mode:
+            self.model.eval()
+
         for name, quantizer in grad_quantizers:
             quantizer.finish_calibration(debug=False)
 
-        self.model.enable_lora_after_calibration()
         print(f"  ✓ Calibrated {len(grad_quantizers)} gradient quantizers")
 
         torch.cuda.empty_cache()
         gc.collect()
 
+    def calibrate_current_precision(self, bits: int, num_batches: int = 10):
+        """Calibrate quantizers for current precision only (per-epoch calibration)."""
+        if bits >= 32:
+            return
+
+        print(f"  Calibrating {bits}-bit precision...")
+        self._calibrate_precision(bits, num_batches)
+        self.calibrated_bits.add(bits)
+
     def _print_calibration_stats(self, bits: int):
         """Print calibration statistics for debugging."""
-        bits_key = f'{bits}bit'
-
         weight_stats = []
         for name, module in self.model.named_modules():
-            if hasattr(module, 'quantizers_weight') and bits_key in module.quantizers_weight:
-                q = module.quantizers_weight[bits_key]
-                if q.calibrated:
+            if hasattr(module, 'quantizer_weight'):
+                q = module.quantizer_weight
+                if q.calibrated and q.num_bits == bits:
                     weight_stats.append({
                         'name': f"{name}.weight",
                         'scale': q.scale.mean().item() if q.scale.numel() > 1 else q.scale.item(),

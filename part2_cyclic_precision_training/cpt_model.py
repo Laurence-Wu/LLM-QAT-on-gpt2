@@ -12,14 +12,13 @@ from typing import Optional, Dict, Tuple
 import math
 
 from quantization import LearnableFakeQuantize, GradientQuantizer
-from switchable_batchnorm import SwitchableLayerNorm
 
 
 class LoRAAdapter(nn.Module):
     """Low-Rank Adaptation for parameter-efficient fine-tuning with quantization support."""
 
     def __init__(self, in_features: int, out_features: int, rank: int = 16, alpha: float = 32,
-                 num_bits: int = 8, quantizer_type: str = 'log'):
+                 num_bits: int = 8, quantizer_type: str = 'log', gradient_bits: int = 8):
         super().__init__()
         self.rank = rank
         self.alpha = alpha
@@ -29,7 +28,6 @@ class LoRAAdapter(nn.Module):
             self.lora_A = nn.Parameter(torch.randn(in_features, rank) * 0.01)
             self.lora_B = nn.Parameter(torch.zeros(rank, out_features))
 
-            # Quantizers for LoRA matrices
             self.quantize_A = LearnableFakeQuantize(
                 num_bits=num_bits,
                 quantizer_type=quantizer_type,
@@ -42,24 +40,36 @@ class LoRAAdapter(nn.Module):
                 channel_dim=0,
                 per_channel=True
             )
+
+            self.grad_quantizer_8bit = LearnableFakeQuantize(
+                num_bits=gradient_bits,
+                quantizer_type='minmax',
+                channel_dim=0,
+                per_channel=True
+            )
         else:
             self.lora_A = None
             self.lora_B = None
             self.quantize_A = None
             self.quantize_B = None
+            self.grad_quantizer_8bit = None
 
         self.calibration_mode = False
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply LoRA adaptation with quantization."""
         if self.lora_A is not None and self.lora_B is not None:
-            # Skip quantization in calibration mode or if quantizers not available
             if self.calibration_mode or self.quantize_A is None:
                 lora_output = x @ self.lora_A @ self.lora_B
             else:
-                # Quantize LoRA parameters
+                # Quantize LoRA parameters (forward pass - cyclic precision)
                 lora_A_quant = self.quantize_A(self.lora_A)
                 lora_B_quant = self.quantize_B(self.lora_B)
+
+                # Apply 8-bit gradient quantization (backward pass - static BW8)
+                lora_A_quant = GradientQuantizer.apply(lora_A_quant, self.grad_quantizer_8bit)
+                lora_B_quant = GradientQuantizer.apply(lora_B_quant, self.grad_quantizer_8bit)
+
                 lora_output = x @ lora_A_quant @ lora_B_quant
             return lora_output * self.scaling
         return torch.zeros_like(x[..., :self.lora_B.size(1)] if self.lora_B is not None else x)
@@ -78,6 +88,7 @@ class CPTLinear(nn.Module):
         lora_rank_per_bit: dict = None,
         lora_alpha_per_bit: dict = None,
         quantizer_per_bit: dict = None,
+        gradient_bits: int = 8,
         bias: bool = True
     ):
         super().__init__()
@@ -85,10 +96,8 @@ class CPTLinear(nn.Module):
         self.out_features = out_features
         self.bit_widths = bit_widths
 
-        # Base linear layer
         self.linear = nn.Linear(in_features, out_features, bias=bias)
 
-        # LoRA adapters for each precision
         self.lora_adapters = nn.ModuleDict()
         if lora_rank_per_bit is None:
             lora_rank_per_bit = {4: 32, 6: 24, 8: 16}
@@ -99,45 +108,27 @@ class CPTLinear(nn.Module):
             rank = lora_rank_per_bit.get(bits, 16)
             alpha = lora_alpha_per_bit.get(bits, 32)
             quant_type = quantizer_per_bit.get(bits, 'log')
-            # Use same naming as part1 (without 'lora_' prefix)
             self.lora_adapters[f'{bits}bit'] = LoRAAdapter(
                 in_features, out_features, rank, alpha,
-                num_bits=bits, quantizer_type=quant_type
+                num_bits=bits, quantizer_type=quant_type, gradient_bits=gradient_bits
             )
 
-        # Default quantizer types if not provided
         if quantizer_per_bit is None:
             quantizer_per_bit = {bits: 'log' for bits in bit_widths}
 
-        student_bits = [b for b in bit_widths if b < 32]
+        max_bits = max([b for b in bit_widths if b < 32]) if any(b < 32 for b in bit_widths) else 8
+        max_quant_type = quantizer_per_bit.get(max_bits, 'log')
 
-        # Quantizers for weights
-        self.quantizers_weight = nn.ModuleDict({
-            f'{bits}bit': LearnableFakeQuantize(
-                num_bits=bits,
-                quantizer_type=quantizer_per_bit.get(bits, 'log'),
-                channel_dim=0,
-                per_channel=True
-            )
-            for bits in student_bits
-        })
+        self.quantizer_weight = LearnableFakeQuantize(
+            num_bits=max_bits,
+            quantizer_type=max_quant_type,
+            channel_dim=0,
+            per_channel=True
+        )
 
-        # Quantizers for inputs
-        self.quantizers_input = nn.ModuleDict({
-            f'{bits}bit': LearnableFakeQuantize(
-                num_bits=bits,
-                quantizer_type=quantizer_per_bit.get(bits, 'log'),
-                channel_dim=-1,
-                per_channel=True,
-                is_input=True
-            )
-            for bits in student_bits
-        })
-
-        # Static 8-bit gradient quantizer (BW8)
-        self.grad_quantizer_8bit = LearnableFakeQuantize(
-            num_bits=8,
-            quantizer_type='minmax',
+        self.quantizer_input = LearnableFakeQuantize(
+            num_bits=max_bits,
+            quantizer_type=max_quant_type,
             channel_dim=-1,
             per_channel=True,
             is_input=True
@@ -151,22 +142,18 @@ class CPTLinear(nn.Module):
         if num_bits not in self.bit_widths:
             raise ValueError(f"Precision {num_bits} not in configured widths {self.bit_widths}")
         self.current_bits = num_bits
+        if num_bits < 32:
+            self.quantizer_weight.set_num_bits(num_bits)
+            self.quantizer_input.set_num_bits(num_bits)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass with current precision and gradient quantization."""
+        """Forward pass with current precision."""
         if self.current_bits >= 32:
             out = F.linear(x, self.linear.weight, self.linear.bias)
             return out
 
-        bits_key = f'{self.current_bits}bit'
-
-        # Quantize inputs and weights with gradient quantization wrapper
-        x_quant = self.quantizers_input[bits_key](x)
-        weight_quant = self.quantizers_weight[bits_key](self.linear.weight)
-
-        # Apply gradient quantization (BW8) during backward pass
-        x_quant = GradientQuantizer.apply(x_quant, self.grad_quantizer_8bit)
-        weight_quant = GradientQuantizer.apply(weight_quant, self.grad_quantizer_8bit)
+        x_quant = self.quantizer_input(x)
+        weight_quant = self.quantizer_weight(self.linear.weight)
 
         out = F.linear(x_quant, weight_quant, self.linear.bias)
 
@@ -186,7 +173,7 @@ class CPTSelfAttention(nn.Module):
     Self-attention module with cyclic precision support.
     """
 
-    def __init__(self, config, bit_widths: list, lora_rank_per_bit: dict, lora_alpha_per_bit: dict, quantizer_per_bit: dict = None):
+    def __init__(self, config, bit_widths: list, lora_rank_per_bit: dict, lora_alpha_per_bit: dict, quantizer_per_bit: dict = None, gradient_bits: int = 8):
         super().__init__()
         self.n_head = config.n_head
         self.n_embd = config.n_embd
@@ -195,12 +182,12 @@ class CPTSelfAttention(nn.Module):
         # Combined QKV projection (like GPT-2 and part1)
         self.c_attn = CPTLinear(
             self.n_embd, 3 * self.n_embd,
-            bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit
+            bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit, gradient_bits
         )
         # Output projection
         self.c_proj = CPTLinear(
             self.n_embd, self.n_embd,
-            bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit
+            bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit, gradient_bits
         )
 
         # Attention dropout
@@ -268,34 +255,29 @@ class CPTBlock(nn.Module):
     Transformer block with CPT support and Range LayerNorm.
     """
 
-    def __init__(self, config, bit_widths: list, lora_rank_per_bit: dict, lora_alpha_per_bit: dict, quantizer_per_bit: dict = None):
+    def __init__(self, config, bit_widths: list, lora_rank_per_bit: dict, lora_alpha_per_bit: dict, quantizer_per_bit: dict = None, gradient_bits: int = 8):
         super().__init__()
 
-        # Switchable LayerNorm with bit widths
-        self.ln_1 = SwitchableLayerNorm(config.n_embd, precision_levels=bit_widths, eps=config.layer_norm_epsilon)
-        self.ln_2 = SwitchableLayerNorm(config.n_embd, precision_levels=bit_widths, eps=config.layer_norm_epsilon)
+        self.ln_1 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
+        self.ln_2 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
         self.bit_widths = bit_widths
 
-        # Self-attention with CPT
-        self.attn = CPTSelfAttention(config, bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit)
+        self.attn = CPTSelfAttention(config, bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit, gradient_bits)
 
-        # Feed-forward with CPT
         self.mlp = nn.ModuleDict({
             'fc_in': CPTLinear(
                 config.n_embd, 4 * config.n_embd,
-                bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit
+                bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit, gradient_bits
             ),
             'fc_out': CPTLinear(
                 4 * config.n_embd, config.n_embd,
-                bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit
+                bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit, gradient_bits
             )
         })
         self.mlp_dropout = nn.Dropout(config.embd_pdrop)
 
     def set_precision(self, num_bits: int):
         """Set precision for all layers."""
-        self.ln_1.set_precision(num_bits)
-        self.ln_2.set_precision(num_bits)
         self.attn.set_precision(num_bits)
         self.mlp['fc_in'].set_precision(num_bits)
         self.mlp['fc_out'].set_precision(num_bits)
@@ -335,7 +317,6 @@ class CPTModel(nn.Module):
         super().__init__()
         self.config = config
         model_config = config['model']
-        cpt_config = config['cpt']
 
         # Token and position embeddings
         self.wte = nn.Embedding(model_config.vocab_size, model_config.n_embd)
@@ -349,13 +330,13 @@ class CPTModel(nn.Module):
                 model_config.bit_widths,
                 model_config.lora_rank_per_bit,
                 model_config.lora_alpha_per_bit,
-                model_config.quantizer_per_bit
+                model_config.quantizer_per_bit,
+                model_config.gradient_bits
             )
             for _ in range(model_config.n_layer)
         ])
 
-        # Final layer norm
-        self.ln_f = SwitchableLayerNorm(model_config.n_embd, precision_levels=model_config.bit_widths, eps=model_config.layer_norm_epsilon)
+        self.ln_f = nn.LayerNorm(model_config.n_embd, eps=model_config.layer_norm_epsilon)
 
         # Language modeling head
         self.lm_head = CPTLinear(
@@ -364,6 +345,7 @@ class CPTModel(nn.Module):
             model_config.lora_rank_per_bit,
             model_config.lora_alpha_per_bit,
             model_config.quantizer_per_bit,
+            model_config.gradient_bits,
             bias=False
         )
 
@@ -387,7 +369,6 @@ class CPTModel(nn.Module):
         self.current_precision = num_bits
         for block in self.h:
             block.set_precision(num_bits)
-        self.ln_f.set_precision(num_bits)
         self.lm_head.set_precision(num_bits)
 
     def forward(
