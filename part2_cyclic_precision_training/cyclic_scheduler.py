@@ -70,8 +70,9 @@ class CyclicPrecisionScheduler:
             t = position % self.cycle_length
             T = self.cycle_length
             # Cosine schedule: starts at min, peaks at max, returns to min
-            precision = self.min_bits + 0.5 * (self.max_bits - self.min_bits) * \
-                       (1 - math.cos(t * math.pi / T))
+            print(f"Cosine schedule: t={t}, T={T}")
+            print(f"min_bits={self.min_bits}, max_bits={self.max_bits}")
+            precision = self.min_bits + 0.5 * (self.max_bits - self.min_bits) * (1 - math.cos(t * math.pi / T))
 
         elif self.schedule_type == 'triangular':
             # Triangular wave between min and max
@@ -102,23 +103,7 @@ class CyclicPrecisionScheduler:
         return self.bit_widths[min_idx]
 
     def get_precision_for_epoch(self, epoch: int) -> int:
-        """
-        Get precision for specific epoch using CPT Equation 1.
-
-        Args:
-            epoch: Current epoch number (0-indexed)
-
-        Returns:
-            Precision (bit-width) for this epoch
-        """
-        # Calculate which cycle we're in and position within that cycle
-        # Use floating point to handle fractional cycles per epoch
-        cycle_position = (epoch / self.epochs_per_cycle) % 1.0
-
-        # Convert to position in cycle (0 to cycle_length)
-        position_in_cycle = int(cycle_position * self.total_cycles) % self.total_cycles
-
-        return self.get_precision_at_position(position_in_cycle)
+        return self.get_precision_at_position(epoch)
 
     def cycle(self) -> int:
         """
