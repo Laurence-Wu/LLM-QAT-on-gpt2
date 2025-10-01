@@ -267,7 +267,7 @@ def main(args):
         total_cycles=cpt_config.total_cycles
     )
     print(f"CPT: {cpt_config.total_cycles} cycles over {training_config.num_epochs} epochs")
-    print(f"Cycle length: {precision_scheduler.cycle_length_epochs} epochs")
+    print(f"Cycle length: {precision_scheduler.epochs_per_cycle} epochs")
 
     # Run Precision Range Test (only during training, not evaluation)
     print("Running Precision Range Test...")
@@ -415,7 +415,7 @@ def main(args):
     print(f"  Min Precision Used: {precision_scheduler.min_bits}-bit")
     print(f"  Max Precision Used: {precision_scheduler.max_bits}-bit")
     print(f"  Total Cycles: {cpt_config.total_cycles}")
-    print(f"  Cycle Length: {precision_scheduler.cycle_length_epochs} epochs")
+    print(f"  Cycle Length: {precision_scheduler.epochs_per_cycle} epochs")
 
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     frozen_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
