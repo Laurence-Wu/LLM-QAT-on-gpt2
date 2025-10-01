@@ -49,7 +49,7 @@ class CyclicPrecisionScheduler:
         if self.schedule_type == 'cosine':
 
             # Cosine interpolation between min and max
-            t = int(position / self.epochs_per_cycle)
+            t = float(position / self.epochs_per_cycle)
             T = self.epochs_per_cycle
             # Cosine schedule: starts at min, peaks at max, returns to min
             print(f"Cosine schedule: t={t}, T={T}")
@@ -58,7 +58,7 @@ class CyclicPrecisionScheduler:
 
         elif self.schedule_type == 'triangular':
             # Triangular wave between min and max
-            t = position % self.epochs_per_cycle
+            t = float(position / self.epochs_per_cycle)
             T = self.epochs_per_cycle
             if t < T / 2:
                 # Rising edge
