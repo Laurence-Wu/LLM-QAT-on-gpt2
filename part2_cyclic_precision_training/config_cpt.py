@@ -27,7 +27,7 @@ class ModelConfig:
         self.quantizer_type = 'log'
         self.quantizer_per_bit = {
             2: 'minmax', 3: 'minmax',
-            4: 'log', 5: 'log', 6: 'log', 7: 'log', 8: 'log', 9: 'log',
+            4: 'minmax', 5: 'log', 6: 'log', 7: 'log', 8: 'log', 9: 'log',
             10: 'log', 11: 'log', 12: 'log', 13: 'log', 14: 'log', 15: 'log',
             16: 'log', 17: 'log', 18: 'log', 32: None
         }
@@ -46,7 +46,7 @@ class ModelConfig:
 
 class CPTConfig:
     def __init__(self):
-        self.total_cycles = 32
+        self.total_cycles = 5
         self.schedule_type = 'cosine'
 
         self.prt_start_bits = 2
@@ -69,7 +69,7 @@ class TrainingConfig:
         self.max_grad_norm = 1.0
 
         self.num_epochs = 10
-        self.gradient_accumulation_steps = 1
+        self.gradient_accumulation_steps = 3
 
         self.target_bits = 6
 
