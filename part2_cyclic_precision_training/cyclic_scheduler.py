@@ -37,8 +37,17 @@ class CyclicPrecisionScheduler:
         self.total_epochs = total_epochs
         self.total_cycles = total_cycles
 
-        # Calculate cycle lengths
-        self.cycle_length_epochs = max(1, total_epochs // total_cycles)
+        # Calculate cycle lengths based on the relationship between cycles and epochs
+        if total_cycles >= total_epochs:
+            # More cycles than epochs: cycle within each epoch or across epochs
+            # Each cycle spans fewer epochs (possibly fractional)
+            self.cycle_length_epochs = total_epochs / total_cycles  # Keep as float for precision
+            self.epochs_per_cycle = total_epochs / total_cycles
+        else:
+            # Fewer cycles than epochs: multiple epochs per cycle
+            self.cycle_length_epochs = max(1, total_epochs // total_cycles)
+            self.epochs_per_cycle = total_epochs / total_cycles
+
         self.cycle_length = self.cycle_length_epochs
 
         # Initialize cycle tracking
@@ -102,7 +111,13 @@ class CyclicPrecisionScheduler:
         Returns:
             Precision (bit-width) for this epoch
         """
-        position_in_cycle = epoch % self.cycle_length_epochs
+        # Calculate which cycle we're in and position within that cycle
+        # Use floating point to handle fractional cycles per epoch
+        cycle_position = (epoch / self.epochs_per_cycle) % 1.0
+
+        # Convert to position in cycle (0 to cycle_length)
+        position_in_cycle = int(cycle_position * self.total_cycles) % self.total_cycles
+
         return self.get_precision_at_position(position_in_cycle)
 
     def cycle(self) -> int:
@@ -124,14 +139,17 @@ class CyclicPrecisionScheduler:
 
     def get_current_cycle_info(self) -> dict:
         """Get information about current cycle status."""
-        position = self.current_epoch % self.cycle_length_epochs
-        cycle_num = self.current_epoch // self.cycle_length_epochs
+        # Calculate current cycle number based on epochs
+        cycle_num = int(self.current_epoch / self.epochs_per_cycle)
+        # Position within the current cycle (0.0 to 1.0)
+        cycle_progress = (self.current_epoch / self.epochs_per_cycle) % 1.0
+
         return {
             'epoch': self.current_epoch,
             'cycle_num': cycle_num,
-            'position_in_cycle': position,
+            'total_cycles': self.total_cycles,
             'current_precision': self.get_precision_for_epoch(self.current_epoch),
-            'cycle_progress': position / self.cycle_length_epochs
+            'cycle_progress': cycle_progress
         }
 
     def reset(self):

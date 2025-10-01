@@ -316,9 +316,9 @@ def main(args):
 
         # Calculate precision for THIS epoch using CPT
         current_precision = precision_scheduler.get_precision_for_epoch(epoch)
-        cycle_position = epoch % precision_scheduler.cycle_length_epochs
+        cycle_num = int(epoch / precision_scheduler.epochs_per_cycle)
         print(f"\n{'='*70}")
-        print(f"Epoch {epoch+1}/{training_config.num_epochs} - Precision: {current_precision}-bit (Cycle {cycle_position}/{precision_scheduler.cycle_length_epochs})")
+        print(f"Epoch {epoch+1}/{training_config.num_epochs} - Precision: {current_precision}-bit (Cycle {cycle_num+1}/{cpt_config.total_cycles})")
         print(f"{'='*70}")
 
         # Calibrate quantizers for current precision
