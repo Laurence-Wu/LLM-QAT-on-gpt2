@@ -19,7 +19,6 @@ class CyclicPrecisionScheduler:
         bit_widths: List[int] = [4, 6, 8],
         schedule_type: str = 'cosine',
         total_epochs: int = 160,
-        total_cycles: int = 32
     ):
         """
         Initialize cyclic precision scheduler per CPT paper.
@@ -35,9 +34,7 @@ class CyclicPrecisionScheduler:
         self.max_bits = max(bit_widths)
         self.schedule_type = schedule_type
         self.total_epochs = total_epochs
-        self.total_cycles = total_cycles
-        self.cycle_length_epochs = max(1, total_epochs // total_cycles)
-
+        self.cycle_per_epochs = max(1, total_epochs // len(self.bit_widths))
         self.current_epoch = 0
 
     def get_precision_at_position(self, position: int) -> int:
