@@ -37,18 +37,8 @@ class CyclicPrecisionScheduler:
         self.total_epochs = total_epochs
         self.total_cycles = total_cycles
 
-        # Calculate cycle lengths based on the relationship between cycles and epochs
-        if total_cycles >= total_epochs:
-            # More cycles than epochs: cycle within each epoch or across epochs
-            # Each cycle spans fewer epochs (possibly fractional)
-            self.cycle_length_epochs = total_epochs / total_cycles  # Keep as float for precision
-            self.epochs_per_cycle = total_epochs / total_cycles
-        else:
-            # Fewer cycles than epochs: multiple epochs per cycle
-            self.cycle_length_epochs = max(1, total_epochs // total_cycles)
-            self.epochs_per_cycle = total_epochs / total_cycles
-
-        self.cycle_length = self.cycle_length_epochs
+  # Keep as float for precision
+        self.epochs_per_cycle = total_epochs / total_cycles
 
         # Initialize cycle tracking
         self.global_cycle = 0
@@ -56,19 +46,11 @@ class CyclicPrecisionScheduler:
         self.current_epoch = 0
 
     def get_precision_at_position(self, position: int) -> int:
-        """
-        Get precision for a specific position within a cycle.
-
-        Args:
-            position: Position within the cycle (0 to cycle_length-1)
-
-        Returns:
-            Bit-width for this position
-        """
         if self.schedule_type == 'cosine':
+
             # Cosine interpolation between min and max
-            t = position % self.cycle_length
-            T = self.cycle_length
+            t = int(position / self.epochs_per_cycle)
+            T = self.epochs_per_cycle
             # Cosine schedule: starts at min, peaks at max, returns to min
             print(f"Cosine schedule: t={t}, T={T}")
             print(f"min_bits={self.min_bits}, max_bits={self.max_bits}")
@@ -76,19 +58,14 @@ class CyclicPrecisionScheduler:
 
         elif self.schedule_type == 'triangular':
             # Triangular wave between min and max
-            t = position % self.cycle_length
-            T = self.cycle_length
+            t = position % self.epochs_per_cycle
+            T = self.epochs_per_cycle
             if t < T / 2:
                 # Rising edge
                 precision = self.min_bits + (self.max_bits - self.min_bits) * (2 * t / T)
             else:
                 # Falling edge
                 precision = self.max_bits - (self.max_bits - self.min_bits) * (2 * (t - T/2) / T)
-
-        elif self.schedule_type == 'linear':
-            # Simple linear cycling through bit_widths
-            idx = position % len(self.bit_widths)
-            return self.bit_widths[idx]
 
         else:
             raise ValueError(f"Unknown schedule type: {self.schedule_type}")
@@ -112,12 +89,12 @@ class CyclicPrecisionScheduler:
         Returns:
             Current bit-width
         """
-        position = self.global_cycle % self.cycle_length
+        position = self.global_cycle % self.epochs_per_cycle
         precision = self.get_precision_at_position(position)
         self.global_cycle += 1
 
         # Track cycle completions
-        if position == self.cycle_length - 1:
+        if position == self.epochs_per_cycle - 1:
             self.cycle_count += 1
 
         return precision
