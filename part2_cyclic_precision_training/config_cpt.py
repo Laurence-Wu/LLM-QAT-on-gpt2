@@ -71,7 +71,7 @@ class TrainingConfig:
         self.num_epochs = 100
         self.gradient_accumulation_steps = 3
 
-        self.target_bits = 6
+        self.target_bits = 8
 
         self.eval_interval = 50
 
