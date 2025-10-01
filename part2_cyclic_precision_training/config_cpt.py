@@ -68,7 +68,7 @@ class TrainingConfig:
         self.adam_betas = (0.9, 0.999)
         self.max_grad_norm = 1.0
 
-        self.num_epochs = 100
+        self.num_epochs = 10
         self.gradient_accumulation_steps = 3
 
         self.target_bits = 8
