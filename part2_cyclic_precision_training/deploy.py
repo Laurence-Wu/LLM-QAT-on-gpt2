@@ -82,18 +82,19 @@ def save_target_model(model: CPTModel, config: dict, target_bits: int, output_di
     target_key = f'{target_bits}bit'
 
     for key, value in state_dict.items():
-        # Keep base weights/biases
-        if 'linear.weight' in key or 'linear.bias' in key:
-            filtered_state_dict[key] = value
-        # Keep embeddings, layer norms
-        elif any(x in key for x in ['wte', 'wpe', 'ln_', 'lm_head']):
-            filtered_state_dict[key] = value
-        # Keep ONLY target precision quantizers and LoRA
-        elif target_key in key:
-            filtered_state_dict[key] = value
-        # Keep gradient quantizers (8-bit BW)
-        elif 'grad_quantizer_8bit' in key:
-            filtered_state_dict[key] = value
+        filtered_state_dict[key] = value
+        # # Keep base weights/biases
+        # if 'linear.weight' in key or 'linear.bias' in key:
+        #     filtered_state_dict[key] = value
+        # # Keep embeddings, layer norms
+        # elif any(x in key for x in ['wte', 'wpe', 'ln_', 'lm_head']):
+        #     filtered_state_dict[key] = value
+        # # Keep ONLY target precision quantizers and LoRA
+        # elif target_key in key:
+        #     filtered_state_dict[key] = value
+        # # Keep gradient quantizers (8-bit BW)
+        # elif 'grad_quantizer_8bit' in key:
+        #     filtered_state_dict[key] = value
 
     print(f"Original: {len(state_dict)} tensors")
     print(f"Filtered: {len(filtered_state_dict)} tensors ({100*len(filtered_state_dict)/len(state_dict):.1f}%)")
