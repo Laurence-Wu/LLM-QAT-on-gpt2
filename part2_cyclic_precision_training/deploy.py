@@ -192,7 +192,7 @@ def save_target_model(model: CPTModel, config: dict, target_bits: int, output_di
             f.write(f"  - Batch Size: {config['training'].batch_size}\n")
             f.write(f"  - Num Epochs: {config['training'].num_epochs}\n")
             f.write(f"CPT Config:\n")
-            f.write(f"  - Cycle Length: {config['cpt'].cycle_length}\n")
+            f.write(f"  - Cycle Length: {config['cpt'].total_cycles}\n")
             f.write(f"  - Schedule Type: {config['cpt'].schedule_type}\n")
             f.write("=" * 50 + "\n")
         print(f"Summary saved to: {summary_file}")
