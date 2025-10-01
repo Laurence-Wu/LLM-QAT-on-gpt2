@@ -60,7 +60,8 @@ class DistillationManager:
 
         return cache_entry
 
-    def compute_distillation_loss(self, student_outputs, input_ids):
+    def compute_distillation_loss(self, student_outputs, input_ids, accumulative = True):
+        
         teacher = self._get_from_cache(input_ids)
 
         T = self.config.distill_temperature
@@ -85,24 +86,34 @@ class DistillationManager:
             layers_to_match = [l for l in layers_to_match if l < num_layers]
 
             if layers_to_match:
-                for layer_idx in layers_to_match:
+                if accumulative:
+                    for layer_idx in layers_to_match:
+                        teacher_features = teacher['hidden_states'][layer_idx]
+                        student_features = student_outputs['hidden_states'][layer_idx]
+
+                        feature_loss = feature_loss + F.mse_loss(
+                            student_features,
+                            teacher_features,
+                            reduction='mean'
+                        )
+                    feature_loss = feature_loss / len(layers_to_match)
+                else:
+                    layer_idx = layers_to_match[0]
                     teacher_features = teacher['hidden_states'][layer_idx]
                     student_features = student_outputs['hidden_states'][layer_idx]
 
-                    feature_loss = feature_loss + F.mse_loss(
+                    feature_loss = F.mse_loss(
                         student_features,
                         teacher_features,
                         reduction='mean'
                     )
-
-                feature_loss = feature_loss / len(layers_to_match)
-
         total_loss = (
             self.config.distill_alpha_kl * kl_loss +
             self.config.distill_alpha_feature * feature_loss
         )
-
         return total_loss
+
+
 
     def _get_batch_key(self, input_ids):
         shape_key = tuple(input_ids.shape)
