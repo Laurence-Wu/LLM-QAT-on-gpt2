@@ -39,8 +39,8 @@ def test_gradient_quantizer_calibration():
         gradient_bits=8
     )
 
-    # Get the gradient quantizer
-    grad_quantizer = lora.grad_quantizer_8bit
+    # Get the gradient quantizer for lora_A
+    grad_quantizer = lora.grad_quantizer_A
 
     print(f"\n1. Initial state:")
     print(f"   collecting_stats: {grad_quantizer.collecting_stats}")
@@ -262,22 +262,26 @@ def test_input_quantizer_forward_calibration():
 
 
 def test_cptlinear_integrated_calibration():
-    """Test complete CPTLinear calibration workflow."""
+    """Test complete CPTLinear calibration workflow with shared LoRA."""
     print("\n" + "="*70)
-    print("Testing CPTLinear Integrated Calibration")
+    print("Testing CPTLinear Integrated Calibration (Shared LoRA)")
     print("="*70)
 
-    # Create CPTLinear module
+    # Create CPTLinear module with shared LoRA
     cpt_linear = CPTLinear(
         in_features=128,
         out_features=256,
         bit_widths=[4, 6, 8],
-        gradient_bits=8
+        gradient_bits=8,
+        shared_lora_rank=16,
+        shared_lora_alpha=32
     )
 
     print(f"\n1. Initial state:")
     print(f"   Weight quantizer calibrated: {cpt_linear.quantizer_weight.calibrated}")
     print(f"   Input quantizer calibrated: {cpt_linear.quantizer_input.calibrated}")
+    print(f"   Has shared_lora: {hasattr(cpt_linear, 'shared_lora')}")
+    print(f"   Has lora_weight_quantizers: {hasattr(cpt_linear, 'lora_weight_quantizers')}")
 
     # Set precision to 8-bit
     cpt_linear.set_precision(8)
@@ -308,16 +312,32 @@ def test_cptlinear_integrated_calibration():
     print(f"\n5. After input calibration:")
     print(f"   Input quantizer calibrated: {cpt_linear.quantizer_input.calibrated}")
 
-    # Verify both calibrated
-    if cpt_linear.quantizer_weight.calibrated and cpt_linear.quantizer_input.calibrated:
-        print(f"\n6. Verification:")
-        print(f"   ✓ SUCCESS: Both weight and input quantizers calibrated")
+    # Calibrate LoRA weight quantizers
+    print(f"\n6. Calibrating LoRA weight quantizers:")
+    lora_calibrated = 0
+    for bits in [4, 6, 8]:
+        lora_quantizer = cpt_linear.lora_weight_quantizers[f'{bits}bit']
+        lora_quantizer.set_num_bits(bits)
+        lora_quantizer.start_calibration()
+        with torch.no_grad():
+            _ = lora_quantizer(cpt_linear.shared_lora.lora_A)
+            _ = lora_quantizer(cpt_linear.shared_lora.lora_B)
+        lora_quantizer.finish_calibration(debug=False)
+        if lora_quantizer.calibrated:
+            lora_calibrated += 1
+        print(f"   {bits}-bit LoRA quantizer calibrated: {lora_quantizer.calibrated}")
+
+    # Verify all calibrated
+    if cpt_linear.quantizer_weight.calibrated and cpt_linear.quantizer_input.calibrated and lora_calibrated == 3:
+        print(f"\n7. Verification:")
+        print(f"   ✓ SUCCESS: Weight, input, and LoRA weight quantizers all calibrated")
         return True
     else:
-        print(f"\n6. Verification:")
+        print(f"\n7. Verification:")
         print(f"   ✗ FAILURE: Not all quantizers calibrated")
         print(f"   Weight calibrated: {cpt_linear.quantizer_weight.calibrated}")
         print(f"   Input calibrated: {cpt_linear.quantizer_input.calibrated}")
+        print(f"   LoRA quantizers calibrated: {lora_calibrated}/3")
         return False
 
 
@@ -341,12 +361,15 @@ def test_gradient_forward_calibration_separation():
     print(f"\n1. Initial state:")
     print(f"   Weight quantizer A calibrated: {lora.quantize_A.calibrated}")
     print(f"   Weight quantizer B calibrated: {lora.quantize_B.calibrated}")
-    print(f"   Gradient quantizer calibrated: {lora.grad_quantizer_8bit.calibrated}")
+    print(f"   Gradient quantizer A calibrated: {lora.grad_quantizer_A.calibrated}")
+    print(f"   Gradient quantizer B calibrated: {lora.grad_quantizer_B.calibrated}")
 
-    # Calibrate gradient quantizer only
-    print(f"\n2. Calibrating gradient quantizer (backward):")
-    lora.grad_quantizer_8bit.eval()
-    lora.grad_quantizer_8bit.start_calibration()
+    # Calibrate gradient quantizers only
+    print(f"\n2. Calibrating gradient quantizers (backward):")
+    lora.grad_quantizer_A.eval()
+    lora.grad_quantizer_B.eval()
+    lora.grad_quantizer_A.start_calibration()
+    lora.grad_quantizer_B.start_calibration()
 
     x = torch.randn(4, 64, requires_grad=True)
     target = torch.randn(4, 64)
@@ -354,14 +377,18 @@ def test_gradient_forward_calibration_separation():
     loss = nn.MSELoss()(output, target)
     loss.backward()
 
-    lora.grad_quantizer_8bit.finish_calibration(debug=False)
+    lora.grad_quantizer_A.finish_calibration(debug=False)
+    lora.grad_quantizer_B.finish_calibration(debug=False)
 
-    print(f"   Gradient quantizer calibrated: {lora.grad_quantizer_8bit.calibrated}")
+    print(f"   Gradient quantizer A calibrated: {lora.grad_quantizer_A.calibrated}")
+    print(f"   Gradient quantizer B calibrated: {lora.grad_quantizer_B.calibrated}")
     print(f"   Weight quantizer A calibrated: {lora.quantize_A.calibrated}")
     print(f"   Weight quantizer B calibrated: {lora.quantize_B.calibrated}")
 
     # Verify weight quantizers NOT affected
-    if lora.grad_quantizer_8bit.calibrated and not lora.quantize_A.calibrated and not lora.quantize_B.calibrated:
+    grad_cal_ok = lora.grad_quantizer_A.calibrated and lora.grad_quantizer_B.calibrated
+    weight_not_cal = not lora.quantize_A.calibrated and not lora.quantize_B.calibrated
+    if grad_cal_ok and weight_not_cal:
         print(f"   ✓ Gradient calibration did NOT affect weight quantizers")
     else:
         print(f"   ✗ ERROR: Gradient calibration affected weight quantizers!")
@@ -383,7 +410,9 @@ def test_gradient_forward_calibration_separation():
     print(f"   Weight quantizer B calibrated: {lora.quantize_B.calibrated}")
 
     # Verify all calibrated independently
-    if lora.grad_quantizer_8bit.calibrated and lora.quantize_A.calibrated and lora.quantize_B.calibrated:
+    all_grad_cal = lora.grad_quantizer_A.calibrated and lora.grad_quantizer_B.calibrated
+    all_weight_cal = lora.quantize_A.calibrated and lora.quantize_B.calibrated
+    if all_grad_cal and all_weight_cal:
         print(f"\n4. Verification:")
         print(f"   ✓ SUCCESS: All quantizers calibrated independently")
         return True
@@ -460,6 +489,86 @@ def test_multi_precision_calibration():
         return True
 
 
+def test_lora_weight_quantizer_cross_precision():
+    """Test LoRA weight quantizer calibration across multiple precisions (True CPT)."""
+    print("\n" + "="*70)
+    print("Testing LoRA Weight Quantizer Cross-Precision Calibration")
+    print("="*70)
+
+    # Create CPTLinear with shared LoRA
+    cpt_linear = CPTLinear(
+        in_features=128,
+        out_features=256,
+        bit_widths=[4, 6, 8],
+        gradient_bits=8,
+        shared_lora_rank=16,
+        shared_lora_alpha=32
+    )
+
+    print(f"\n1. Initial state:")
+    print(f"   Shared LoRA shape A: {cpt_linear.shared_lora.lora_A.shape}")
+    print(f"   Shared LoRA shape B: {cpt_linear.shared_lora.lora_B.shape}")
+    print(f"   Number of LoRA weight quantizers: {len(cpt_linear.lora_weight_quantizers)}")
+
+    # Calibrate LoRA weight quantizers for each precision
+    print(f"\n2. Calibrating LoRA weight quantizers for each precision:")
+    scales_by_bits = {}
+
+    for bits in [4, 6, 8]:
+        print(f"\n   Calibrating {bits}-bit LoRA weight quantizer:")
+        lora_quantizer = cpt_linear.lora_weight_quantizers[f'{bits}bit']
+
+        lora_quantizer.set_num_bits(bits)
+        lora_quantizer.start_calibration()
+
+        with torch.no_grad():
+            # Calibrate on both lora_A and lora_B
+            _ = lora_quantizer(cpt_linear.shared_lora.lora_A)
+            _ = lora_quantizer(cpt_linear.shared_lora.lora_B)
+
+        lora_quantizer.finish_calibration(debug=False)
+
+        print(f"     Calibrated: {lora_quantizer.calibrated}")
+        print(f"     Batches collected: {lora_quantizer.num_batches_collected}")
+
+        if lora_quantizer.calibrated:
+            scales_by_bits[bits] = lora_quantizer.scale.mean().item()
+            print(f"     Scale mean: {scales_by_bits[bits]:.6f}")
+
+    # Verify all precisions calibrated
+    print(f"\n3. Verification:")
+    all_calibrated = all(
+        cpt_linear.lora_weight_quantizers[f'{bits}bit'].calibrated
+        for bits in [4, 6, 8]
+    )
+
+    if all_calibrated:
+        print(f"   ✓ All LoRA weight quantizers calibrated")
+        print(f"   Scale comparison:")
+        for bits in [4, 6, 8]:
+            print(f"     {bits}-bit: {scales_by_bits[bits]:.6f}")
+
+        # Test forward pass at different precisions
+        print(f"\n4. Testing forward pass with different precisions:")
+        cpt_linear.calibration_mode = False
+        x = torch.randn(4, 128)
+
+        for bits in [4, 6, 8]:
+            cpt_linear.set_precision(bits)
+            with torch.no_grad():
+                output = cpt_linear(x)
+            print(f"     {bits}-bit output shape: {output.shape}")
+
+        print(f"\n   ✓ SUCCESS: True CPT - Single LoRA quantized at multiple precisions")
+        return True
+    else:
+        print(f"   ✗ FAILURE: Not all LoRA weight quantizers calibrated")
+        for bits in [4, 6, 8]:
+            q = cpt_linear.lora_weight_quantizers[f'{bits}bit']
+            print(f"     {bits}-bit calibrated: {q.calibrated}")
+        return False
+
+
 if __name__ == '__main__':
     print("\n" + "="*70)
     print("CALIBRATION TEST SUITE (FORWARD + BACKWARD)")
@@ -473,6 +582,7 @@ if __name__ == '__main__':
     test5_passed = test_cptlinear_integrated_calibration()
     test6_passed = test_gradient_forward_calibration_separation()
     test7_passed = test_multi_precision_calibration()
+    test8_passed = test_lora_weight_quantizer_cross_precision()
 
     print("\n" + "="*70)
     print("TEST SUMMARY")
@@ -484,9 +594,10 @@ if __name__ == '__main__':
     print(f"Test 5 (CPTLinear Integrated Calibration):     {'✓ PASSED' if test5_passed else '✗ FAILED'}")
     print(f"Test 6 (Gradient vs Forward Separation):       {'✓ PASSED' if test6_passed else '✗ FAILED'}")
     print(f"Test 7 (Multi-Precision Calibration):          {'✓ PASSED' if test7_passed else '✗ FAILED'}")
+    print(f"Test 8 (LoRA Weight Cross-Precision):          {'✓ PASSED' if test8_passed else '✗ FAILED'}")
 
     all_tests = [test1_passed, test2_passed, test3_passed, test4_passed,
-                 test5_passed, test6_passed, test7_passed]
+                 test5_passed, test6_passed, test7_passed, test8_passed]
 
     if all(all_tests):
         print(f"\n✓ ALL {len(all_tests)} TESTS PASSED")
