@@ -66,6 +66,8 @@ class CPTLinear(nn.Module):
             lora_rank_per_bit = {4: 32, 6: 24, 8: 16}
         if lora_alpha_per_bit is None:
             lora_alpha_per_bit = {4: 64, 6: 48, 8: 32}
+        if quantizer_per_bit is None:
+            quantizer_per_bit = {bits: 'log' for bits in bit_widths}
 
         for bits in bit_widths:
             rank = lora_rank_per_bit.get(bits, 16)
@@ -75,9 +77,6 @@ class CPTLinear(nn.Module):
                 in_features, out_features, rank, alpha, num_bits=bits,
                 quantizer_type=quant_type, gradient_bits=gradient_bits
             )
-
-        if quantizer_per_bit is None:
-            quantizer_per_bit = {bits: 'log' for bits in bit_widths}
 
         max_bits = max([b for b in bit_widths if b < 32]) if any(b < 32 for b in bit_widths) else 8
         max_quant_type = quantizer_per_bit.get(max_bits, 'log')
