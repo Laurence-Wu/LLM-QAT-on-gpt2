@@ -172,12 +172,10 @@ def verify_cpt_quantization_status(model, current_bits):
         if module.__class__.__name__ == 'CPTLinear':
             total_count += 1
 
-            # Direct attribute access - check weight quantizers
-            # Will raise AttributeError if quantizers_weight doesn't exist
-            for bit_key, quantizer in module.quantizers_weight.items():
-                if not quantizer.per_channel:
-                    per_tensor_count += 1
-                    break
+            # Direct attribute access - check weight quantizer
+            # Will raise AttributeError if quantizer_weight doesn't exist
+            if not module.quantizer_weight.per_channel:
+                per_tensor_count += 1
 
     if total_count > 0:
         print(f"✓ {per_tensor_count}/{total_count} modules using per-tensor quantization")
