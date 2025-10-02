@@ -305,6 +305,15 @@ def main(args):
     )
     print(f"LR scheduler: T_max={total_steps} steps ({training_config.num_epochs} epochs, {len(train_loader)} batches/epoch)")
 
+    # Calibrate ALL precisions ONCE before training (CPT paper approach)
+    print("\n" + "="*70)
+    print("Pre-Training Calibration: Calibrating all precisions ONCE")
+    print("="*70)
+    for precision in model_config.bit_widths:
+        if precision < 32:
+            calib_mgr.ensure_calibrated(precision)
+    print("="*70 + "\n")
+
     # Training loop
     print("Starting CPT training...")
     best_val_loss = float('inf')
@@ -321,8 +330,8 @@ def main(args):
         print(f"Epoch {epoch+1}/{training_config.num_epochs} - Precision: {current_precision}-bit (Cycle {cycle_num+1}/{cpt_config.total_cycles})")
         print(f"{'='*70}")
 
-        # Calibrate quantizers for current precision
-        calib_mgr.calibrate_current_precision(current_precision, num_batches=10)
+        # Set model precision for this epoch (no recalibration - already done once before training)
+        model.set_precision(current_precision)
 
         # Train one epoch at this precision
         avg_epoch_loss = train_epoch_with_cpt(

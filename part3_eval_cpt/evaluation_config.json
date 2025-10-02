@@ -18,31 +18,31 @@
     "datasets": {
       "BoolQ": {
         "dataset_name": "boolq",
-        "split": "validation[:1000]"
+        "split": "validation[:3000]"
       },
       "HellaSwag": {
         "dataset_name": "hellaswag",
-        "split": "validation[:1000]"
+        "split": "validation[:2000]"
       },
       "WinoGrande": {
         "dataset_name": "winogrande",
         "config": "winogrande_m",
-        "split": "validation[:1000]"
+        "split": "validation[:2000]"
       },
       "ARC-e": {
         "dataset_name": "ai2_arc",
         "config": "ARC-Easy",
-        "split": "validation[:1000]"
+        "split": "validation[:2000]"
       },
       "ARC-c": {
         "dataset_name": "ai2_arc",
         "config": "ARC-Challenge",
-        "split": "validation[:1000]"
+        "split": "validation[:2000]"
       },
       "OBQA": {
         "dataset_name": "openbookqa",
         "config": "main",
-        "split": "validation[:1000]"
+        "split": "validation[:2000]"
       }
     },
     "generation": {

@@ -75,33 +75,6 @@ def main():
     # Initialize evaluators (same as SP evaluation)
     device = eval_config['device']
 
-    # Run diagnostic if requested
-    if args.diagnose:
-        print("\n" + "="*70)
-        print("Running Comprehensive Quantization Diagnostics...")
-        print("="*70)
-        from diagnose_quantization import (
-            comprehensive_diagnosis,
-            test_sliding_window_perplexity,
-            track_batch_degradation
-        )
-
-        # Run comprehensive diagnosis
-        diagnostic_results = comprehensive_diagnosis(model, tokenizer, device)
-
-        # Check for issues
-        if 'perplexity_test' in diagnostic_results:
-            ppl = diagnostic_results['perplexity_test']['perplexity']
-            logits_mean = diagnostic_results['perplexity_test']['logits_mean']
-
-            if ppl > 100 or logits_mean < -50:
-                print("\n⚠️ WARNING: Model shows severe issues!")
-                print(f"   Perplexity: {ppl:.2f}")
-                print(f"   Logits mean: {logits_mean:.2f}")
-                print("   Model may have quantization failure or other critical issues.")
-
-        print("\nDiagnostic complete. Proceeding with evaluation...\n")
-
     # Initialize evaluation modules
     evaluator = CPTEvaluation(model, tokenizer)
 
