@@ -68,17 +68,29 @@ def load_cpt_model(model_path: str):
     if checkpoint_bit_width:
         model.set_precision(checkpoint_bit_width)
 
-    override_count = 0
-    for name, module in model.named_modules():
-        if module.__class__.__name__ == 'CPTLinear':
-            module.quantizer_weight.per_channel = False
-            module.quantizer_input.per_channel = False
-            override_count += 1
-
-    print(f"Set {override_count} quantizers to per-tensor mode")
-
     model.load_state_dict(checkpoint['model_state_dict'], strict=False)
     print("Model weights loaded")
+
+    first_linear = None
+    for name, module in model.named_modules():
+        if module.__class__.__name__ == 'CPTLinear':
+            first_linear = (name, module)
+            break
+
+    if first_linear:
+        name, module = first_linear
+        print(f"\nDEBUG: Quantizer status for {name}:")
+        print(f"  Weight quantizer:")
+        print(f"    - Calibrated: {module.quantizer_weight.calibrated}")
+        print(f"    - per_channel: {module.quantizer_weight.per_channel}")
+        print(f"    - Scale shape: {module.quantizer_weight.scale.shape}")
+        print(f"    - Scale mean: {module.quantizer_weight.scale.mean().item():.6f}")
+        print(f"    - Scale std: {module.quantizer_weight.scale.std().item():.6f}")
+        print(f"  Input quantizer:")
+        print(f"    - Calibrated: {module.quantizer_input.calibrated}")
+        print(f"    - per_channel: {module.quantizer_input.per_channel}")
+        print(f"    - Scale shape: {module.quantizer_input.scale.shape}")
+        print(f"    - Scale mean: {module.quantizer_input.scale.mean().item():.6f}")
 
     model = model.cuda()
     model.eval()
