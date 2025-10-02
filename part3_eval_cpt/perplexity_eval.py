@@ -50,14 +50,20 @@ class PerplexityEvaluator:
         if not texts:
             return float('inf')
 
+        debug_sample_limit = 50
+        texts = texts[:debug_sample_limit]
+        print(f"  DEBUG: Processing {len(texts)} texts for debugging")
+
         stride = self.config['stride']
         max_length = self.config['max_length']
         self.model.eval()
 
         total_loss = 0.0
         total_tokens = 0
+        window_count = 0
+        loss_values = []
 
-        for text in tqdm(texts, desc=f"Processing {dataset_name}"):
+        for text_idx, text in enumerate(tqdm(texts, desc=f"Processing {dataset_name}")):
             if not text.strip():
                 continue
 
@@ -84,7 +90,17 @@ class PerplexityEvaluator:
                 window_ids = input_ids[:, begin_loc:end_loc]
 
                 with torch.no_grad():
-                    logits = self.model(window_ids).logits
+                    outputs = self.model(window_ids)
+                    logits = outputs.logits
+
+                    if window_count == 0:
+                        print(f"\n  DEBUG First window:")
+                        print(f"    Logits shape: {logits.shape}")
+                        print(f"    Logits mean: {logits.mean().item():.4f}")
+                        print(f"    Logits std: {logits.std().item():.4f}")
+                        print(f"    Logits min: {logits.min().item():.4f}")
+                        print(f"    Logits max: {logits.max().item():.4f}")
+
                     shift_logits = logits[..., :-1, :].contiguous()
                     shift_labels = window_ids[..., 1:].contiguous()
 
@@ -102,8 +118,20 @@ class PerplexityEvaluator:
                         )
 
                         if not (torch.isnan(loss) or torch.isinf(loss)):
-                            total_loss += loss.item()
-                            total_tokens += loss_labels.numel()
+                            loss_value = loss.item()
+                            num_tokens = loss_labels.numel()
+                            per_token_loss = loss_value / num_tokens
+
+                            total_loss += loss_value
+                            total_tokens += num_tokens
+                            window_count += 1
+                            loss_values.append(per_token_loss)
+
+                            if window_count == 1:
+                                print(f"    Loss (sum): {loss_value:.4f}")
+                                print(f"    Tokens: {num_tokens}")
+                                print(f"    Loss/token: {per_token_loss:.4f}")
+                                print(f"    PPL (this window): {math.exp(per_token_loss):.2f}\n")
 
                 prev_end_loc = target_end
 
@@ -112,7 +140,14 @@ class PerplexityEvaluator:
 
         avg_loss = total_loss / total_tokens
         perplexity = math.exp(avg_loss)
-        print(f"  Evaluated {total_tokens} tokens, PPL: {perplexity:.1f}")
+
+        print(f"\n  DEBUG Summary:")
+        print(f"    Total windows: {window_count}")
+        print(f"    Total tokens: {total_tokens}")
+        print(f"    Avg loss/token: {avg_loss:.4f}")
+        print(f"    Loss min/max: {min(loss_values):.4f}/{max(loss_values):.4f}")
+        print(f"    Final PPL: {perplexity:.1f}\n")
+
         return perplexity
 
     def evaluate_all_datasets(self, bit_config: Dict) -> Dict:

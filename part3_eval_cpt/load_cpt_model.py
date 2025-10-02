@@ -83,6 +83,18 @@ def load_cpt_model(model_path: str):
     model = model.cuda()
     model.eval()
     model.enable_lora_after_calibration()
-    print("LoRA adapters enabled for evaluation")
+
+    lora_enabled_count = 0
+    for name, module in model.named_modules():
+        if module.__class__.__name__ == 'LoRAAdapter' and hasattr(module, 'calibration_mode'):
+            if not module.calibration_mode:
+                lora_enabled_count += 1
+
+    print(f"LoRA adapters enabled for evaluation ({lora_enabled_count} adapters active)")
+
+    print("\nDEBUG: Model configuration:")
+    print(f"  Current precision: {checkpoint_bit_width}-bit")
+    print(f"  LoRA enabled: {lora_enabled_count > 0}")
+    print(f"  Model on device: {next(model.parameters()).device}")
 
     return model, checkpoint_bit_width, model_config, training_config
