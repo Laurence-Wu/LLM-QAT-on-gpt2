@@ -138,7 +138,6 @@ class CPTLinear(nn.Module):
         self.calibration_mode = False
 
     def set_precision(self, num_bits: int):
-        """Set current precision for forward pass."""
         if num_bits not in self.bit_widths:
             raise ValueError(f"Precision {num_bits} not in configured widths {self.bit_widths}")
         self.current_bits = num_bits
@@ -147,8 +146,7 @@ class CPTLinear(nn.Module):
             self.quantizer_input.set_num_bits(num_bits)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass with current precision."""
-        if self.current_bits >= 32:
+        if self.current_bits == 32:
             out = F.linear(x, self.linear.weight, self.linear.bias)
             return out
 
@@ -169,28 +167,19 @@ class CPTLinear(nn.Module):
 
 
 class CPTSelfAttention(nn.Module):
-    """
-    Self-attention module with cyclic precision support.
-    """
-
     def __init__(self, config, bit_widths: list, lora_rank_per_bit: dict, lora_alpha_per_bit: dict, quantizer_per_bit: dict = None, gradient_bits: int = 8):
         super().__init__()
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.head_dim = self.n_embd // self.n_head
-
-        # Combined QKV projection (like GPT-2 and part1)
         self.c_attn = CPTLinear(
             self.n_embd, 3 * self.n_embd,
             bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit, gradient_bits
         )
-        # Output projection
         self.c_proj = CPTLinear(
             self.n_embd, self.n_embd,
             bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit, gradient_bits
         )
-
-        # Attention dropout
         self.attn_dropout = nn.Dropout(config.embd_pdrop)
         self.resid_dropout = nn.Dropout(config.embd_pdrop)
 

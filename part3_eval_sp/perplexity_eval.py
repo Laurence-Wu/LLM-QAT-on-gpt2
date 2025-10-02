@@ -18,203 +18,116 @@ class PerplexityEvaluator:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
+    def _load_dataset(self, dataset_name: str) -> list:
+        datasets_config = self.config.get('datasets', {})
+
+        dataset_map = {
+            'wikitext2': ('WikiText2', 'wikitext', 'wikitext-2-raw-v1', 'test', False),
+            'wikitext103': ('WikiText103', 'wikitext', 'wikitext-103-raw-v1', 'test', False),
+            'c4': ('C4', 'allenai/c4', 'en', 'validation', True)
+        }
+
+        if dataset_name not in dataset_map:
+            return []
+
+        cfg_key, default_name, default_config, default_split, streaming = dataset_map[dataset_name]
+        cfg = datasets_config.get(cfg_key, {})
+
+        try:
+            dataset = load_dataset(
+                cfg.get('dataset_name', default_name),
+                cfg.get('config', default_config),
+                split=cfg.get('split', default_split),
+                streaming=streaming
+            )
+
+            if streaming:
+                return [item['text'] for i, item in enumerate(dataset) if i < 5000]
+            else:
+                return [item['text'] for item in dataset if item['text'].strip()]
+        except Exception as e:
+            print(f"Warning: Could not load {dataset_name}: {e}")
+            return []
+
     def calculate_perplexity(self, dataset_name: str, bit_config: Dict) -> float:
-        """
-        Calculate perplexity using sliding window with proper context handling.
-
-        Each window uses first half as context (not scored) and second half for prediction (scored).
-        This ensures all scored tokens have sufficient context.
-
-        Args:
-            dataset_name: Name of dataset to evaluate
-            bit_config: Bit configuration for the model
-        """
+        texts = self._load_dataset(dataset_name)
+        if not texts:
+            return float('inf')
 
         stride = self.config['stride']
         max_length = self.config['max_length']
         self.model.eval()
 
-        # Verify model is in eval mode
-        if self.model.training:
-            print("⚠️ WARNING: Model was not in eval mode! Setting to eval now...")
-            self.model.eval()
+        total_loss = 0.0
+        total_tokens = 0
 
-        # Load dataset from config
-        datasets_config = self.config.get('datasets', {})
-
-        if dataset_name == 'wikitext2':
-            try:
-                wiki_cfg = datasets_config.get('WikiText2', {})
-                dataset_name_str = wiki_cfg.get('dataset_name', 'wikitext')
-                config_str = wiki_cfg.get('config', 'wikitext-2-raw-v1')
-                split_str = wiki_cfg.get('split', 'test')
-                dataset = load_dataset(dataset_name_str, config_str, split=split_str)
-                texts = [item['text'] for item in dataset if item['text'].strip()]
-            except Exception as e:
-                print(f"Warning: Could not load {dataset_name} dataset: {e}")
-                return float('inf')
-        elif dataset_name == 'wikitext103':
-            try:
-                wiki_cfg = datasets_config.get('WikiText103', {})
-                dataset_name_str = wiki_cfg.get('dataset_name', 'wikitext')
-                config_str = wiki_cfg.get('config', 'wikitext-103-raw-v1')
-                split_str = wiki_cfg.get('split', 'test')
-                dataset = load_dataset(dataset_name_str, config_str, split=split_str)
-                texts = [item['text'] for item in dataset if item['text'].strip()]
-            except Exception as e:
-                print(f"Warning: Could not load {dataset_name} dataset: {e}")
-                return float('inf')
-        elif dataset_name == 'c4':
-            try:
-                cfg = datasets_config.get('C4', {})
-                dataset_name_str = cfg.get('dataset_name', 'allenai/c4')
-                config_str = cfg.get('config', 'en')
-                split_str = cfg.get('split', 'validation')
-                use_streaming = cfg.get('streaming', True)
-
-                dataset = load_dataset(dataset_name_str, config_str, split=split_str, streaming=use_streaming)
-
-                texts = []
-                max_docs = self.config.get('max_samples', 100)
-                for i, item in enumerate(dataset):
-                    if i >= max_docs:
-                        break
-                    texts.append(item['text'])
-            except Exception as e:
-                print(f"Warning: Could not load C4 dataset: {e}")
-                return float('inf')
-        else:
-            print(f"Unknown dataset: {dataset_name}")
-            return float('inf')
-
-        if not texts:
-            return float('inf')
-
-        # Sliding window approach with proper context handling
-        all_losses = []
-        max_texts = self.config.get('max_samples', 100)
-
-        # Calculate context and prediction sizes
-        context_size = max_length // 2  # First half for context
-        predict_size = max_length - context_size  # Second half for prediction
-
-        print(f"Using sliding window: {max_length} tokens, stride: {stride}")
-        print(f"Processing {min(len(texts), max_texts)} texts")
-
-        for text_idx, text in enumerate(tqdm(texts[:max_texts], desc=f"Processing {dataset_name}")):
+        for text in tqdm(texts, desc=f"Processing {dataset_name}"):
             if not text.strip():
                 continue
 
-            # Sliding window method with proper context handling
-            encodings = self.tokenizer(
-                text,
-                return_tensors='pt',
-                truncation=True,
-                max_length=max_length * 4,  # Allow longer for sliding window
-                padding=False
-            )
+            input_ids = self.tokenizer(text, return_tensors='pt', truncation=True,
+                                      max_length=max_length * 10, padding=False).input_ids.to(self.device)
 
-            seq_len = encodings.input_ids.size(1)
-            if seq_len < 10:
+            if input_ids.size(1) < 2:
                 continue
 
-            # Use sliding window with proper context handling
-            # Step by stride for the sliding windows
-            for window_idx, begin_loc in enumerate(range(0, seq_len, stride)):
-                end_loc = min(begin_loc + max_length, seq_len)
-                window_size = end_loc - begin_loc
+            prev_end_loc = 0
 
-                # Need at least context_size + some tokens to predict
-                if window_size < context_size + 10:
+            for begin_loc in range(0, input_ids.size(1), stride):
+                end_loc = min(begin_loc + max_length, input_ids.size(1))
+
+                if end_loc - begin_loc < 2:
                     break
 
-                input_ids = encodings.input_ids[:, begin_loc:end_loc].to(self.device)
+                target_start = max(prev_end_loc, begin_loc)
+                target_end = end_loc
+
+                if target_end <= target_start:
+                    continue
+
+                window_ids = input_ids[:, begin_loc:end_loc]
 
                 with torch.no_grad():
-                    try:
-                        outputs = self.model(input_ids)
+                    outputs = self.model(window_ids)
+                    logits = outputs.logits if hasattr(outputs, 'logits') else outputs
 
-                        # Check if outputs is already a tensor (raw logits)
-                        if isinstance(outputs, torch.Tensor):
-                            logits = outputs  # Use directly, preserves batch dimension
-                        else:
-                            # Try to extract logits from dict/object
-                            try:
-                                logits = outputs.logits
-                            except AttributeError:
-                                try:
-                                    # Only use indexing for non-tensor outputs
-                                    logits = outputs[0]
-                                except (IndexError, TypeError):
-                                    print(f"Warning: Could not extract logits from outputs type {type(outputs)}")
-                                    continue
+                    shift_logits = logits[..., :-1, :].contiguous()
+                    shift_labels = window_ids[..., 1:].contiguous()
 
-                        # Calculate loss using standard next-token prediction
-                        shift_logits = logits[..., :-1, :].contiguous()
-                        shift_labels = input_ids[..., 1:].contiguous()
+                    target_start_in_window = target_start - begin_loc
+                    target_end_in_window = target_end - begin_loc - 1
 
-                        # CRITICAL: Only score tokens AFTER the context prefix
-                        if window_idx == 0:
-                            # First window: skip initial tokens (they have no context)
-                            skip_tokens = min(32, window_size // 4)  # Skip first 32 tokens or 25% of window
-                        else:
-                            # Subsequent windows: skip the context portion (first half)
-                            skip_tokens = context_size
+                    if target_end_in_window > target_start_in_window:
+                        loss_logits = shift_logits[:, target_start_in_window:target_end_in_window, :]
+                        loss_labels = shift_labels[:, target_start_in_window:target_end_in_window]
 
-                        # Only calculate loss on tokens with sufficient context
-                        if shift_logits.size(1) > skip_tokens:
-                            shift_logits = shift_logits[:, skip_tokens:, :]
-                            shift_labels = shift_labels[:, skip_tokens:]
-                        else:
-                            continue  # Window too small after skipping context
-
-                        loss_fct = torch.nn.CrossEntropyLoss()
-                        loss = loss_fct(
-                            shift_logits.view(-1, shift_logits.size(-1)),
-                            shift_labels.view(-1)
+                        loss = torch.nn.functional.cross_entropy(
+                            loss_logits.reshape(-1, loss_logits.size(-1)),
+                            loss_labels.reshape(-1),
+                            reduction='sum'
                         )
 
-                        if not torch.isnan(loss) and not torch.isinf(loss):
-                            loss_value = loss.item()
-                            all_losses.append(loss_value)
+                        if not (torch.isnan(loss) or torch.isinf(loss)):
+                            total_loss += loss.item()
+                            total_tokens += loss_labels.numel()
 
-                    except Exception as e:
-                        continue
+                prev_end_loc = target_end
 
-        if not all_losses:
+        if total_tokens == 0:
             return float('inf')
 
-        # Calculate perplexity with detailed statistics
-        avg_loss = np.mean(all_losses)
-        std_loss = np.std(all_losses)
-        min_loss = min(all_losses)
-        max_loss = max(all_losses)
-
-        # Calculate percentiles
-        sorted_losses = sorted(all_losses)
-        p25 = sorted_losses[int(len(sorted_losses) * 0.25)]
-        p50 = sorted_losses[int(len(sorted_losses) * 0.50)]  # median
-        p75 = sorted_losses[int(len(sorted_losses) * 0.75)]
-        p95 = sorted_losses[int(len(sorted_losses) * 0.95)]
-
+        avg_loss = total_loss / total_tokens
         perplexity = math.exp(avg_loss)
-
-        print(f"  Processed {len(all_losses)} segments, PPL: {perplexity:.1f}")
-
+        print(f"  Evaluated {total_tokens} tokens, PPL: {perplexity:.1f}")
         return perplexity
 
     def evaluate_all_datasets(self, bit_config: Dict) -> Dict:
-        """
-        Return perplexity for WikiText2, WikiText103, and OpenWebText
-        Format: {'WikiText2': 11.2, 'WikiText103': 10.5, 'OpenWebText': 7.5}
-        """
         results = {}
 
         print("  Calculating WikiText2 perplexity...")
         wikitext2_ppl = self.calculate_perplexity('wikitext2', bit_config)
         results['WikiText2'] = round(wikitext2_ppl, 1)
 
-        # Only calculate WikiText103 if it's in the config
         if 'WikiText103' in self.config.get('datasets', {}):
             print("  Calculating WikiText103 perplexity...")
             wikitext103_ppl = self.calculate_perplexity('wikitext103', bit_config)
@@ -223,24 +136,5 @@ class PerplexityEvaluator:
         print("  Calculating C4 perplexity...")
         c4_ppl = self.calculate_perplexity('c4', bit_config)
         results['C4'] = round(c4_ppl, 1)
-
-        return results
-
-    def evaluate_long_context(self, bit_config: Dict, config_override: Dict = None) -> Dict:
-        """
-        Evaluate with longer context (1024 tokens) to test model's full capacity
-        """
-        # Save original config
-        original_config = self.config.copy()
-
-        # Override with long context settings if provided
-        if config_override:
-            self.config.update(config_override)
-            print(f"  Using long context: max_length={self.config['max_length']}, stride={self.config['stride']}")
-
-        results = self.evaluate_all_datasets(bit_config)
-
-        # Restore original config
-        self.config = original_config
 
         return results
