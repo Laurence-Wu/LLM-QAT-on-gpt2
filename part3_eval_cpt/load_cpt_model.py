@@ -121,15 +121,13 @@ def load_cpt_model(model_path: str):
         # Check if this is a CPTLinear module by class name
         if module.__class__.__name__ == 'CPTLinear':
             # Direct attribute access - will raise error if attributes don't exist
-            # Handle weight quantizers
-            for bit_key, quantizer in module.quantizers_weight.items():
-                quantizer.per_channel = False
-                override_count += 1
+            # Set weight quantizer to per-tensor mode
+            module.quantizer_weight.per_channel = False
+            override_count += 1
 
-            # Handle input quantizers
-            for bit_key, quantizer in module.quantizers_input.items():
-                quantizer.per_channel = False
-                override_count += 1
+            # Set input quantizer to per-tensor mode
+            module.quantizer_input.per_channel = False
+            override_count += 1
 
     print(f"✅ Overrode {override_count} quantizers to per-tensor mode")
 
