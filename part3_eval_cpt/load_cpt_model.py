@@ -60,6 +60,15 @@ def load_cpt_model(model_path: str):
     model_config = SimpleNamespace(**model_config_dict)
     training_config = SimpleNamespace(**training_config_dict)
 
+    # CRITICAL: For evaluation, only create LoRA for the checkpoint's bit width
+    # This prevents random LoRA initialization for other bit widths
+    if checkpoint_bit_width is not None:
+        original_bit_widths = model_config.bit_widths
+        model_config.bit_widths = [checkpoint_bit_width]
+        print(f"\n⚠️ Overriding bit_widths for evaluation:")
+        print(f"   Original: {original_bit_widths}")
+        print(f"   Evaluation: {model_config.bit_widths} (checkpoint precision only)")
+
     # Handle cpt_config - provide defaults if missing
     if cpt_config_dict:
         cpt_config = SimpleNamespace(**cpt_config_dict)
@@ -135,10 +144,9 @@ def load_cpt_model(model_path: str):
     model = model.cuda()
     model.eval()
 
-    # CRITICAL: Keep LoRA ENABLED for evaluation
-    # The LoRA adapters contain the fine-tuned knowledge - we NEED them!
-    # (LoRA was only disabled during calibration, which is already done)
-    # Re-enable LoRA to ensure it's active for evaluation
+    # CRITICAL: Enable LoRA for evaluation
+    # Since we only created LoRA for checkpoint_bit_width, all LoRA params are properly loaded
+    # No random initialization to worry about!
     model.enable_lora_after_calibration()
     print("✅ LoRA adapters ENABLED for evaluation (fine-tuned model)")
 
