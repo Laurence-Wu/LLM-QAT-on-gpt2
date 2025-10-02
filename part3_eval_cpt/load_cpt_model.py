@@ -68,9 +68,6 @@ def load_cpt_model(model_path: str):
     if checkpoint_bit_width:
         model.set_precision(checkpoint_bit_width)
 
-    model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-    print("Model weights loaded")
-
     override_count = 0
     for name, module in model.named_modules():
         if module.__class__.__name__ == 'CPTLinear':
@@ -78,7 +75,10 @@ def load_cpt_model(model_path: str):
             module.quantizer_input.per_channel = False
             override_count += 1
 
-    print(f"Overrode {override_count} quantizers to per-tensor mode")
+    print(f"Set {override_count} quantizers to per-tensor mode")
+
+    model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+    print("Model weights loaded")
 
     model = model.cuda()
     model.eval()
