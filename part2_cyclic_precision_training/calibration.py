@@ -167,11 +167,20 @@ class CalibrationManager:
         grad_quantizers = []
         grad_quantizer_modes = []
         for name, module in self.model.named_modules():
-            if isinstance(module, LoRAAdapter) and hasattr(module, 'grad_quantizer_8bit') and module.grad_quantizer_8bit is not None:
-                grad_quantizer_modes.append(module.grad_quantizer_8bit.training)
-                module.grad_quantizer_8bit.eval()
-                module.grad_quantizer_8bit.start_calibration()
-                grad_quantizers.append((name, module.grad_quantizer_8bit))
+            if isinstance(module, LoRAAdapter):
+                # Calibrate grad_quantizer_A
+                if hasattr(module, 'grad_quantizer_A') and module.grad_quantizer_A is not None:
+                    grad_quantizer_modes.append(module.grad_quantizer_A.training)
+                    module.grad_quantizer_A.eval()
+                    module.grad_quantizer_A.start_calibration()
+                    grad_quantizers.append((f"{name}.grad_A", module.grad_quantizer_A))
+
+                # Calibrate grad_quantizer_B
+                if hasattr(module, 'grad_quantizer_B') and module.grad_quantizer_B is not None:
+                    grad_quantizer_modes.append(module.grad_quantizer_B.training)
+                    module.grad_quantizer_B.eval()
+                    module.grad_quantizer_B.start_calibration()
+                    grad_quantizers.append((f"{name}.grad_B", module.grad_quantizer_B))
 
         if not grad_quantizers:
             print("  No gradient quantizers")
