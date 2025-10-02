@@ -135,9 +135,12 @@ def load_cpt_model(model_path: str):
     model = model.cuda()
     model.eval()
 
-    # CRITICAL: Disable LoRA for evaluation - we want base model performance
-    model.disable_lora_for_calibration()
-    print("✅ LoRA adapters disabled for evaluation")
+    # CRITICAL: Keep LoRA ENABLED for evaluation
+    # The LoRA adapters contain the fine-tuned knowledge - we NEED them!
+    # (LoRA was only disabled during calibration, which is already done)
+    # Re-enable LoRA to ensure it's active for evaluation
+    model.enable_lora_after_calibration()
+    print("✅ LoRA adapters ENABLED for evaluation (fine-tuned model)")
 
     device = torch.device('cuda')
     print(f"✅ Model ready on {device}")
