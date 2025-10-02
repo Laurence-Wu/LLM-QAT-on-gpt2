@@ -1,3 +1,4 @@
+import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -98,7 +99,8 @@ class DistillationManager:
                         )
                     feature_loss = feature_loss / len(layers_to_match)
                 else:
-                    layer_idx = layers_to_match[0]
+                    # randomly select one layer to compute feature loss
+                    layer_idx = random.choice(layers_to_match)
                     teacher_features = teacher['hidden_states'][layer_idx]
                     student_features = student_outputs['hidden_states'][layer_idx]
 

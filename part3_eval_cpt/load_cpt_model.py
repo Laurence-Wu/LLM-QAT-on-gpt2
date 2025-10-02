@@ -103,7 +103,11 @@ def load_cpt_model(model_path: str):
 
     # Load weights
     try:
-        model.load_state_dict(checkpoint['model_state_dict'], strict=True)
+        missing_keys, unexpected_keys = model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+        if missing_keys:
+            print(f"⚠️ Missing {len(missing_keys)} keys in checkpoint (expected for LoRA adapters at other bit widths)")
+        if unexpected_keys:
+            print(f"⚠️ Unexpected {len(unexpected_keys)} keys in checkpoint")
         print("✅ Model weights loaded successfully")
     except KeyError:
         raise ValueError("No model_state_dict found in checkpoint!")
