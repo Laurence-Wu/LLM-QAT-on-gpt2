@@ -21,7 +21,9 @@ class GradientQuantizer(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        if ctx.quantizer is not None and not ctx.quantizer.training:
+        if ctx.quantizer is not None and ctx.quantizer.collecting_stats:
+            return ctx.quantizer(grad_output), None
+        if ctx.quantizer is not None and ctx.quantizer.calibrated:
             return ctx.quantizer(grad_output), None
         return grad_output, None
 

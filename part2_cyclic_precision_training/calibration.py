@@ -165,8 +165,11 @@ class CalibrationManager:
         print("\nCalibrating gradient quantizers...")
 
         grad_quantizers = []
+        grad_quantizer_modes = []
         for name, module in self.model.named_modules():
             if isinstance(module, LoRAAdapter) and hasattr(module, 'grad_quantizer_8bit') and module.grad_quantizer_8bit is not None:
+                grad_quantizer_modes.append(module.grad_quantizer_8bit.training)
+                module.grad_quantizer_8bit.eval()
                 module.grad_quantizer_8bit.start_calibration()
                 grad_quantizers.append((name, module.grad_quantizer_8bit))
 
@@ -195,10 +198,17 @@ class CalibrationManager:
         if not original_mode:
             self.model.eval()
 
-        for name, quantizer in grad_quantizers:
+        calibrated_count = 0
+        for i, (name, quantizer) in enumerate(grad_quantizers):
             quantizer.finish_calibration(debug=False)
+            if quantizer.calibrated:
+                calibrated_count += 1
+            if i < len(grad_quantizer_modes):
+                quantizer.train(grad_quantizer_modes[i])
 
-        print(f"  ✓ Calibrated {len(grad_quantizers)} gradient quantizers")
+        print(f"  ✓ Calibrated {calibrated_count}/{len(grad_quantizers)} gradient quantizers")
+        if calibrated_count == 0:
+            print(f"  ⚠️ WARNING: No gradient quantizers were successfully calibrated!")
 
         torch.cuda.empty_cache()
         gc.collect()
