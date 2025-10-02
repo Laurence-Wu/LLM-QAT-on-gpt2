@@ -18,7 +18,7 @@ class LoRAAdapter(nn.Module):
 
         if rank > 0:
             self.lora_A = nn.Parameter(torch.randn(in_features, rank) * 0.01)
-            self.lora_B = nn.Parameter(torch.zeros(rank, out_features))
+            self.lora_B = nn.Parameter(torch.zeros(out_features, rank))
             self.quantize_A = LearnableFakeQuantize(
                 num_bits=num_bits, quantizer_type=quantizer_type, channel_dim=0, per_channel=True
             )
@@ -40,15 +40,15 @@ class LoRAAdapter(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.lora_A is not None and self.lora_B is not None:
             if self.calibration_mode or self.quantize_A is None:
-                lora_output = x @ self.lora_A @ self.lora_B
+                lora_output = x @ self.lora_A @ self.lora_B.T
             else:
                 lora_A_quant = self.quantize_A(self.lora_A)
                 lora_B_quant = self.quantize_B(self.lora_B)
                 lora_A_quant = GradientQuantizer.apply(lora_A_quant, self.grad_quantizer_8bit)
                 lora_B_quant = GradientQuantizer.apply(lora_B_quant, self.grad_quantizer_8bit)
-                lora_output = x @ lora_A_quant @ lora_B_quant
+                lora_output = x @ lora_A_quant @ lora_B_quant.T
             return lora_output * self.scaling
-        return torch.zeros_like(x[..., :self.lora_B.size(1)] if self.lora_B is not None else x)
+        return torch.zeros_like(x[..., :self.lora_B.size(0)] if self.lora_B is not None else x)
 
 
 class CPTLinear(nn.Module):
