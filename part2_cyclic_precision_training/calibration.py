@@ -21,6 +21,9 @@ class CalibrationManager:
                 self._calibrate_precision(bits, num_batches)
                 self.calibrated_bits.add(bits)
 
+        # Calibrate LoRA weight quantizers for all precisions
+        self.calibrate_lora_weight_quantizers(bit_widths)
+
         if not self.gradient_calibrated:
             self.calibrate_gradient_quantizers()
             self.gradient_calibrated = True
@@ -218,6 +221,76 @@ class CalibrationManager:
         print(f"  ✓ Calibrated {calibrated_count}/{len(grad_quantizers)} gradient quantizers")
         if calibrated_count == 0:
             print(f"  ⚠️ WARNING: No gradient quantizers were successfully calibrated!")
+
+        torch.cuda.empty_cache()
+        gc.collect()
+
+    def calibrate_lora_weight_quantizers(self, bit_widths: List[int]):
+        print("\nCalibrating LoRA weight quantizers for all precisions...")
+
+        from cpt_model import CPTLinear
+
+        # Collect all LoRA weight quantizers across all precisions
+        lora_quantizers_by_bits = {}
+        for bits in bit_widths:
+            if bits >= 32:
+                continue
+            lora_quantizers_by_bits[bits] = []
+
+        # Find all CPTLinear modules and their LoRA weight quantizers
+        for name, module in self.model.named_modules():
+            if isinstance(module, CPTLinear):
+                if not hasattr(module, 'shared_lora') or module.shared_lora is None:
+                    continue
+
+                # Get the shared LoRA adapter
+                shared_lora = module.shared_lora
+                if not hasattr(shared_lora, 'lora_A') or shared_lora.lora_A is None:
+                    continue
+
+                # Calibrate quantizers for each precision
+                for bits in bit_widths:
+                    if bits >= 32:
+                        continue
+
+                    lora_key = f'{bits}bit'
+                    if lora_key not in module.lora_weight_quantizers:
+                        continue
+
+                    quantizer = module.lora_weight_quantizers[lora_key]
+                    lora_quantizers_by_bits[bits].append((name, quantizer, shared_lora))
+
+        # Calibrate each precision's quantizers
+        for bits in bit_widths:
+            if bits >= 32 or bits not in lora_quantizers_by_bits:
+                continue
+
+            quantizers = lora_quantizers_by_bits[bits]
+            if not quantizers:
+                continue
+
+            print(f"  Calibrating {bits}-bit LoRA weight quantizers...")
+            calibrated_count = 0
+
+            for name, quantizer, shared_lora in quantizers:
+                try:
+                    quantizer.set_num_bits(bits)
+                    quantizer.start_calibration()
+
+                    with torch.no_grad():
+                        # Calibrate on lora_A
+                        _ = quantizer(shared_lora.lora_A)
+                        # Calibrate on lora_B
+                        _ = quantizer(shared_lora.lora_B)
+
+                    quantizer.finish_calibration(debug=False)
+
+                    if quantizer.calibrated:
+                        calibrated_count += 1
+                except Exception as e:
+                    print(f"    Warning {name}: {str(e)}")
+
+            print(f"    ✓ Calibrated {calibrated_count}/{len(quantizers)} LoRA weight quantizers for {bits}-bit")
 
         torch.cuda.empty_cache()
         gc.collect()
