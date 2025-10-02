@@ -14,10 +14,6 @@ from quantization_methods import (
 
 
 class GradientQuantizer(torch.autograd.Function):
-    """
-    Quantize gradients to 8-bit during backward pass (BW8).
-    Forward passes through unchanged, backward quantizes gradients.
-    """
     @staticmethod
     def forward(ctx, input, quantizer):
         ctx.quantizer = quantizer
@@ -26,8 +22,7 @@ class GradientQuantizer(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         if ctx.quantizer is not None and not ctx.quantizer.training:
-            grad_quantized = ctx.quantizer(grad_output)
-            return grad_quantized, None
+            return ctx.quantizer(grad_output), None
         return grad_output, None
 
 class LearnableFakeQuantize(nn.Module):
@@ -93,16 +88,13 @@ class LearnableFakeQuantize(nn.Module):
             self.calibrated = True
 
     def set_num_bits(self, value):
-
         old_bits = self.num_bits
         self.num_bits = max(1, min(value, 32))
         self._update_quant_range()
-
         if old_bits != self.num_bits:
             self.calibrated = False
 
     def _update_quant_range(self):
-        
         if self.symmetric:
             self.quant_min = -(2 ** (self.num_bits - 1))
             self.quant_max = 2 ** (self.num_bits - 1) - 1
@@ -111,7 +103,6 @@ class LearnableFakeQuantize(nn.Module):
             self.quant_max = 2 ** self.num_bits - 1
 
     def start_calibration(self):
-        
         self.collecting_stats = True
         self.calibrated = False
         self.num_batches_collected = 0
@@ -119,29 +110,23 @@ class LearnableFakeQuantize(nn.Module):
         self.temp_max = None
 
     def finish_calibration(self, debug=False):
-        
         if self.num_batches_collected > 0 and self.temp_min is not None:
             self.running_min.resize_as_(self.temp_min).copy_(self.temp_min)
             self.running_max.resize_as_(self.temp_max).copy_(self.temp_max)
             with torch.no_grad():
                 if self.quantizer_type == 'log':
-                    log_min = self.running_min
-                    log_max = self.running_max
-                    log_range = log_max - log_min
-
-                    self.zero_point.resize_as_(self.running_max).copy_(log_min)
+                    log_range = self.running_max - self.running_min
+                    self.zero_point.resize_as_(self.running_max).copy_(self.running_min)
                     self.scale.resize_as_(self.running_max).copy_(log_range)
                 else:
                     if self.symmetric:
-                        abs_max = torch.max(torch.abs(self.running_min), torch.abs(self.running_max))
-                        abs_max = torch.clamp(abs_max, min=self.eps)
+                        abs_max = torch.clamp(torch.max(torch.abs(self.running_min), torch.abs(self.running_max)), min=self.eps)
                         self.scale.resize_as_(abs_max).copy_(abs_max / (2**(self.num_bits-1) - 1))
                         self.zero_point.resize_as_(abs_max).zero_()
                     else:
                         range_val = torch.clamp(self.running_max - self.running_min, min=self.eps)
                         self.scale.resize_as_(range_val).copy_(range_val / (2**self.num_bits - 1))
-                        self.zero_point.resize_as_(range_val)
-                        self.zero_point.copy_(torch.round(-self.running_min / self.scale))
+                        self.zero_point.resize_as_(range_val).copy_(torch.round(-self.running_min / self.scale))
 
                 if debug:
                     print(f"         Computed scale: mean={self.scale.mean().item():.6f}")
@@ -156,7 +141,6 @@ class LearnableFakeQuantize(nn.Module):
                 print(f"      ⚠️ No statistics collected for {self.num_bits}-bit {self.quantizer_type} quantizer")
 
     def _get_reduction_dims(self, tensor):
-        
         if self.per_channel and self.channel_dim is not None:
             dims_to_reduce = list(range(tensor.dim()))
             actual_dim = self.channel_dim if self.channel_dim >= 0 else tensor.dim() + self.channel_dim
@@ -167,10 +151,8 @@ class LearnableFakeQuantize(nn.Module):
         return dims_to_reduce
 
     def _reduce_min_max(self, tensor, dims_to_reduce):
-        
         if not dims_to_reduce:
             return tensor, tensor
-
         min_val = tensor
         max_val = tensor
         for dim in sorted(dims_to_reduce, reverse=True):
@@ -179,7 +161,6 @@ class LearnableFakeQuantize(nn.Module):
         return min_val, max_val
 
     def _get_default_shape(self, x, default_value):
-        
         if self.per_channel and self.channel_dim is not None:
             shape = list(x.shape)
             actual_dim = self.channel_dim if self.channel_dim >= 0 else len(shape) + self.channel_dim
@@ -189,16 +170,13 @@ class LearnableFakeQuantize(nn.Module):
             return torch.tensor(default_value, device=x.device)
 
     def _collect_statistics_batch(self, x):
-        
         with torch.no_grad():
             if self.quantizer_type == 'log':
                 abs_x = torch.abs(x)
                 non_zero_mask = abs_x > self.eps
 
                 if non_zero_mask.any():
-                    abs_x_clamped = torch.clamp(abs_x, min=self.eps)
-                    log_x = torch.log2(abs_x_clamped)
-
+                    log_x = torch.log2(torch.clamp(abs_x, min=self.eps))
                     dims_to_reduce = self._get_reduction_dims(log_x)
                     min_val, max_val = self._reduce_min_max(log_x, dims_to_reduce)
 
@@ -243,14 +221,7 @@ class LearnableFakeQuantize(nn.Module):
             raise ValueError(f"Unknown quantizer type: {self.quantizer_type}. Supported types: 'minmax', 'log'")
 
     def _quantize_minmax(self, x):
-        
-        return apply_minmax_quantization(
-            x, self.scale, self.zero_point,
-            self.num_bits, self.symmetric
-        )
+        return apply_minmax_quantization(x, self.scale, self.zero_point, self.num_bits, self.symmetric)
 
     def _quantize_log(self, x):
-        
-        return apply_log_quantization(
-            x, self.zero_point, self.scale, self.num_bits, self.symmetric
-        )
+        return apply_log_quantization(x, self.zero_point, self.scale, self.num_bits, self.symmetric)
