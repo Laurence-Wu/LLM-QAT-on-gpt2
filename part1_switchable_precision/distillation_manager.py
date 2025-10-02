@@ -61,7 +61,7 @@ class DistillationManager:
 
         return cache_entry
 
-    def compute_distillation_loss(self, student_outputs, input_ids, accumulative = True):
+    def compute_distillation_loss(self, student_outputs, input_ids, accumulative = False):
         
         teacher = self._get_from_cache(input_ids)
 

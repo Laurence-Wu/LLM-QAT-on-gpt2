@@ -89,8 +89,8 @@
     }
   },
   "perplexity": {
-    "stride": 256,
-    "max_length": 256,
+    "stride": 512,
+    "max_length": 1024,
     "max_samples": 500,
     "batch_size": 1,
     "datasets": {

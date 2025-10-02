@@ -94,10 +94,6 @@ class PerplexityEvaluator:
         all_losses = []
         max_texts = self.config.get('max_samples', 100)
 
-        # Calculate context and prediction sizes
-        context_size = max_length // 2  # First half for context
-        predict_size = max_length - context_size  # Second half for prediction
-
         print(f"Using sliding window: {max_length} tokens, stride: {stride}")
         print(f"Processing {min(len(texts), max_texts)} texts")
 
@@ -124,8 +120,8 @@ class PerplexityEvaluator:
                 end_loc = min(begin_loc + max_length, seq_len)
                 window_size = end_loc - begin_loc
 
-                # Need at least context_size + some tokens to predict
-                if window_size < context_size + 10:
+                # Need minimum window size for meaningful evaluation
+                if window_size < 64:
                     break
 
                 input_ids = encodings.input_ids[:, begin_loc:end_loc].to(self.device)
@@ -140,20 +136,21 @@ class PerplexityEvaluator:
                     shift_logits = logits[..., :-1, :].contiguous()
                     shift_labels = input_ids[..., 1:].contiguous()
 
-                    # CRITICAL: Only score tokens AFTER the context prefix
+                    # CRITICAL: Only score tokens with sufficient context
                     if window_idx == 0:
-                        # First window: skip initial tokens (they have no context)
-                        skip_tokens = min(32, window_size // 4)  # Skip first 32 tokens or 25% of window
+                        # First window: skip initial tokens (they have no/little context)
+                        skip_tokens = 32
                     else:
-                        # Subsequent windows: skip the context portion (first half)
-                        skip_tokens = context_size
+                        # Subsequent windows: skip the overlapping portion (already scored in previous window)
+                        # With stride=512, max_length=1024: skip first 512 tokens
+                        skip_tokens = stride
 
                     # Only calculate loss on tokens with sufficient context
                     if shift_logits.size(1) > skip_tokens:
                         shift_logits = shift_logits[:, skip_tokens:, :]
                         shift_labels = shift_labels[:, skip_tokens:]
                     else:
-                        continue  # Window too small after skipping context
+                        continue  # Window too small after skipping overlap
 
                     loss_fct = torch.nn.CrossEntropyLoss()
                     loss = loss_fct(
