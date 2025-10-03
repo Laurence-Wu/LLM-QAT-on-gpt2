@@ -31,7 +31,7 @@ class ModelConfig:
 
 class CPTConfig:
     def __init__(self):
-        self.total_cycles = 25
+        self.total_cycles = 5
         self.schedule_type = 'cosine'
         self.prt_start_bits = 2
         self.prt_threshold = 0.01
@@ -49,7 +49,7 @@ class TrainingConfig:
         self.adam_epsilon = 1e-8
         self.adam_betas = (0.9, 0.999)
         self.max_grad_norm = 1.0
-        self.num_epochs = 500
+        self.num_epochs = 50
         self.gradient_accumulation_steps = 3
         self.target_bits = 8
         self.eval_interval = 50
