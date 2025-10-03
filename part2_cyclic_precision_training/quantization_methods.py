@@ -9,7 +9,7 @@ class MinMaxQuantizationFunction(torch.autograd.Function):
 
         if symmetric:
             quantized = torch.round(input / scale)
-            quantized = torch.clamp(quantized, -(2**(num_bits-1)), 2**(num_bits-1) - 1)
+            quantized = torch.clamp(quantized, -(2**(num_bits-1) - 1), 2**(num_bits-1) - 1)
             return quantized * scale
         else:
             quantized = torch.round(input / scale + zero_point)

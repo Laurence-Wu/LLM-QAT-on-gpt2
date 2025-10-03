@@ -223,7 +223,7 @@ class SPModel(nn.Module):
     
     def set_precision(self, bits) -> int:
         if bits not in self.bit_widths:
-            continue
+            raise ValueError(f"Bit width {bits} not in configured widths {self.bit_widths}")
         self.current_bit_width = bits
 
         for block in self.h:
