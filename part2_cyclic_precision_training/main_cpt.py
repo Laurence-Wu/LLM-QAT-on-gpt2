@@ -261,32 +261,7 @@ def main(args):
     )
     print(f"LR scheduler: T_max={total_steps} steps ({training_config.num_epochs} epochs, {len(train_loader)} batches/epoch)")
 
-    # CRITICAL: Pre-calibrate ALL precisions that will be used during CPT
-    print("\n" + "="*70)
-    print("Pre-calibrating all precisions in CPT range...")
-    print(f"Range: [{lower_bound}, {upper_bound}] bits")
-
-    precisions_to_calibrate = [b for b in model_config.bit_widths if lower_bound <= b <= upper_bound]
-    print(f"Precisions to calibrate: {precisions_to_calibrate}")
-
-    for bits in precisions_to_calibrate:
-        # Calibrate weight and input quantizers
-        if bits not in calib_mgr.calibrated_bits:
-            print(f"  Calibrating {bits}-bit weight/input quantizers...")
-            calib_mgr.ensure_calibrated(bits)
-
-        # Calibrate LoRA weight quantizers
-        if bits not in calib_mgr.lora_calibrated_bits:
-            print(f"  Calibrating {bits}-bit LoRA weight quantizers...")
-            calib_mgr.calibrate_lora_weight_quantizers([bits])
-            calib_mgr.lora_calibrated_bits.add(bits)
-
-    print(f"\n✓ Pre-calibration complete!")
-    print(f"  Weight/input calibrated: {sorted(calib_mgr.calibrated_bits)}")
-    print(f"  LoRA weight calibrated: {sorted(calib_mgr.lora_calibrated_bits)}")
-    print("="*70)
-
-    print("\nStarting CPT training with pre-calibrated quantizers...")
+    print("\nStarting CPT training with on-demand calibration...")
     best_val_loss = float('inf')
     prev_loss = None
     loss_history = []

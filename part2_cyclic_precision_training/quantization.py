@@ -316,9 +316,9 @@ class LearnableFakeQuantize(nn.Module):
             return x
 
         if self.num_bits not in self.calibrated_bits:
-            # CRITICAL: During training, this is a fatal error
-            # During evaluation, we can proceed but warn
-            if self.training:
+            # CRITICAL: During actual training (not evaluation/PRT), this is a fatal error
+            # Check both training mode AND gradient enabled (PRT uses no_grad)
+            if self.training and torch.is_grad_enabled():
                 raise RuntimeError(
                     f"FATAL: Quantizer not calibrated for {self.num_bits}-bit precision during training!\n"
                     f"  Calibrated bits: {self.calibrated_bits}\n"
@@ -328,7 +328,7 @@ class LearnableFakeQuantize(nn.Module):
                     f"  Training cannot proceed with uncalibrated quantizers."
                 )
             else:
-                # During eval, warn once and return unquantized (for old checkpoints)
+                # During eval/PRT/no_grad, warn once and return unquantized
                 if not hasattr(self, '_warned_not_calibrated'):
                     print(f"WARNING: Quantizer not calibrated for {self.num_bits}-bit precision")
                     print(f"  Calibrated bits: {self.calibrated_bits}")
