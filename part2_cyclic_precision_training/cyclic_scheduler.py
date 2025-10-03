@@ -137,5 +137,5 @@ class PrecisionRangeTest:
         lower_bound = self.find_lower_bound(dataloader, criterion)
         # Add +1 to ensure target_bits is included in CPT cycling range
         # Example: target_bits=8 → upper_bound=9, so CPT cycles [lower, 9] which includes 8
-        upper_bound = min(self.target_bits + 1, self.max_bits)
+        upper_bound = min(self.target_bits + 4, self.max_bits)
         return lower_bound, upper_bound

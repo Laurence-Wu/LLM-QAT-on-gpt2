@@ -323,22 +323,26 @@ def main():
         help="Path to trained SP model checkpoint (.pth file)"
     )
     parser.add_argument(
-        "--config",
+        "--num_samples",
+        type=int,
+        default=100,
+        help="Number of samples to evaluate (default: 100)"
+    )
+    parser.add_argument(
+        "--switch_probs",
+        type=float,
+        nargs='+',
+        default=[0.0, 0.3, 0.5, 0.7],
+        help="List of switching probabilities to test (default: 0.0 0.3 0.5 0.7)"
+    )
+    parser.add_argument(
+        "--output_dir",
         type=str,
-        default="part4_randomSwitching/config.json",
-        help="Path to configuration JSON file"
+        default=".",
+        help="Output directory for results (default: current directory)"
     )
 
     args = parser.parse_args()
-
-    # Load configuration from JSON
-    config_path = Path(args.config)
-    if not config_path.exists():
-        print(f"Error: Config file not found at {config_path}")
-        sys.exit(1)
-
-    with open(config_path, 'r') as f:
-        config = json.load(f)
 
     # Ensure CUDA is available and set device
     if not torch.cuda.is_available():
@@ -347,21 +351,21 @@ def main():
 
     device = "cuda"
 
-    # Set output directory from config
-    output_dir = config['output_settings'].get('output_dir', '.')
-    output_path = Path(output_dir)
+    # Set output directory
+    output_path = Path(args.output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # Get parameters from config
-    num_samples = config['dataset']['num_samples']
-    switch_probs = config['defense_settings']['switch_probabilities']
+    # Get parameters from arguments
+    num_samples = args.num_samples
+    switch_probs = args.switch_probs
 
     print("="*60)
     print("ADVERSARIAL ROBUSTNESS EVALUATION WITH RANDOM SWITCHING")
     print("="*60)
     print(f"\nCheckpoint: {args.checkpoint}")
-    print(f"Config: {args.config}")
-    print(f"Output Directory: {output_path}")
+    print(f"Number of samples: {num_samples}")
+    print(f"Switch probabilities: {switch_probs}")
+    print(f"Output directory: {output_path}")
 
     # Load SP model
     model, tokenizer, bit_widths, saved_precision = load_sp_model_with_bit_config(
@@ -372,7 +376,7 @@ def main():
     if saved_precision:
         print(f"Model was saved at {saved_precision}-bit precision")
 
-    print(f"\nPreparing {config['dataset']['name']} dataset...")
+    print(f"\nPreparing WikiText-2 dataset...")
     test_samples = prepare_wikitext2_samples(
         tokenizer, num_samples=num_samples
     )
@@ -394,14 +398,18 @@ def main():
         fixed_results, switching_results, comparison, output_path
     )
 
-    # Enhance report with model and config info
+    # Enhance report with model info and evaluation parameters
     report['model_info'] = {
         'type': 'sp',
         'checkpoint': args.checkpoint,
         'bit_widths': bit_widths,
         'saved_precision': saved_precision
     }
-    report['config'] = config
+    report['evaluation_params'] = {
+        'num_samples': num_samples,
+        'switch_probabilities': switch_probs,
+        'dataset': 'WikiText-2'
+    }
 
     # Save enhanced report
     report_file = output_path / 'evaluation_results_sp.json'
