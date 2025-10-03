@@ -1,6 +1,3 @@
-"""
-Simplified Random Switching Defense for Adversarial Robustness
-"""
 
 import torch
 import random
@@ -15,22 +12,7 @@ from part1_switchable_precision.models_sp import SPLMHeadModel
 from transformers import GPT2Tokenizer, GPT2Config
 from part1_switchable_precision.config_sp import ModelConfig
 
-
 def load_sp_model_with_bit_config(checkpoint_path: str, device: str = 'cuda'):
-    """
-    Load SP model and extract bit width configuration from checkpoint.
-    Uses the same loading flow as part1/main_sp.py
-
-    Args:
-        checkpoint_path: Path to the saved model checkpoint
-        device: Device to load model on
-
-    Returns:
-        model: Loaded SPLMHeadModel
-        tokenizer: GPT2 tokenizer
-        bit_widths: List of available bit widths
-        saved_precision: Precision the model was saved at
-    """
     print(f"Loading SP model from {checkpoint_path}")
 
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
@@ -47,10 +29,8 @@ def load_sp_model_with_bit_config(checkpoint_path: str, device: str = 'cuda'):
         bit_widths = [4, 8, 16]
         saved_precision = 8
 
-    # Initialize model config matching part1/main_sp.py flow
     model_cfg = ModelConfig()
 
-    # Create GPT2Config with all required parameters
     gpt2_config = GPT2Config(
         vocab_size=model_cfg.vocab_size,
         n_positions=model_cfg.n_positions,
@@ -62,8 +42,6 @@ def load_sp_model_with_bit_config(checkpoint_path: str, device: str = 'cuda'):
         embd_pdrop=model_cfg.embd_pdrop
     )
 
-    # Set quantization and LoRA configurations
-    # Use saved config if available, otherwise use defaults
     gpt2_config.quantization_bits = saved_model_config.get('quantization_bits', model_cfg.quantization_bits)
     gpt2_config.lora_rank = saved_model_config.get('lora_rank', model_cfg.lora_rank)
     gpt2_config.lora_alpha = saved_model_config.get('lora_alpha', model_cfg.lora_alpha)
@@ -78,10 +56,8 @@ def load_sp_model_with_bit_config(checkpoint_path: str, device: str = 'cuda'):
     print(f"  lora_rank_per_bit: {gpt2_config.lora_rank_per_bit}")
     print(f"  quantizer_per_bit: {gpt2_config.quantizer_per_bit}")
 
-    # Initialize model
     model = SPLMHeadModel(gpt2_config)
 
-    # Load state dict
     if isinstance(model_state, dict):
         model.load_state_dict(model_state, strict=False)
 
@@ -97,29 +73,11 @@ def load_sp_model_with_bit_config(checkpoint_path: str, device: str = 'cuda'):
 
     return model, tokenizer, bit_widths, saved_precision
 
-
-
-
 class SimplifiedRandomSwitching:
-    """
-    Implements random precision switching for adversarial defense.
-
-    This creates a "moving target" that makes it harder for adversarial
-    examples to consistently fool the model.
-    """
 
     def __init__(self, model, bit_widths: List[int],
                  switch_probability: float = 0.3,
                  device: str = 'cuda'):
-        """
-        Initialize random switching defense.
-
-        Args:
-            model: SPLMHeadModel instance
-            bit_widths: List of available bit widths
-            switch_probability: Probability of switching precision (0-1)
-            device: Device for computation
-        """
         self.model = model
         self.bit_widths = sorted(bit_widths)
         self.switch_prob = switch_probability
@@ -133,12 +91,6 @@ class SimplifiedRandomSwitching:
         self.total_forwards = 0
 
     def select_next_precision(self) -> int:
-        """
-        Randomly decide whether to switch precision and select new one.
-
-        Returns:
-            Selected precision for next forward pass
-        """
         if random.random() < self.switch_prob:
             new_precision = random.choice(self.bit_widths)
             if new_precision != self.current_precision:
@@ -151,18 +103,6 @@ class SimplifiedRandomSwitching:
     def forward_with_switching(self, input_ids: torch.Tensor,
                               attention_mask: Optional[torch.Tensor] = None,
                               labels: Optional[torch.Tensor] = None) -> Tuple[Dict, int]:
-        """
-        Perform forward pass with random precision switching.
-
-        Args:
-            input_ids: Input token IDs
-            attention_mask: Optional attention mask
-            labels: Optional labels for loss computation
-
-        Returns:
-            outputs: Model outputs dictionary
-            precision: Precision used for this forward pass
-        """
         precision = self.select_next_precision()
         self.model.set_precision(precision)
 
@@ -182,18 +122,6 @@ class SimplifiedRandomSwitching:
                                  attention_mask: Optional[torch.Tensor] = None,
                                  labels: Optional[torch.Tensor] = None,
                                  precision: Optional[int] = None) -> Dict:
-        """
-        Perform forward pass at fixed precision (for baseline evaluation).
-
-        Args:
-            input_ids: Input token IDs
-            attention_mask: Optional attention mask
-            labels: Optional labels
-            precision: Specific precision to use
-
-        Returns:
-            Model outputs dictionary
-        """
         if precision is not None:
             self.model.set_precision(precision)
 
@@ -208,12 +136,6 @@ class SimplifiedRandomSwitching:
         return outputs
 
     def get_statistics(self) -> Dict:
-        """
-        Get statistics about precision switching behavior.
-
-        Returns:
-            Dictionary with switching statistics
-        """
         if not self.precision_history:
             return {
                 'total_forwards': 0,
@@ -237,27 +159,13 @@ class SimplifiedRandomSwitching:
         }
 
     def reset_statistics(self):
-        """Reset all tracking statistics."""
         self.precision_history = []
         self.switch_count = 0
         self.total_forwards = 0
 
-
 class DefenseEvaluator:
-    """
-    Evaluates the effectiveness of random switching defense.
-    """
 
     def __init__(self, model, tokenizer, bit_widths: List[int], device: str = 'cuda'):
-        """
-        Initialize defense evaluator.
-
-        Args:
-            model: SPLMHeadModel instance
-            tokenizer: Tokenizer instance
-            bit_widths: Available bit widths
-            device: Device for computation
-        """
         self.model = model
         self.tokenizer = tokenizer
         self.bit_widths = bit_widths
@@ -265,16 +173,6 @@ class DefenseEvaluator:
 
     def evaluate_fixed_precision(self, test_samples: List[Dict],
                                 precision: int) -> Dict:
-        """
-        Evaluate model at fixed precision (baseline).
-
-        Args:
-            test_samples: List of test samples
-            precision: Fixed precision to use
-
-        Returns:
-            Evaluation results dictionary
-        """
         defender = SimplifiedRandomSwitching(
             self.model, [precision], switch_probability=0.0, device=self.device
         )
@@ -288,7 +186,6 @@ class DefenseEvaluator:
             attention_mask = sample.get('attention_mask')
             labels = sample.get('labels')
 
-            # Add batch dimension if needed
             if input_ids.dim() == 1:
                 input_ids = input_ids.unsqueeze(0)
 
@@ -307,14 +204,12 @@ class DefenseEvaluator:
             )
 
             if labels is not None and outputs.get('loss') is not None:
-                # Count actual tokens (excluding padding -100)
                 mask = labels != -100
                 num_tokens = mask.sum().item()
 
                 total_loss += outputs['loss'].item() * num_tokens
                 total_tokens += num_tokens
 
-                # Compute token-level accuracy
                 logits = outputs['logits']
                 predictions = logits[0, :-1, :].argmax(dim=-1)
                 target_labels = labels[0, 1:]
@@ -336,16 +231,6 @@ class DefenseEvaluator:
 
     def evaluate_random_switching(self, test_samples: List[Dict],
                                  switch_probability: float) -> Dict:
-        """
-        Evaluate model with random switching defense.
-
-        Args:
-            test_samples: List of test samples
-            switch_probability: Probability of switching
-
-        Returns:
-            Evaluation results with switching statistics
-        """
         defender = SimplifiedRandomSwitching(
             self.model, self.bit_widths, switch_probability, self.device
         )
@@ -360,7 +245,6 @@ class DefenseEvaluator:
             attention_mask = sample.get('attention_mask')
             labels = sample.get('labels')
 
-            # Add batch dimension if needed
             if input_ids.dim() == 1:
                 input_ids = input_ids.unsqueeze(0)
 
@@ -402,7 +286,6 @@ class DefenseEvaluator:
             'switching_stats': stats,
             'precision_at_prediction': precision_at_prediction
         }
-
 
 if __name__ == "__main__":
     print("Testing SimplifiedRandomSwitching module...")

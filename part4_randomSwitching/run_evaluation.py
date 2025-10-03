@@ -1,7 +1,3 @@
-#!/usr/bin/env python3
-"""
-Main evaluation pipeline for adversarial robustness with random precision switching.
-"""
 
 import argparse
 import torch
@@ -23,22 +19,8 @@ from simplified_random_switching import (
 from adversarial_attacks import TextFoolerAttack, AttackEvaluator
 from wikitext_evaluation import prepare_wikitext2_samples, WikiTextEvaluator
 
-
 def evaluate_fixed_precision_baseline(model, tokenizer, test_samples: List[Dict],
                                      bit_widths: List[int], device: str = 'cuda') -> Dict:
-    """
-    Evaluate model at fixed precisions to establish baseline.
-
-    Args:
-        model: SP model
-        tokenizer: Tokenizer
-        test_samples: Test samples
-        bit_widths: Available bit widths
-        device: Device for computation
-
-    Returns:
-        Baseline results for each precision
-    """
     print("\n" + "="*60)
     print("BASELINE: Fixed Precision Evaluation")
     print("="*60)
@@ -84,14 +66,10 @@ def evaluate_fixed_precision_baseline(model, tokenizer, test_samples: List[Dict]
         print(f"    Avg accuracy drop: {bert_attack_results['avg_accuracy_drop']:.2%}")
         print(f"    Avg perturbation ratio: {bert_attack_results['avg_perturb_ratio']:.2%}")
 
-        defense_rate_tf = 1 - textfooler_results['attack_success_rate']
-        defense_rate_bert = 1 - bert_attack_results['attack_success_rate']
-
         results[precision] = {
             'clean_performance': clean_results,
             'textfooler': {
                 'attack_success_rate': textfooler_results['attack_success_rate'],
-                'defense_rate': defense_rate_tf,
                 'avg_accuracy_drop': textfooler_results['avg_accuracy_drop'],
                 'avg_original_accuracy': textfooler_results['avg_original_accuracy'],
                 'avg_adversarial_accuracy': textfooler_results['avg_adversarial_accuracy'],
@@ -100,7 +78,6 @@ def evaluate_fixed_precision_baseline(model, tokenizer, test_samples: List[Dict]
             },
             'bert_attack': {
                 'attack_success_rate': bert_attack_results['attack_success_rate'],
-                'defense_rate': defense_rate_bert,
                 'avg_accuracy_drop': bert_attack_results['avg_accuracy_drop'],
                 'avg_original_accuracy': bert_attack_results['avg_original_accuracy'],
                 'avg_adversarial_accuracy': bert_attack_results['avg_adversarial_accuracy'],
@@ -112,28 +89,12 @@ def evaluate_fixed_precision_baseline(model, tokenizer, test_samples: List[Dict]
 
     return results
 
-
 def evaluate_random_switching_defense(model, tokenizer,
                                      textfooler_adv_examples: List[Dict],
                                      bert_adv_examples: List[Dict],
                                      bit_widths: List[int],
                                      switch_probabilities: List[float],
                                      device: str = 'cuda') -> Dict:
-    """
-    Evaluate random switching defense with different probabilities.
-
-    Args:
-        model: SP model
-        tokenizer: Tokenizer
-        textfooler_adv_examples: Pre-generated TextFooler adversarial examples
-        bert_adv_examples: Pre-generated BERT-Attack adversarial examples
-        bit_widths: Available bit widths
-        switch_probabilities: List of switching probabilities to test
-        device: Device for computation
-
-    Returns:
-        Results for each switching probability
-    """
     print("\n" + "="*60)
     print("RANDOM SWITCHING DEFENSE EVALUATION")
     print("="*60)
@@ -150,57 +111,67 @@ def evaluate_random_switching_defense(model, tokenizer,
         total_success_tf = 0
         total_success_bert = 0
 
-        # TextFooler defense evaluation using stored adversarial examples
-        for adv_example in tqdm(textfooler_adv_examples, desc="TextFooler defense"):
+        print(f"\n  Diagnostic samples (every 5th):")
+        for idx, adv_example in enumerate(tqdm(textfooler_adv_examples, desc="TextFooler defense")):
             adv_text = adv_example['adversarial_text']
-            baseline_adv_accuracy = adv_example['adversarial_accuracy']
+            orig_accuracy = adv_example['original_accuracy']
+            adv_accuracy_at_32bit = adv_example['adversarial_accuracy']
+
+            original_labels = adv_example['original_labels'].to(device)
 
             adv_ids = tokenizer.encode(adv_text, return_tensors='pt').to(device)
 
             outputs_with_switch, precision = defender.forward_with_switching(
-                adv_ids, labels=adv_ids
+                adv_ids, labels=original_labels
             )
 
-            # Compute accuracy with switching
             switched_logits = outputs_with_switch['logits']
             switched_predictions = switched_logits[0, :-1, :].argmax(dim=-1)
-            switched_labels = adv_ids[0, 1:]
+            switched_labels = original_labels[0, 1:]
             switched_mask = switched_labels != -100
             switched_correct = (switched_predictions[switched_mask] == switched_labels[switched_mask]).sum().item()
             switched_total = switched_mask.sum().item()
             switched_accuracy = switched_correct / max(switched_total, 1)
 
-            # Defense succeeds if accuracy recovers by >3% absolute
-            accuracy_recovery = switched_accuracy - baseline_adv_accuracy
-            if accuracy_recovery > 0.03:  # 3% threshold
+            accuracy_gap = orig_accuracy - adv_accuracy_at_32bit
+            recovery_ratio = (switched_accuracy - adv_accuracy_at_32bit) / max(accuracy_gap, 0.01)
+
+            if idx % 5 == 0:
+                print(f"    [TF #{idx}] Precision: {precision}-bit | Orig: {orig_accuracy:.3f} | Adv@32: {adv_accuracy_at_32bit:.3f} | Switched: {switched_accuracy:.3f} | Recovery: {recovery_ratio:.2%}")
+
+            if recovery_ratio > 0.15:
                 total_success_tf += 1
 
-        # BERT-Attack defense evaluation using stored adversarial examples
-        for adv_example in tqdm(bert_adv_examples, desc="BERT-Attack defense"):
+        for idx, adv_example in enumerate(tqdm(bert_adv_examples, desc="BERT-Attack defense")):
             adv_text = adv_example['adversarial_text']
-            baseline_adv_accuracy = adv_example['adversarial_accuracy']
+            orig_accuracy = adv_example['original_accuracy']
+            adv_accuracy_at_32bit = adv_example['adversarial_accuracy']
+
+            original_labels = adv_example['original_labels'].to(device)
 
             adv_ids = tokenizer.encode(adv_text, return_tensors='pt').to(device)
 
             outputs_with_switch, precision = defender.forward_with_switching(
-                adv_ids, labels=adv_ids
+                adv_ids, labels=original_labels
             )
 
-            # Compute accuracy with switching
             switched_logits = outputs_with_switch['logits']
             switched_predictions = switched_logits[0, :-1, :].argmax(dim=-1)
-            switched_labels = adv_ids[0, 1:]
+            switched_labels = original_labels[0, 1:]
             switched_mask = switched_labels != -100
             switched_correct = (switched_predictions[switched_mask] == switched_labels[switched_mask]).sum().item()
             switched_total = switched_mask.sum().item()
             switched_accuracy = switched_correct / max(switched_total, 1)
 
-            # Defense succeeds if accuracy recovers by >3% absolute
-            accuracy_recovery = switched_accuracy - baseline_adv_accuracy
-            if accuracy_recovery > 0.03:  # 3% threshold
+            accuracy_gap = orig_accuracy - adv_accuracy_at_32bit
+            recovery_ratio = (switched_accuracy - adv_accuracy_at_32bit) / max(accuracy_gap, 0.01)
+
+            if idx % 5 == 0:
+                print(f"    [BERT #{idx}] Precision: {precision}-bit | Orig: {orig_accuracy:.3f} | Adv@32: {adv_accuracy_at_32bit:.3f} | Switched: {switched_accuracy:.3f} | Recovery: {recovery_ratio:.2%}")
+
+            if recovery_ratio > 0.15:
                 total_success_bert += 1
 
-        # Calculate defense rates based on successful attacks only
         defense_rate_tf = total_success_tf / max(len(textfooler_adv_examples), 1)
         defense_rate_bert = total_success_bert / max(len(bert_adv_examples), 1)
 
@@ -219,92 +190,43 @@ def evaluate_random_switching_defense(model, tokenizer,
 
     return results
 
-
 def compare_results(fixed_results: Dict, switching_results: Dict) -> Dict:
-    """
-    Compare fixed precision and random switching results.
-
-    Args:
-        fixed_results: Results from fixed precision evaluation
-        switching_results: Results from random switching evaluation
-
-    Returns:
-        Comparison metrics
-    """
-    best_fixed_tf = max(
-        r['textfooler']['defense_rate'] for r in fixed_results.values()
-    )
-    best_fixed_bert = max(
-        r['bert_attack']['defense_rate'] for r in fixed_results.values()
-    )
-
-    best_precision_tf = max(
-        fixed_results.keys(),
-        key=lambda k: fixed_results[k]['textfooler']['defense_rate']
-    )
-    best_precision_bert = max(
-        fixed_results.keys(),
-        key=lambda k: fixed_results[k]['bert_attack']['defense_rate']
-    )
+    baseline_defense_tf = 0.0
+    baseline_defense_bert = 0.0
 
     improvements = {}
 
     for switch_prob, results in switching_results.items():
-        tf_improvement = (
-            (results['textfooler_defense_rate'] - best_fixed_tf) / best_fixed_tf * 100
-            if best_fixed_tf > 0 else 0
-        )
-        bert_improvement = (
-            (results['bert_attack_defense_rate'] - best_fixed_bert) / best_fixed_bert * 100
-            if best_fixed_bert > 0 else 0
-        )
+        tf_absolute_improvement = results['textfooler_defense_rate'] - baseline_defense_tf
+        bert_absolute_improvement = results['bert_attack_defense_rate'] - baseline_defense_bert
 
         improvements[switch_prob] = {
-            'textfooler_improvement': tf_improvement,
-            'bert_attack_improvement': bert_improvement
+            'textfooler_improvement': tf_absolute_improvement * 100,
+            'bert_attack_improvement': bert_absolute_improvement * 100
         }
 
     return {
-        'best_fixed_textfooler': {
-            'precision': best_precision_tf,
-            'defense_rate': best_fixed_tf
-        },
-        'best_fixed_bert_attack': {
-            'precision': best_precision_bert,
-            'defense_rate': best_fixed_bert
+        'baseline_defense': {
+            'textfooler': baseline_defense_tf,
+            'bert_attack': baseline_defense_bert
         },
         'improvements': improvements
     }
 
-
 def generate_report(fixed_results: Dict, switching_results: Dict,
                    comparison: Dict, output_path: Path):
-    """
-    Generate comprehensive evaluation report.
-
-    Args:
-        fixed_results: Fixed precision results
-        switching_results: Random switching results
-        comparison: Comparison metrics
-        output_path: Path to save report
-    """
     print("\n" + "="*60)
     print("EVALUATION SUMMARY REPORT")
     print("="*60)
 
-    print(f"\nBest Fixed Precision Performance:")
-    print(f"  TextFooler: {comparison['best_fixed_textfooler']['precision']}-bit "
-          f"({comparison['best_fixed_textfooler']['defense_rate']:.2%} defense rate)")
-    print(f"  BERT-Attack: {comparison['best_fixed_bert_attack']['precision']}-bit "
-          f"({comparison['best_fixed_bert_attack']['defense_rate']:.2%} defense rate)")
+    print(f"\nBaseline Defense (no switching): 0.00%")
 
-    print("\nRandom Switching Improvements:")
+    print("\nRandom Switching Defense Rates and Improvements:")
     for switch_prob, improvements in comparison['improvements'].items():
         print(f"  Switching probability {switch_prob:.0%}:")
         print(f"    TextFooler: {improvements['textfooler_improvement']:+.1f}%")
         print(f"    BERT-Attack: {improvements['bert_attack_improvement']:+.1f}%")
 
-    # Calculate average improvement across all attacks
     best_switch_prob = max(
         comparison['improvements'].keys(),
         key=lambda k: (comparison['improvements'][k]['textfooler_improvement'] +
@@ -336,9 +258,6 @@ def generate_report(fixed_results: Dict, switching_results: Dict,
     print(f"\nResults saved to: {output_file}")
 
     return report
-
-
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -379,18 +298,15 @@ def main():
 
     args = parser.parse_args()
 
-    # Ensure CUDA is available and set device
     if not torch.cuda.is_available():
         print("Error: CUDA is not available. This evaluation requires GPU.")
         sys.exit(1)
 
     device = "cuda"
 
-    # Set output directory
     output_path = Path(args.output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # Get parameters from arguments
     num_samples = args.num_samples
     switch_probs = args.switch_probs
 
@@ -402,12 +318,10 @@ def main():
     print(f"Switch probabilities: {switch_probs}")
     print(f"Output directory: {output_path}")
 
-    # Load SP model
     model, tokenizer, checkpoint_bit_widths, saved_precision = load_sp_model_with_bit_config(
         args.checkpoint, device
     )
 
-    # Use command-line bit widths if specified, otherwise use checkpoint bit widths
     if args.bit_widths is not None:
         bit_widths = args.bit_widths
         print(f"\nUsing specified bit widths: {bit_widths}")
@@ -429,8 +343,6 @@ def main():
         model, tokenizer, test_samples, bit_widths, device
     )
 
-    # Extract adversarial examples from baseline results for defense evaluation
-    # Use examples from the best-performing precision (highest bit-width = 32-bit)
     best_precision = max(bit_widths)
     textfooler_adv_examples = fixed_results[best_precision]['textfooler'].get('adversarial_examples', [])
     bert_adv_examples = fixed_results[best_precision]['bert_attack'].get('adversarial_examples', [])
@@ -445,12 +357,10 @@ def main():
 
     comparison = compare_results(fixed_results, switching_results)
 
-    # Add model info and config to report
     report = generate_report(
         fixed_results, switching_results, comparison, output_path
     )
 
-    # Enhance report with model info and evaluation parameters
     report['model_info'] = {
         'type': 'sp',
         'checkpoint': args.checkpoint,
@@ -463,7 +373,6 @@ def main():
         'dataset': 'WikiText-2'
     }
 
-    # Save enhanced report
     report_file = output_path / 'evaluation_results_sp.json'
     with open(report_file, 'w') as f:
         json.dump(report, f, indent=2)
@@ -485,7 +394,6 @@ def main():
               f"against adversarial attacks")
 
     return report
-
 
 if __name__ == "__main__":
     main()

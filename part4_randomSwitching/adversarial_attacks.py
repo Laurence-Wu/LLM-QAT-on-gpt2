@@ -270,7 +270,12 @@ class TextFoolerAttack:
             # Keep for compatibility
             'original_loss': orig_loss,
             'adversarial_loss': adv_loss,
-            'loss_increase': (adv_loss - orig_loss) / orig_loss
+            'loss_increase': (adv_loss - orig_loss) / orig_loss,
+
+            'original_input_ids': input_ids.cpu(),
+            'adversarial_input_ids': adv_ids.cpu(),
+            'original_predictions': orig_predictions.cpu(),
+            'original_labels': labels.cpu()
         }
 
 
@@ -578,7 +583,12 @@ class BERTAttack:
             # Keep for compatibility
             'original_loss': orig_loss,
             'adversarial_loss': adv_loss,
-            'loss_increase': (adv_loss - orig_loss) / orig_loss
+            'loss_increase': (adv_loss - orig_loss) / orig_loss,
+
+            'original_input_ids': input_ids.cpu(),
+            'adversarial_input_ids': adv_ids.cpu(),
+            'original_predictions': orig_predictions.cpu(),
+            'original_labels': labels.cpu()
         }
 
 
@@ -655,7 +665,11 @@ class AttackEvaluator:
                     'original_text': text,
                     'adversarial_text': attack_result['adversarial_text'],
                     'adversarial_accuracy': attack_result.get('adversarial_accuracy', 0),
-                    'original_accuracy': attack_result.get('original_accuracy', 0)
+                    'original_accuracy': attack_result.get('original_accuracy', 0),
+                    'original_input_ids': attack_result.get('original_input_ids'),
+                    'adversarial_input_ids': attack_result.get('adversarial_input_ids'),
+                    'original_predictions': attack_result.get('original_predictions'),
+                    'original_labels': attack_result.get('original_labels')
                 })
 
             results['avg_num_changes'] += attack_result['num_changes']
@@ -739,7 +753,11 @@ class AttackEvaluator:
                     'original_text': text,
                     'adversarial_text': attack_result['adversarial_text'],
                     'adversarial_accuracy': attack_result.get('adversarial_accuracy', 0),
-                    'original_accuracy': attack_result.get('original_accuracy', 0)
+                    'original_accuracy': attack_result.get('original_accuracy', 0),
+                    'original_input_ids': attack_result.get('original_input_ids'),
+                    'adversarial_input_ids': attack_result.get('adversarial_input_ids'),
+                    'original_predictions': attack_result.get('original_predictions'),
+                    'original_labels': attack_result.get('original_labels')
                 })
 
             results['avg_num_changes'] += attack_result['num_changes']
