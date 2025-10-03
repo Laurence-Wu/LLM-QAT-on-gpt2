@@ -37,12 +37,13 @@ def load_sp_model_with_bit_config(checkpoint_path: str, device: str = 'cuda'):
 
     if isinstance(checkpoint, dict):
         model_state = checkpoint.get('model_state_dict', checkpoint)
-        model_config = checkpoint.get('config', {})
-        bit_widths = checkpoint.get('bit_widths', [4, 8, 16])
-        saved_precision = checkpoint.get('current_precision', 8)
+        saved_model_config = checkpoint.get('model_config', {})
+        bit_widths = checkpoint.get('bit_widths') or saved_model_config.get('bit_widths', [4, 8, 16])
+        saved_precision = checkpoint.get('bit_width') or checkpoint.get('current_precision', 8)
     else:
         print("Warning: Checkpoint is not a dictionary, using default bit widths")
         model_state = checkpoint
+        saved_model_config = {}
         bit_widths = [4, 8, 16]
         saved_precision = 8
 
@@ -62,14 +63,20 @@ def load_sp_model_with_bit_config(checkpoint_path: str, device: str = 'cuda'):
     )
 
     # Set quantization and LoRA configurations
-    gpt2_config.quantization_bits = model_cfg.quantization_bits
-    gpt2_config.lora_rank = model_cfg.lora_rank
-    gpt2_config.lora_alpha = model_cfg.lora_alpha
-    gpt2_config.lora_rank_per_bit = model_cfg.lora_rank_per_bit
-    gpt2_config.lora_alpha_per_bit = model_cfg.lora_alpha_per_bit
-    gpt2_config.activation_bits_per_bit = model_cfg.activation_bits_per_bit
-    gpt2_config.quantizer_per_bit = model_cfg.quantizer_per_bit
+    # Use saved config if available, otherwise use defaults
+    gpt2_config.quantization_bits = saved_model_config.get('quantization_bits', model_cfg.quantization_bits)
+    gpt2_config.lora_rank = saved_model_config.get('lora_rank', model_cfg.lora_rank)
+    gpt2_config.lora_alpha = saved_model_config.get('lora_alpha', model_cfg.lora_alpha)
+    gpt2_config.lora_rank_per_bit = saved_model_config.get('lora_rank_per_bit', model_cfg.lora_rank_per_bit)
+    gpt2_config.lora_alpha_per_bit = saved_model_config.get('lora_alpha_per_bit', model_cfg.lora_alpha_per_bit)
+    gpt2_config.activation_bits_per_bit = saved_model_config.get('activation_bits_per_bit', model_cfg.activation_bits_per_bit)
+    gpt2_config.quantizer_per_bit = saved_model_config.get('quantizer_per_bit', model_cfg.quantizer_per_bit)
     gpt2_config.bit_widths = bit_widths
+
+    print(f"Model configuration loaded from checkpoint:")
+    print(f"  bit_widths: {bit_widths}")
+    print(f"  lora_rank_per_bit: {gpt2_config.lora_rank_per_bit}")
+    print(f"  quantizer_per_bit: {gpt2_config.quantizer_per_bit}")
 
     # Initialize model
     model = SPLMHeadModel(gpt2_config)
