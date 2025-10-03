@@ -115,8 +115,8 @@ def save_target_model(model: CPTModel, config: dict, target_bits: int, output_di
         'bit_width': target_bits,
         'target_precision': target_bits,
         'timestamp': timestamp,
-        'lora_rank': config['model'].lora_rank_per_bit.get(target_bits, 0),
-        'lora_alpha': config['model'].lora_alpha_per_bit.get(target_bits, 0),
+        'lora_rank': config['model'].shared_lora_rank,
+        'lora_alpha': config['model'].shared_lora_alpha,
         'checkpoint_version': '1.2',
         'pytorch_version': torch.__version__,
         'model_type': 'CPT_TARGET'

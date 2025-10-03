@@ -12,6 +12,7 @@ class CalibrationManager:
         self.device = device
         self.calibrated_bits = set()
         self.gradient_calibrated = False
+        self.lora_calibrated_bits = set()
 
     def calibrate_all_precisions(self, bit_widths: List[int], num_batches: int = 10):
         for bits in bit_widths:

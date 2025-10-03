@@ -299,17 +299,8 @@ def main(args):
     )
     print(f"LR scheduler: T_max={total_steps} steps ({training_config.num_epochs} epochs, {len(train_loader)} batches/epoch)")
 
-    # Calibrate ALL precisions ONCE before training (CPT paper approach)
-    print("\n" + "="*70)
-    print("Pre-Training Calibration: Calibrating all precisions ONCE")
-    print("="*70)
-    for precision in model_config.bit_widths:
-        if precision < 32:
-            calib_mgr.ensure_calibrated(precision)
-    print("="*70 + "\n")
-
-    # Training loop
-    print("Starting CPT training...")
+    # Training loop with per-epoch calibration
+    print("\nStarting CPT training with per-epoch calibration...")
     best_val_loss = float('inf')
     prev_loss = None
     loss_history = []
@@ -324,7 +315,16 @@ def main(args):
         print(f"Epoch {epoch+1}/{training_config.num_epochs} - Precision: {current_precision}-bit (Cycle {cycle_num+1}/{cpt_config.total_cycles})")
         print(f"{'='*70}")
 
-        # Set model precision for this epoch (no recalibration - already done once before training)
+        # Per-epoch calibration: Calibrate ONLY current precision if not already done
+        calib_mgr.ensure_calibrated(current_precision)
+
+        # Calibrate LoRA weight quantizers for this precision
+        if current_precision not in calib_mgr.lora_calibrated_bits:
+            print(f"  Calibrating LoRA weight quantizers for {current_precision}-bit...")
+            calib_mgr.calibrate_lora_weight_quantizers([current_precision])
+            calib_mgr.lora_calibrated_bits.add(current_precision)
+
+        # Set model precision for this epoch
         model.set_precision(current_precision)
 
         # Train one epoch at this precision
