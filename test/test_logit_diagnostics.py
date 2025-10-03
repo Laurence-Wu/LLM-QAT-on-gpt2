@@ -22,7 +22,7 @@ part2_dir = os.path.join(parent_dir, 'part2_cyclic_precision_training')
 sys.path.insert(0, part2_dir)
 
 from cpt_model import CPTModel
-from config_cpt import get_default_config
+from config_cpt import get_config
 from transformers import GPT2Tokenizer
 
 
@@ -32,7 +32,7 @@ def test_simple_prompt_confidence():
     print("TEST 1: Simple Prompt Confidence")
     print("="*80)
 
-    config = get_default_config()
+    config = get_config()
     model = CPTModel(config)
     model.eval()
     model.cuda()
@@ -71,7 +71,7 @@ def test_fp32_vs_quantized():
     print("TEST 2: FP32 vs Quantized Logits")
     print("="*80)
 
-    config = get_default_config()
+    config = get_config()
     model = CPTModel(config)
     model.eval()
     model.cuda()
@@ -117,7 +117,7 @@ def test_layernorm_output():
     print("TEST 3: LayerNorm Output Analysis")
     print("="*80)
 
-    config = get_default_config()
+    config = get_config()
     model = CPTModel(config)
     model.eval()
     model.cuda()
@@ -174,7 +174,7 @@ def test_lm_head_weights():
     print("TEST 4: lm_head Weight Verification")
     print("="*80)
 
-    config = get_default_config()
+    config = get_config()
     model = CPTModel(config)
     model.eval()
     model.cuda()
@@ -210,7 +210,7 @@ def test_lora_contribution():
     print("TEST 5: LoRA Contribution Analysis")
     print("="*80)
 
-    config = get_default_config()
+    config = get_config()
     model = CPTModel(config)
     model.eval()
     model.cuda()
@@ -264,7 +264,7 @@ def test_hidden_state_progression():
     print("TEST 6: Hidden State Progression Through Layers")
     print("="*80)
 
-    config = get_default_config()
+    config = get_config()
     model = CPTModel(config)
     model.eval()
     model.cuda()
@@ -320,7 +320,7 @@ def test_quantizer_scales():
     print("TEST 7: Quantizer Scale Analysis")
     print("="*80)
 
-    config = get_default_config()
+    config = get_config()
     model = CPTModel(config)
     model.eval()
     model.cuda()

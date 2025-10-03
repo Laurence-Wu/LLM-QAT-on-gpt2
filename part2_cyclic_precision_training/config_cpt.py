@@ -39,7 +39,7 @@ class CPTConfig:
 
 class TrainingConfig:
     def __init__(self):
-        self.train_split = 'train[:80000]'
+        self.train_split = 'train[:8000]'
         self.val_split = 'validation[:5000]'
         self.batch_size = 32
         self.max_seq_length = 256
@@ -49,7 +49,7 @@ class TrainingConfig:
         self.adam_epsilon = 1e-8
         self.adam_betas = (0.9, 0.999)
         self.max_grad_norm = 1.0
-        self.num_epochs = 10
+        self.num_epochs = 500
         self.gradient_accumulation_steps = 3
         self.target_bits = 8
         self.eval_interval = 50
