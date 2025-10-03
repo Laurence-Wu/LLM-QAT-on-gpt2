@@ -78,8 +78,13 @@ def evaluate(model: CPTModel, dataloader: DataLoader, device: str, precision: in
             outputs = model(input_ids=input_ids, labels=labels)
             loss = outputs.loss
 
-            total_loss += loss.item() * labels.numel()
-            total_tokens += labels.numel()
+            # Model shifts labels by 1 (predicts labels[1:] from logits[:-1])
+            # so actual tokens used = seq_len - 1
+            batch_size, seq_len = labels.shape
+            actual_tokens = batch_size * (seq_len - 1)
+
+            total_loss += loss.item() * actual_tokens
+            total_tokens += actual_tokens
 
     avg_loss = total_loss / total_tokens
     perplexity = np.exp(avg_loss)

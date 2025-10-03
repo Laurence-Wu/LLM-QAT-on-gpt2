@@ -19,6 +19,7 @@ from part1_switchable_precision.config_sp import ModelConfig
 def load_sp_model_with_bit_config(checkpoint_path: str, device: str = 'cuda'):
     """
     Load SP model and extract bit width configuration from checkpoint.
+    Uses the same loading flow as part1/main_sp.py
 
     Args:
         checkpoint_path: Path to the saved model checkpoint
@@ -30,7 +31,7 @@ def load_sp_model_with_bit_config(checkpoint_path: str, device: str = 'cuda'):
         bit_widths: List of available bit widths
         saved_precision: Precision the model was saved at
     """
-    print(f"Loading model from {checkpoint_path}")
+    print(f"Loading SP model from {checkpoint_path}")
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
 
@@ -45,25 +46,35 @@ def load_sp_model_with_bit_config(checkpoint_path: str, device: str = 'cuda'):
         bit_widths = [4, 8, 16]
         saved_precision = 8
 
-    from transformers import GPT2Config
-    from part1_switchable_precision.config_sp import ModelConfig
-
+    # Initialize model config matching part1/main_sp.py flow
     model_cfg = ModelConfig()
+
+    # Create GPT2Config with all required parameters
     gpt2_config = GPT2Config(
         vocab_size=model_cfg.vocab_size,
         n_positions=model_cfg.n_positions,
         n_embd=model_cfg.n_embd,
         n_layer=model_cfg.n_layer,
-        n_head=model_cfg.n_head
+        n_head=model_cfg.n_head,
+        activation_function='gelu_new',
+        layer_norm_epsilon=model_cfg.layer_norm_epsilon,
+        embd_pdrop=model_cfg.embd_pdrop
     )
 
-    gpt2_config.bit_widths = bit_widths
+    # Set quantization and LoRA configurations
+    gpt2_config.quantization_bits = model_cfg.quantization_bits
+    gpt2_config.lora_rank = model_cfg.lora_rank
+    gpt2_config.lora_alpha = model_cfg.lora_alpha
     gpt2_config.lora_rank_per_bit = model_cfg.lora_rank_per_bit
     gpt2_config.lora_alpha_per_bit = model_cfg.lora_alpha_per_bit
+    gpt2_config.activation_bits_per_bit = model_cfg.activation_bits_per_bit
     gpt2_config.quantizer_per_bit = model_cfg.quantizer_per_bit
+    gpt2_config.bit_widths = bit_widths
 
+    # Initialize model
     model = SPLMHeadModel(gpt2_config)
 
+    # Load state dict
     if isinstance(model_state, dict):
         model.load_state_dict(model_state, strict=False)
 
@@ -73,7 +84,7 @@ def load_sp_model_with_bit_config(checkpoint_path: str, device: str = 'cuda'):
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     tokenizer.pad_token = tokenizer.eos_token
 
-    print(f"Model loaded successfully")
+    print(f"SP model loaded successfully")
     print(f"  Available bit widths: {bit_widths}")
     print(f"  Model was saved at {saved_precision}-bit precision")
 

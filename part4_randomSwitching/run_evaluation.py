@@ -17,7 +17,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from simplified_random_switching import (
     load_sp_model_with_bit_config,
-    load_cpt_model_with_bit_config,
     SimplifiedRandomSwitching,
     DefenseEvaluator
 )
@@ -311,24 +310,6 @@ def generate_report(fixed_results: Dict, switching_results: Dict,
     return report
 
 
-def load_model_by_type(checkpoint_path, model_type, device):
-    """
-    Load model based on type (SP or CPT).
-
-    Args:
-        checkpoint_path: Path to model checkpoint
-        model_type: 'sp' or 'cpt'
-        device: Device to load model to
-
-    Returns:
-        model, tokenizer, bit_widths, saved_precision
-    """
-    if model_type.lower() == 'sp':
-        return load_sp_model_with_bit_config(checkpoint_path, device)
-    elif model_type.lower() == 'cpt':
-        return load_cpt_model_with_bit_config(checkpoint_path, device)
-    else:
-        raise ValueError(f"Unknown model type: {model_type}. Must be 'sp' or 'cpt'")
 
 
 def main():
@@ -339,14 +320,7 @@ def main():
         "--checkpoint",
         type=str,
         required=True,
-        help="Path to trained model checkpoint (.pth file)"
-    )
-    parser.add_argument(
-        "--model_type",
-        type=str,
-        required=True,
-        choices=['sp', 'cpt'],
-        help="Model type: 'sp' for Switchable Precision or 'cpt' for Cyclic Precision Training"
+        help="Path to trained SP model checkpoint (.pth file)"
     )
     parser.add_argument(
         "--config",
@@ -385,17 +359,16 @@ def main():
     print("="*60)
     print("ADVERSARIAL ROBUSTNESS EVALUATION WITH RANDOM SWITCHING")
     print("="*60)
-    print(f"\nModel Type: {args.model_type.upper()}")
-    print(f"Checkpoint: {args.checkpoint}")
+    print(f"\nCheckpoint: {args.checkpoint}")
     print(f"Config: {args.config}")
     print(f"Output Directory: {output_path}")
 
-    # Load model based on type
-    model, tokenizer, bit_widths, saved_precision = load_model_by_type(
-        args.checkpoint, args.model_type, device
+    # Load SP model
+    model, tokenizer, bit_widths, saved_precision = load_sp_model_with_bit_config(
+        args.checkpoint, device
     )
 
-    print(f"\nLoaded {args.model_type.upper()} model with bit widths: {bit_widths}")
+    print(f"\nLoaded SP model with bit widths: {bit_widths}")
     if saved_precision:
         print(f"Model was saved at {saved_precision}-bit precision")
 
@@ -423,7 +396,7 @@ def main():
 
     # Enhance report with model and config info
     report['model_info'] = {
-        'type': args.model_type,
+        'type': 'sp',
         'checkpoint': args.checkpoint,
         'bit_widths': bit_widths,
         'saved_precision': saved_precision
@@ -431,7 +404,7 @@ def main():
     report['config'] = config
 
     # Save enhanced report
-    report_file = output_path / f'evaluation_results_{args.model_type}.json'
+    report_file = output_path / 'evaluation_results_sp.json'
     with open(report_file, 'w') as f:
         json.dump(report, f, indent=2)
     print(f"\nEnhanced report saved to: {report_file}")

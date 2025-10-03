@@ -50,6 +50,6 @@ class WikiTextDataset(Dataset):
     def __getitem__(self, idx):
         seq = self.sequences[idx]
         return {
-            'input_ids': seq[:-1],
-            'labels': seq[1:]
+            'input_ids': seq,
+            'labels': seq
         }
