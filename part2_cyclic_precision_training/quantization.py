@@ -316,13 +316,26 @@ class LearnableFakeQuantize(nn.Module):
             return x
 
         if self.num_bits not in self.calibrated_bits:
-            if not hasattr(self, '_warned_not_calibrated'):
-                print(f"WARNING: Quantizer not calibrated for {self.num_bits}-bit precision")
-                print(f"  Calibrated bits: {self.calibrated_bits}")
-                print(f"  Available scales: {list(self.scales.keys())}")
-                print(f"  Available zero_points: {list(self.zero_points.keys())}")
-                self._warned_not_calibrated = True
-            return x
+            # CRITICAL: During training, this is a fatal error
+            # During evaluation, we can proceed but warn
+            if self.training:
+                raise RuntimeError(
+                    f"FATAL: Quantizer not calibrated for {self.num_bits}-bit precision during training!\n"
+                    f"  Calibrated bits: {self.calibrated_bits}\n"
+                    f"  Available scales: {list(self.scales.keys())}\n"
+                    f"  Available zero_points: {list(self.zero_points.keys())}\n"
+                    f"  This indicates a bug in the calibration logic.\n"
+                    f"  Training cannot proceed with uncalibrated quantizers."
+                )
+            else:
+                # During eval, warn once and return unquantized (for old checkpoints)
+                if not hasattr(self, '_warned_not_calibrated'):
+                    print(f"WARNING: Quantizer not calibrated for {self.num_bits}-bit precision")
+                    print(f"  Calibrated bits: {self.calibrated_bits}")
+                    print(f"  Available scales: {list(self.scales.keys())}")
+                    print(f"  Available zero_points: {list(self.zero_points.keys())}")
+                    self._warned_not_calibrated = True
+                return x
 
         # Use per-precision calibration parameters
         scale = self.scales[self.num_bits]
