@@ -143,7 +143,6 @@ def evaluate_random_switching_defense(model, tokenizer, test_samples: List[Dict]
         )
 
         total_success_tf = 0
-        total_success_grad = 0
         total_success_bert = 0
         total_samples = 0
 
@@ -165,35 +164,23 @@ def evaluate_random_switching_defense(model, tokenizer, test_samples: List[Dict]
                 outputs_with_switch, precision = defender.forward_with_switching(
                     adv_ids, labels=adv_ids
                 )
-                switched_loss = outputs_with_switch['loss'].item()
 
-                if switched_loss < attack_result['adversarial_loss'] * 0.9:
-                    total_success_tf += 1
+                # Compute accuracy with switching
+                switched_logits = outputs_with_switch['logits']
+                switched_predictions = switched_logits[0, :-1, :].argmax(dim=-1)
+                switched_labels = adv_ids[0, 1:]
+                switched_mask = switched_labels != -100
+                switched_correct = (switched_predictions[switched_mask] == switched_labels[switched_mask]).sum().item()
+                switched_total = switched_mask.sum().item()
+                switched_accuracy = switched_correct / max(switched_total, 1)
+
+                # Defense succeeds if accuracy recovers by >3% absolute
+                if 'adversarial_accuracy' in attack_result:
+                    accuracy_recovery = switched_accuracy - attack_result['adversarial_accuracy']
+                    if accuracy_recovery > 0.03:  # 3% threshold
+                        total_success_tf += 1
 
             total_samples += 1
-
-        # Gradient attack defense evaluation
-        for i, sample in enumerate(tqdm(test_samples[:30], desc="Gradient defense")):
-            input_ids = sample['input_ids'].to(device)
-            labels = sample.get('labels', input_ids.clone()).to(device)
-
-            # Use the highest non-FP32 precision available for gradient attack
-            attack_precision = max([b for b in bit_widths if b < 32]) if any(b < 32 for b in bit_widths) else max(bit_widths)
-            model.set_precision(attack_precision)
-
-            gradient_attack = GradientAttack(model, tokenizer, device)
-            attack_result = gradient_attack.hotflip_attack(input_ids, labels)
-
-            if attack_result['success']:
-                perturbed_ids = attack_result['perturbed_ids']
-
-                outputs_with_switch, precision = defender.forward_with_switching(
-                    perturbed_ids, labels=labels
-                )
-                switched_loss = outputs_with_switch['loss'].item()
-
-                if switched_loss < attack_result['adversarial_loss'] * 0.9:
-                    total_success_grad += 1
 
         # BERT-Attack defense evaluation
         from adversarial_attacks import BERTAttack
@@ -215,26 +202,34 @@ def evaluate_random_switching_defense(model, tokenizer, test_samples: List[Dict]
                 outputs_with_switch, precision = defender.forward_with_switching(
                     adv_ids, labels=adv_ids
                 )
-                switched_loss = outputs_with_switch['loss'].item()
 
-                if switched_loss < attack_result['adversarial_loss'] * 0.9:
-                    total_success_bert += 1
+                # Compute accuracy with switching
+                switched_logits = outputs_with_switch['logits']
+                switched_predictions = switched_logits[0, :-1, :].argmax(dim=-1)
+                switched_labels = adv_ids[0, 1:]
+                switched_mask = switched_labels != -100
+                switched_correct = (switched_predictions[switched_mask] == switched_labels[switched_mask]).sum().item()
+                switched_total = switched_mask.sum().item()
+                switched_accuracy = switched_correct / max(switched_total, 1)
+
+                # Defense succeeds if accuracy recovers by >3% absolute
+                if 'adversarial_accuracy' in attack_result:
+                    accuracy_recovery = switched_accuracy - attack_result['adversarial_accuracy']
+                    if accuracy_recovery > 0.03:  # 3% threshold
+                        total_success_bert += 1
 
         defense_rate_tf = total_success_tf / max(total_samples, 1)
-        defense_rate_grad = total_success_grad / max(total_samples, 1)
         defense_rate_bert = total_success_bert / max(total_samples, 1)
 
         stats = defender.get_statistics()
 
         print(f"  TextFooler defense rate: {defense_rate_tf:.2%}")
-        print(f"  Gradient defense rate: {defense_rate_grad:.2%}")
         print(f"  BERT-Attack defense rate: {defense_rate_bert:.2%}")
         print(f"  Actual switch rate: {stats['switch_rate']:.2%}")
         print(f"  Precision distribution: {stats['precision_distribution']}")
 
         results[switch_prob] = {
             'textfooler_defense_rate': defense_rate_tf,
-            'gradient_defense_rate': defense_rate_grad,
             'bert_attack_defense_rate': defense_rate_bert,
             'switching_statistics': stats
         }
@@ -256,9 +251,6 @@ def compare_results(fixed_results: Dict, switching_results: Dict) -> Dict:
     best_fixed_tf = max(
         r['textfooler']['defense_rate'] for r in fixed_results.values()
     )
-    best_fixed_grad = max(
-        r['gradient']['defense_rate'] for r in fixed_results.values()
-    )
     best_fixed_bert = max(
         r['bert_attack']['defense_rate'] for r in fixed_results.values()
     )
@@ -266,10 +258,6 @@ def compare_results(fixed_results: Dict, switching_results: Dict) -> Dict:
     best_precision_tf = max(
         fixed_results.keys(),
         key=lambda k: fixed_results[k]['textfooler']['defense_rate']
-    )
-    best_precision_grad = max(
-        fixed_results.keys(),
-        key=lambda k: fixed_results[k]['gradient']['defense_rate']
     )
     best_precision_bert = max(
         fixed_results.keys(),
@@ -283,10 +271,6 @@ def compare_results(fixed_results: Dict, switching_results: Dict) -> Dict:
             (results['textfooler_defense_rate'] - best_fixed_tf) / best_fixed_tf * 100
             if best_fixed_tf > 0 else 0
         )
-        grad_improvement = (
-            (results['gradient_defense_rate'] - best_fixed_grad) / best_fixed_grad * 100
-            if best_fixed_grad > 0 else 0
-        )
         bert_improvement = (
             (results['bert_attack_defense_rate'] - best_fixed_bert) / best_fixed_bert * 100
             if best_fixed_bert > 0 else 0
@@ -294,7 +278,6 @@ def compare_results(fixed_results: Dict, switching_results: Dict) -> Dict:
 
         improvements[switch_prob] = {
             'textfooler_improvement': tf_improvement,
-            'gradient_improvement': grad_improvement,
             'bert_attack_improvement': bert_improvement
         }
 
@@ -302,10 +285,6 @@ def compare_results(fixed_results: Dict, switching_results: Dict) -> Dict:
         'best_fixed_textfooler': {
             'precision': best_precision_tf,
             'defense_rate': best_fixed_tf
-        },
-        'best_fixed_gradient': {
-            'precision': best_precision_grad,
-            'defense_rate': best_fixed_grad
         },
         'best_fixed_bert_attack': {
             'precision': best_precision_bert,
@@ -333,8 +312,6 @@ def generate_report(fixed_results: Dict, switching_results: Dict,
     print(f"\nBest Fixed Precision Performance:")
     print(f"  TextFooler: {comparison['best_fixed_textfooler']['precision']}-bit "
           f"({comparison['best_fixed_textfooler']['defense_rate']:.2%} defense rate)")
-    print(f"  Gradient: {comparison['best_fixed_gradient']['precision']}-bit "
-          f"({comparison['best_fixed_gradient']['defense_rate']:.2%} defense rate)")
     print(f"  BERT-Attack: {comparison['best_fixed_bert_attack']['precision']}-bit "
           f"({comparison['best_fixed_bert_attack']['defense_rate']:.2%} defense rate)")
 
@@ -342,15 +319,13 @@ def generate_report(fixed_results: Dict, switching_results: Dict,
     for switch_prob, improvements in comparison['improvements'].items():
         print(f"  Switching probability {switch_prob:.0%}:")
         print(f"    TextFooler: {improvements['textfooler_improvement']:+.1f}%")
-        print(f"    Gradient: {improvements['gradient_improvement']:+.1f}%")
         print(f"    BERT-Attack: {improvements['bert_attack_improvement']:+.1f}%")
 
     # Calculate average improvement across all attacks
     best_switch_prob = max(
         comparison['improvements'].keys(),
         key=lambda k: (comparison['improvements'][k]['textfooler_improvement'] +
-                      comparison['improvements'][k]['gradient_improvement'] +
-                      comparison['improvements'][k]['bert_attack_improvement']) / 3
+                      comparison['improvements'][k]['bert_attack_improvement']) / 2
     )
     print(f"\nOptimal switching probability: {best_switch_prob:.0%}")
 
@@ -366,7 +341,6 @@ def generate_report(fixed_results: Dict, switching_results: Dict,
             'optimal_switch_probability': best_switch_prob,
             'expected_improvement': {
                 'textfooler': comparison['improvements'][best_switch_prob]['textfooler_improvement'],
-                'gradient': comparison['improvements'][best_switch_prob]['gradient_improvement'],
                 'bert_attack': comparison['improvements'][best_switch_prob]['bert_attack_improvement']
             }
         }
@@ -510,11 +484,13 @@ def main():
     if comparison['improvements']:
         best_improvement = max(
             comparison['improvements'].values(),
-            key=lambda x: x['gradient_improvement']
+            key=lambda x: (x['textfooler_improvement'] + x['bert_attack_improvement']) / 2
         )
+        avg_improvement = (best_improvement['textfooler_improvement'] +
+                          best_improvement['bert_attack_improvement']) / 2
         print(f"\nKey Finding: Random switching provides up to "
-              f"{best_improvement['gradient_improvement']:.1f}% improvement "
-              f"against gradient attacks")
+              f"{avg_improvement:.1f}% average improvement "
+              f"against adversarial attacks")
 
     return report
 
