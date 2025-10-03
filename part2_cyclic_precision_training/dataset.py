@@ -3,16 +3,13 @@ from torch.utils.data import Dataset
 from datasets import load_dataset
 
 class WikiTextDataset(Dataset):
-
     def __init__(self, split: str, tokenizer, max_seq_length: int = 256, doc_stride: int = 128):
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
         self.doc_stride = doc_stride
 
-
         dataset = load_dataset('wikitext', 'wikitext-2-raw-v1', split=split)
         self.texts = dataset['text']
-
 
         self.sequences = self._create_sequences()
 
@@ -22,13 +19,11 @@ class WikiTextDataset(Dataset):
             if len(text.strip()) == 0:
                 continue
 
-
             tokens = self.tokenizer(
                 text,
                 truncation=False,
                 return_tensors='pt'
             )['input_ids'][0]
-
 
             for i in range(0, len(tokens) - self.max_seq_length + 1, self.doc_stride):
                 seq = tokens[i:i + self.max_seq_length]

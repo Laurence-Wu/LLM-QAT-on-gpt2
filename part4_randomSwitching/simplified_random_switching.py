@@ -280,8 +280,7 @@ class DefenseEvaluator:
         )
 
         total_loss = 0
-        correct_predictions = 0
-        total_predictions = 0
+        total_tokens = 0
 
         for sample in test_samples:
             input_ids = sample['input_ids'].to(self.device)
@@ -307,23 +306,21 @@ class DefenseEvaluator:
             )
 
             if labels is not None and outputs.get('loss') is not None:
-                total_loss += outputs['loss'].item()
-
-            predictions = outputs['logits'].argmax(dim=-1)
-            if labels is not None:
+                # Count actual tokens (excluding padding -100)
                 mask = labels != -100
-                correct_predictions += (predictions[mask] == labels[mask]).sum().item()
-                total_predictions += mask.sum().item()
+                num_tokens = mask.sum().item()
 
-        accuracy = correct_predictions / max(total_predictions, 1)
-        avg_loss = total_loss / max(len(test_samples), 1)
+                total_loss += outputs['loss'].item() * num_tokens
+                total_tokens += num_tokens
+
+        avg_loss = total_loss / max(total_tokens, 1)
+        perplexity = np.exp(avg_loss)
 
         return {
             'precision': precision,
-            'accuracy': accuracy,
+            'perplexity': perplexity,
             'avg_loss': avg_loss,
-            'correct_predictions': correct_predictions,
-            'total_predictions': total_predictions
+            'total_tokens': total_tokens
         }
 
     def evaluate_random_switching(self, test_samples: List[Dict],

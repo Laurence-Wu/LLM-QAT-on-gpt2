@@ -57,7 +57,7 @@ def evaluate_fixed_precision_baseline(model, tokenizer, test_samples: List[Dict]
             test_samples[:50], precision
         )
 
-        print(f"  Clean accuracy: {clean_results['accuracy']:.2%}")
+        print(f"  Clean perplexity: {clean_results['perplexity']:.2f}")
         print(f"  Clean loss: {clean_results['avg_loss']:.3f}")
 
         print("  Testing TextFooler attack...")
@@ -76,8 +76,18 @@ def evaluate_fixed_precision_baseline(model, tokenizer, test_samples: List[Dict]
         print(f"    Attack success rate: {gradient_results['attack_success_rate']:.2%}")
         print(f"    Avg changed tokens: {gradient_results['avg_change_ratio']:.2%}")
 
+        print("  Testing BERT-Attack...")
+        bert_attack_results = attack_evaluator.evaluate_bert_attack(
+            test_samples[:30], max_samples=30
+        )
+
+        print(f"    Attack success rate: {bert_attack_results['attack_success_rate']:.2%}")
+        print(f"    Avg perturbation ratio: {bert_attack_results['avg_perturb_ratio']:.2%}")
+        print(f"    Avg perplexity increase: {bert_attack_results['avg_perplexity_increase']:.2%}")
+
         defense_rate_tf = 1 - textfooler_results['attack_success_rate']
         defense_rate_grad = 1 - gradient_results['attack_success_rate']
+        defense_rate_bert = 1 - bert_attack_results['attack_success_rate']
 
         results[precision] = {
             'clean_performance': clean_results,
@@ -90,6 +100,12 @@ def evaluate_fixed_precision_baseline(model, tokenizer, test_samples: List[Dict]
                 'attack_success_rate': gradient_results['attack_success_rate'],
                 'defense_rate': defense_rate_grad,
                 'avg_changes': gradient_results['avg_change_ratio']
+            },
+            'bert_attack': {
+                'attack_success_rate': bert_attack_results['attack_success_rate'],
+                'defense_rate': defense_rate_bert,
+                'avg_perturbations': bert_attack_results['avg_perturb_ratio'],
+                'avg_perplexity_increase': bert_attack_results['avg_perplexity_increase']
             }
         }
 
@@ -129,8 +145,10 @@ def evaluate_random_switching_defense(model, tokenizer, test_samples: List[Dict]
 
         total_success_tf = 0
         total_success_grad = 0
+        total_success_bert = 0
         total_samples = 0
 
+        # TextFooler defense evaluation
         for i, sample in enumerate(tqdm(test_samples[:30], desc="TextFooler defense")):
             model.set_precision(max(bit_widths))
 
@@ -155,6 +173,7 @@ def evaluate_random_switching_defense(model, tokenizer, test_samples: List[Dict]
 
             total_samples += 1
 
+        # Gradient attack defense evaluation
         for i, sample in enumerate(tqdm(test_samples[:30], desc="Gradient defense")):
             input_ids = sample['input_ids'].to(device)
             labels = sample.get('labels', input_ids.clone()).to(device)
@@ -177,19 +196,47 @@ def evaluate_random_switching_defense(model, tokenizer, test_samples: List[Dict]
                 if switched_loss < attack_result['adversarial_loss'] * 0.9:
                     total_success_grad += 1
 
+        # BERT-Attack defense evaluation
+        from adversarial_attacks import BERTAttack
+        bert_attacker = BERTAttack(model, tokenizer, device)
+
+        for i, sample in enumerate(tqdm(test_samples[:30], desc="BERT-Attack defense")):
+            model.set_precision(max(bit_widths))
+
+            text = sample.get('text', '')
+            if not text:
+                text = tokenizer.decode(sample['input_ids'], skip_special_tokens=True)
+
+            attack_result = bert_attacker.generate_adversarial(text)
+
+            if attack_result['success']:
+                adv_text = attack_result['adversarial_text']
+                adv_ids = tokenizer.encode(adv_text, return_tensors='pt').to(device)
+
+                outputs_with_switch, precision = defender.forward_with_switching(
+                    adv_ids, labels=adv_ids
+                )
+                switched_loss = outputs_with_switch['loss'].item()
+
+                if switched_loss < attack_result['adversarial_loss'] * 0.9:
+                    total_success_bert += 1
+
         defense_rate_tf = total_success_tf / max(total_samples, 1)
         defense_rate_grad = total_success_grad / max(total_samples, 1)
+        defense_rate_bert = total_success_bert / max(total_samples, 1)
 
         stats = defender.get_statistics()
 
         print(f"  TextFooler defense rate: {defense_rate_tf:.2%}")
         print(f"  Gradient defense rate: {defense_rate_grad:.2%}")
+        print(f"  BERT-Attack defense rate: {defense_rate_bert:.2%}")
         print(f"  Actual switch rate: {stats['switch_rate']:.2%}")
         print(f"  Precision distribution: {stats['precision_distribution']}")
 
         results[switch_prob] = {
             'textfooler_defense_rate': defense_rate_tf,
             'gradient_defense_rate': defense_rate_grad,
+            'bert_attack_defense_rate': defense_rate_bert,
             'switching_statistics': stats
         }
 
@@ -213,6 +260,9 @@ def compare_results(fixed_results: Dict, switching_results: Dict) -> Dict:
     best_fixed_grad = max(
         r['gradient']['defense_rate'] for r in fixed_results.values()
     )
+    best_fixed_bert = max(
+        r['bert_attack']['defense_rate'] for r in fixed_results.values()
+    )
 
     best_precision_tf = max(
         fixed_results.keys(),
@@ -221,6 +271,10 @@ def compare_results(fixed_results: Dict, switching_results: Dict) -> Dict:
     best_precision_grad = max(
         fixed_results.keys(),
         key=lambda k: fixed_results[k]['gradient']['defense_rate']
+    )
+    best_precision_bert = max(
+        fixed_results.keys(),
+        key=lambda k: fixed_results[k]['bert_attack']['defense_rate']
     )
 
     improvements = {}
@@ -234,10 +288,15 @@ def compare_results(fixed_results: Dict, switching_results: Dict) -> Dict:
             (results['gradient_defense_rate'] - best_fixed_grad) / best_fixed_grad * 100
             if best_fixed_grad > 0 else 0
         )
+        bert_improvement = (
+            (results['bert_attack_defense_rate'] - best_fixed_bert) / best_fixed_bert * 100
+            if best_fixed_bert > 0 else 0
+        )
 
         improvements[switch_prob] = {
             'textfooler_improvement': tf_improvement,
-            'gradient_improvement': grad_improvement
+            'gradient_improvement': grad_improvement,
+            'bert_attack_improvement': bert_improvement
         }
 
     return {
@@ -248,6 +307,10 @@ def compare_results(fixed_results: Dict, switching_results: Dict) -> Dict:
         'best_fixed_gradient': {
             'precision': best_precision_grad,
             'defense_rate': best_fixed_grad
+        },
+        'best_fixed_bert_attack': {
+            'precision': best_precision_bert,
+            'defense_rate': best_fixed_bert
         },
         'improvements': improvements
     }
@@ -273,16 +336,22 @@ def generate_report(fixed_results: Dict, switching_results: Dict,
           f"({comparison['best_fixed_textfooler']['defense_rate']:.2%} defense rate)")
     print(f"  Gradient: {comparison['best_fixed_gradient']['precision']}-bit "
           f"({comparison['best_fixed_gradient']['defense_rate']:.2%} defense rate)")
+    print(f"  BERT-Attack: {comparison['best_fixed_bert_attack']['precision']}-bit "
+          f"({comparison['best_fixed_bert_attack']['defense_rate']:.2%} defense rate)")
 
     print("\nRandom Switching Improvements:")
     for switch_prob, improvements in comparison['improvements'].items():
         print(f"  Switching probability {switch_prob:.0%}:")
         print(f"    TextFooler: {improvements['textfooler_improvement']:+.1f}%")
         print(f"    Gradient: {improvements['gradient_improvement']:+.1f}%")
+        print(f"    BERT-Attack: {improvements['bert_attack_improvement']:+.1f}%")
 
+    # Calculate average improvement across all attacks
     best_switch_prob = max(
         comparison['improvements'].keys(),
-        key=lambda k: comparison['improvements'][k]['gradient_improvement']
+        key=lambda k: (comparison['improvements'][k]['textfooler_improvement'] +
+                      comparison['improvements'][k]['gradient_improvement'] +
+                      comparison['improvements'][k]['bert_attack_improvement']) / 3
     )
     print(f"\nOptimal switching probability: {best_switch_prob:.0%}")
 
@@ -298,7 +367,8 @@ def generate_report(fixed_results: Dict, switching_results: Dict,
             'optimal_switch_probability': best_switch_prob,
             'expected_improvement': {
                 'textfooler': comparison['improvements'][best_switch_prob]['textfooler_improvement'],
-                'gradient': comparison['improvements'][best_switch_prob]['gradient_improvement']
+                'gradient': comparison['improvements'][best_switch_prob]['gradient_improvement'],
+                'bert_attack': comparison['improvements'][best_switch_prob]['bert_attack_improvement']
             }
         }
     }
@@ -343,6 +413,13 @@ def main():
         default=".",
         help="Output directory for results (default: current directory)"
     )
+    parser.add_argument(
+        "--bit_widths",
+        type=int,
+        nargs='+',
+        default=None,
+        help="Bit widths to evaluate (e.g., --bit_widths 3 4 5). Overrides checkpoint bit widths."
+    )
 
     args = parser.parse_args()
 
@@ -370,11 +447,19 @@ def main():
     print(f"Output directory: {output_path}")
 
     # Load SP model
-    model, tokenizer, bit_widths, saved_precision = load_sp_model_with_bit_config(
+    model, tokenizer, checkpoint_bit_widths, saved_precision = load_sp_model_with_bit_config(
         args.checkpoint, device
     )
 
-    print(f"\nLoaded SP model with bit widths: {bit_widths}")
+    # Use command-line bit widths if specified, otherwise use checkpoint bit widths
+    if args.bit_widths is not None:
+        bit_widths = args.bit_widths
+        print(f"\nUsing specified bit widths: {bit_widths}")
+        print(f"(Checkpoint has bit widths: {checkpoint_bit_widths})")
+    else:
+        bit_widths = checkpoint_bit_widths
+        print(f"\nLoaded SP model with bit widths: {bit_widths}")
+
     if saved_precision:
         print(f"Model was saved at {saved_precision}-bit precision")
 

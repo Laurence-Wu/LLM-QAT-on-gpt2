@@ -14,7 +14,7 @@ class ModelConfig:
         self.quantizer_per_bit = {
             3: 'minmax',
             4: 'minmax',
-            5: 'minmax',
+            5: 'log',
             6: 'log',
             7: 'log',
             8: 'log',
