@@ -50,7 +50,7 @@ class TrainingConfig:
         self.max_grad_norm = 1.0
         self.num_epochs = 600
         self.gradient_accumulation_steps = 3
-        self.target_bits = 8
+        self.target_bits = 4
         self.eval_interval = 50
         self.empty_cache_interval = 25
         self.num_workers = 0
