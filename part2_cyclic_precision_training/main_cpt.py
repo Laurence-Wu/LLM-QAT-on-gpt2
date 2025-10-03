@@ -6,13 +6,10 @@ Implements the key CPT training loop with precision cycling within each step.
 import os
 import sys
 
-# Fix import path to ensure we use part2 modules
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
-# Remove parent directory from path if it exists to avoid importing from part1
 if parent_dir in sys.path:
     sys.path.remove(parent_dir)
-# Insert current directory at the beginning to prioritize local imports
 sys.path.insert(0, current_dir)
 
 import torch
@@ -104,7 +101,6 @@ def load_pretrained_weights(model, model_config):
     """Load pretrained GPT-2 weights into CPT model and freeze all except LoRA adapters."""
     print("Loading pretrained GPT-2 weights...")
 
-    import gc
     from transformers import GPT2LMHeadModel
     pretrained = GPT2LMHeadModel.from_pretrained('gpt2')
 
@@ -340,45 +336,15 @@ def main(args):
         loss_change = avg_epoch_loss - prev_loss if prev_loss is not None else 0.0
         prev_loss = avg_epoch_loss
 
-        grad_norms = []
-        lora_norms = []
-        for name, param in model.named_parameters():
-            if param.requires_grad and param.grad is not None:
-                grad_norms.append(param.grad.norm().item())
-                if 'lora' in name.lower():
-                    lora_norms.append(param.norm().item())
-
-        grad_norm_mean = np.mean(grad_norms) if grad_norms else 0.0
-        grad_norm_max = np.max(grad_norms) if grad_norms else 0.0
-        lora_norm_mean = np.mean(lora_norms) if lora_norms else 0.0
-
-        if torch.cuda.is_available():
-            memory_mb = torch.cuda.max_memory_allocated() / 1024 / 1024
-        else:
-            memory_mb = 0.0
-
-        print(f"\n{'-'*70}")
-        print(f"Epoch {epoch+1} Training Summary:")
-        print(f"  Loss: {avg_epoch_loss:.4f} (Δ={loss_change:+.4f})")
-        print(f"  LR: {current_lr:.2e}")
-        print(f"  Gradient Norm: mean={grad_norm_mean:.4f}, max={grad_norm_max:.4f}")
-        print(f"  LoRA Param Norm: mean={lora_norm_mean:.4f}")
-        print(f"  Time: {epoch_time:.2f}s")
-        if memory_mb > 0:
-            print(f"  Memory: {memory_mb:.1f} MB")
+        print(f"  Loss: {avg_epoch_loss:.4f} (Δ={loss_change:+.4f}), LR: {current_lr:.2e}, Time: {epoch_time:.1f}s")
 
         if loss_change > 0 and epoch > 0:
             print(f"  ⚠️ Loss increased by {loss_change:.4f}")
 
-        if grad_norm_max > 10.0:
-            print(f"  ⚠️ WARNING: Large gradient detected ({grad_norm_max:.2f}) - possible instability")
-
         if len(loss_history) >= 3:
             recent_losses = loss_history[-3:]
             if all(recent_losses[i] < recent_losses[i+1] for i in range(len(recent_losses)-1)):
-                print(f"  ⚠️ WARNING: Loss increasing for 3 consecutive epochs - possible divergence")
-
-        print(f"{'-'*70}")
+                print(f"  ⚠️ WARNING: Loss increasing for 3 consecutive epochs")
 
         # Clear cache periodically
         if (epoch + 1) % 5 == 0 and torch.cuda.is_available():
@@ -398,34 +364,12 @@ def main(args):
                         print(f"  New best: {best_val_loss:.4f}")
 
     print("\n" + "="*70)
-    print("Training completed! Final Summary:")
-    print("="*70)
-
-    total_training_time = sum([time.time() - t for t in [epoch_start_time]])
-    avg_epoch_time = total_training_time / training_config.num_epochs if training_config.num_epochs > 0 else 0
-
-    print(f"\nTraining Statistics:")
-    print(f"  Total Epochs: {training_config.num_epochs}")
+    print("Training completed!")
     print(f"  Best Validation Loss: {best_val_loss:.4f}")
     print(f"  Final Training Loss: {loss_history[-1]:.4f}")
-    print(f"  Average Epoch Time: {avg_epoch_time:.2f}s")
-
     if len(loss_history) > 1:
         loss_improvement = loss_history[0] - loss_history[-1]
-        print(f"  Loss Improvement: {loss_improvement:.4f} ({100*loss_improvement/loss_history[0]:.1f}%)")
-
-    print(f"\nPrecision Schedule:")
-    print(f"  Min Precision Used: {precision_scheduler.min_bits}-bit")
-    print(f"  Max Precision Used: {precision_scheduler.max_bits}-bit")
-    print(f"  Total Cycles: {cpt_config.total_cycles}")
-    print(f"  Cycle Length: {precision_scheduler.epochs_per_cycle} epochs")
-
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    frozen_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
-    print(f"\nModel Statistics:")
-    print(f"  Trainable Parameters: {trainable_params:,}")
-    print(f"  Frozen Parameters: {frozen_params:,}")
-    print(f"  Total Parameters: {trainable_params + frozen_params:,}")
+        print(f"  Loss Improvement: {loss_improvement:.4f}")
 
     print(f"\n{'='*70}")
     print("Saving target model...")

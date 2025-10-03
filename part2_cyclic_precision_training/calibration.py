@@ -14,21 +14,6 @@ class CalibrationManager:
         self.gradient_calibrated = False
         self.lora_calibrated_bits = set()
 
-    def calibrate_all_precisions(self, bit_widths: List[int], num_batches: int = 10):
-        for bits in bit_widths:
-            if bits < 32 and bits not in self.calibrated_bits:
-                print(f"\nCalibrating {bits}-bit precision...")
-                self.model.set_precision(bits)
-                self._calibrate_precision(bits, num_batches)
-                self.calibrated_bits.add(bits)
-
-        # Calibrate LoRA weight quantizers for all precisions
-        self.calibrate_lora_weight_quantizers(bit_widths)
-
-        if not self.gradient_calibrated:
-            self.calibrate_gradient_quantizers()
-            self.gradient_calibrated = True
-
     def _calibrate_precision(self, bits: int, num_batches: int):
         if bits >= 32:
             print(f"  Skipping calibration for {bits}-bit")
@@ -254,10 +239,3 @@ class CalibrationManager:
 
         torch.cuda.empty_cache()
         gc.collect()
-
-    def calibrate_current_precision(self, bits: int, num_batches: int = 10):
-        if bits >= 32:
-            return
-        print(f"  Calibrating {bits}-bit precision...")
-        self._calibrate_precision(bits, num_batches)
-        self.calibrated_bits.add(bits)

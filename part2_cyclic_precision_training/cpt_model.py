@@ -17,17 +17,9 @@ class LoRAAdapter(nn.Module):
         self.scaling = alpha / rank if rank > 0 else 1.0
 
         if rank > 0:
-            # Kaiming initialization for lora_A (down-projection) - follows LoRA paper
             self.lora_A = nn.Parameter(torch.empty(in_features, rank))
             nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
-            # Zero initialization for lora_B (up-projection) - ensures BA = 0 at start
             self.lora_B = nn.Parameter(torch.zeros(out_features, rank))
-            self.quantize_A = LearnableFakeQuantize(
-                num_bits=num_bits, quantizer_type=quantizer_type, channel_dim=0, per_channel=True
-            )
-            self.quantize_B = LearnableFakeQuantize(
-                num_bits=num_bits, quantizer_type=quantizer_type, channel_dim=0, per_channel=True
-            )
             self.grad_quantizer_A = LearnableFakeQuantize(
                 num_bits=gradient_bits, quantizer_type='minmax', channel_dim=0, per_channel=True
             )
@@ -37,55 +29,10 @@ class LoRAAdapter(nn.Module):
         else:
             self.lora_A = None
             self.lora_B = None
-            self.quantize_A = None
-            self.quantize_B = None
             self.grad_quantizer_A = None
             self.grad_quantizer_B = None
 
         self.calibration_mode = False
-
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
-        """Handle backward compatibility when loading old checkpoints with grad_quantizer_8bit."""
-
-        # Check if loading from old checkpoint with 'grad_quantizer_8bit'
-        old_key_prefix = prefix + 'grad_quantizer_8bit.'
-        has_old_format = any(key.startswith(old_key_prefix) for key in state_dict.keys())
-
-        if has_old_format:
-            print(f"  Converting old grad_quantizer_8bit format for {prefix}")
-
-            # Find all keys belonging to old grad_quantizer_8bit
-            old_keys_to_copy = [k for k in list(state_dict.keys()) if k.startswith(old_key_prefix)]
-
-            for old_key in old_keys_to_copy:
-                # Extract the parameter name (e.g., 'scale', 'zero_point', etc.)
-                param_name = old_key[len(old_key_prefix):]
-
-                # Create new keys for both A and B quantizers
-                new_key_A = prefix + 'grad_quantizer_A.' + param_name
-                new_key_B = prefix + 'grad_quantizer_B.' + param_name
-
-                # Copy the value to both new quantizers
-                state_dict[new_key_A] = state_dict[old_key].clone()
-                state_dict[new_key_B] = state_dict[old_key].clone()
-
-        # Call parent implementation
-        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
-                                       missing_keys, unexpected_keys, error_msgs)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.lora_A is not None and self.lora_B is not None:
-            if self.calibration_mode or self.quantize_A is None:
-                lora_output = x @ self.lora_A @ self.lora_B.T
-            else:
-                lora_A_quant = self.quantize_A(self.lora_A)
-                lora_B_quant = self.quantize_B(self.lora_B)
-                lora_A_quant = GradientQuantizer.apply(lora_A_quant, self.grad_quantizer_A)
-                lora_B_quant = GradientQuantizer.apply(lora_B_quant, self.grad_quantizer_B)
-                lora_output = x @ lora_A_quant @ lora_B_quant.T
-            return lora_output * self.scaling
-        return torch.zeros_like(x[..., :self.lora_B.size(0)] if self.lora_B is not None else x)
 
 
 class CPTLinear(nn.Module):
