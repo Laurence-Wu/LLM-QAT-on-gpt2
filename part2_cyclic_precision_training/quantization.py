@@ -130,6 +130,20 @@ class LearnableFakeQuantize(nn.Module):
                         self.scale.resize_as_(range_val).copy_(range_val / (2**self.num_bits - 1))
                         self.zero_point.resize_as_(range_val).copy_(torch.round(-self.running_min / self.scale))
 
+                # Validate scales for numerical stability
+                scale_min = self.scale.min().item()
+                scale_max = self.scale.max().item()
+                scale_mean = self.scale.mean().item()
+
+                if scale_min < 1e-6:
+                    print(f"⚠️ WARNING: Very small scale detected!")
+                    print(f"  Scale min: {scale_min:.2e}")
+                    print(f"  Scale max: {scale_max:.2e}")
+                    print(f"  Scale mean: {scale_mean:.2e}")
+                    print(f"  Quantizer: {self.num_bits}-bit {self.quantizer_type}")
+                    print(f"  Running min: {self.running_min.min().item():.2e}")
+                    print(f"  Running max: {self.running_max.max().item():.2e}")
+
                 if debug:
                     print(f"         Computed scale: mean={self.scale.mean().item():.6f}")
 

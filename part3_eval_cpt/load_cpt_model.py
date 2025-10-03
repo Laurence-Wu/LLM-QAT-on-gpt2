@@ -95,7 +95,8 @@ def load_cpt_model(model_path: str):
     model = model.cuda()
     model.eval()
 
-    model.disable_lora_for_calibration()
+    # CRITICAL: Enable LoRA for evaluation (disable_lora_for_calibration was turning it off!)
+    model.enable_lora_after_calibration()
 
     lora_calibration_count = 0
     for name, module in model.named_modules():
@@ -103,11 +104,11 @@ def load_cpt_model(model_path: str):
             if module.calibration_mode:
                 lora_calibration_count += 1
 
-    print(f"LoRA in calibration mode (unquantized FP32): {lora_calibration_count} adapters")
+    print(f"LoRA in calibration mode (should be 0): {lora_calibration_count} adapters")
 
     print("\nDEBUG: Model configuration:")
     print(f"  Current precision: {checkpoint_bit_width}-bit")
-    print(f"  LoRA calibration_mode: True (FP32, unquantized)")
+    print(f"  LoRA enabled: {not bool(lora_calibration_count)} (calibration_mode=False)")
     print(f"  Model on device: {next(model.parameters()).device}")
 
     return model, checkpoint_bit_width, model_config, training_config
