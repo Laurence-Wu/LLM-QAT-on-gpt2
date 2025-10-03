@@ -22,24 +22,26 @@ class CyclicPrecisionScheduler:
         self.current_epoch = 0
 
     def get_precision_for_epoch(self, epoch: int) -> int:
-        if epoch % self.epochs_per_cycle == 0:
-            position = self.epochs_per_cycle
-        else :
-            position = epoch % self.epochs_per_cycle
+        # Get position within current cycle (0 to epochs_per_cycle-1)
+        position = epoch % self.epochs_per_cycle
+        # Normalize to [0, 1]
+        t = float(position) / self.epochs_per_cycle
+
         if self.schedule_type == 'cosine':
-            t = float(position / self.epochs_per_cycle)
-            T = self.epochs_per_cycle
-            precision = self.min_bits + 0.5 * (self.max_bits - self.min_bits) * (1 - math.cos(t * math.pi / T))
+            # Cosine schedule: min → max → min over one cycle
+            # t=0: cos(0)=1, 1-cos=0, precision=min_bits
+            # t=0.5: cos(π)=-1, 1-cos=2, precision=max_bits
+            # t=1: cos(2π)=1, 1-cos=0, precision=min_bits
+            precision = self.min_bits + 0.5 * (self.max_bits - self.min_bits) * (1 - math.cos(t * 2 * math.pi))
         elif self.schedule_type == 'triangular':
-            t = float(position / self.epochs_per_cycle)
-            T = self.epochs_per_cycle
-            if t < T / 2:
-                precision = self.min_bits + (self.max_bits - self.min_bits) * (2 * t / T)
+            # Triangular schedule: min → max → min over one cycle
+            if t < 0.5:
+                precision = self.min_bits + (self.max_bits - self.min_bits) * (2 * t)
             else:
-                precision = self.max_bits - (self.max_bits - self.min_bits) * (2 * (t - T/2) / T)
+                precision = self.max_bits - (self.max_bits - self.min_bits) * (2 * (t - 0.5))
         else:
             raise ValueError(f"Unknown schedule type: {self.schedule_type}")
-        print(precision)
+
         return self._round_to_nearest_bitwidth(precision)
 
     def _round_to_nearest_bitwidth(self, precision: float) -> int:
