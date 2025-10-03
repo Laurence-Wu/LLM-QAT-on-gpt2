@@ -101,6 +101,29 @@ def load_cpt_model(model_path: str):
     if checkpoint_bit_width:
         model.set_precision(checkpoint_bit_width)
 
+    print("\nDEBUG: Checking checkpoint state_dict for calibration data...")
+    state_dict = checkpoint['model_state_dict']
+
+    # Check for old format (scale/zero_point buffers)
+    old_format_keys = [k for k in state_dict.keys() if k.endswith('.scale') or k.endswith('.zero_point')]
+    if old_format_keys:
+        print(f"  Found {len(old_format_keys)} old-format calibration keys (scale/zero_point buffers)")
+        print(f"  Sample keys: {old_format_keys[:3]}")
+    else:
+        print("  No old-format calibration keys found")
+
+    # Check for new format (per-precision scales/zero_points)
+    new_format_keys = [k for k in state_dict.keys() if '_scales_' in k or '_zero_points_' in k or k.endswith('_calibrated_bits')]
+    if new_format_keys:
+        print(f"  Found {len(new_format_keys)} new-format calibration keys (per-precision)")
+        print(f"  Sample keys: {new_format_keys[:3]}")
+    else:
+        print("  No new-format calibration keys found")
+
+    # Check quantizer keys
+    quantizer_keys = [k for k in state_dict.keys() if 'quantizer' in k]
+    print(f"  Total quantizer-related keys in checkpoint: {len(quantizer_keys)}")
+
     model.load_state_dict(checkpoint['model_state_dict'], strict=False)
     print("Checkpoint weights loaded (LoRA + trained LayerNorms)")
 

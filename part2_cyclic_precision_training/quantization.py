@@ -83,6 +83,8 @@ class LearnableFakeQuantize(nn.Module):
         self.zero_points = {}
         self.calibrated_bits = set()
 
+        debug_load = False  # Set to True to debug loading
+
         # Extract per-precision calibration from state_dict
         keys_to_remove = []
 
@@ -131,6 +133,11 @@ class LearnableFakeQuantize(nn.Module):
             scale_val = state_dict[scale_key]
             zero_point_val = state_dict[zero_point_key]
 
+            if debug_load:
+                print(f"    Loading old-format calibration for {prefix}")
+                print(f"      scale shape: {scale_val.shape}, zero_point shape: {zero_point_val.shape}")
+                print(f"      Storing for {self.num_bits}-bit precision")
+
             # Store in current precision
             self.scales[self.num_bits] = scale_val.clone()
             self.zero_points[self.num_bits] = zero_point_val.clone()
@@ -139,6 +146,9 @@ class LearnableFakeQuantize(nn.Module):
             # Remove from state_dict to avoid errors
             del state_dict[scale_key]
             del state_dict[zero_point_key]
+        else:
+            if debug_load and not keys_to_remove:
+                print(f"    No calibration data found for {prefix}")
 
         # Load running_min/max buffers normally
         for buffer_name in ['running_min', 'running_max']:
@@ -306,6 +316,12 @@ class LearnableFakeQuantize(nn.Module):
             return x
 
         if self.num_bits not in self.calibrated_bits:
+            if not hasattr(self, '_warned_not_calibrated'):
+                print(f"WARNING: Quantizer not calibrated for {self.num_bits}-bit precision")
+                print(f"  Calibrated bits: {self.calibrated_bits}")
+                print(f"  Available scales: {list(self.scales.keys())}")
+                print(f"  Available zero_points: {list(self.zero_points.keys())}")
+                self._warned_not_calibrated = True
             return x
 
         # Use per-precision calibration parameters
