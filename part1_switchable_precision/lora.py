@@ -132,15 +132,8 @@ class SPLinearWithLoRA(nn.Module):
 
         bits_key = f'{self.current_bits}bit'
 
-        if bits_key not in self.quantizers_weight:
-            print(f"ERROR: Missing weight quantizer for {bits_key}")
-            print(f"Available: {list(self.quantizers_weight.keys())}")
+        if bits_key not in self.quantizers_weight or bits_key not in self.quantizers_input:
             raise KeyError(f"No weight quantizer for {bits_key}")
-
-        if bits_key not in self.quantizers_input:
-            print(f"ERROR: Missing input quantizer for {bits_key}")
-            print(f"Available: {list(self.quantizers_input.keys())}")
-            raise KeyError(f"No input quantizer for {bits_key}")
 
         weight_quantizer = self.quantizers_weight[bits_key]
         input_quantizer = self.quantizers_input[bits_key]
@@ -155,23 +148,3 @@ class SPLinearWithLoRA(nn.Module):
 
         lora_output = active_lora(x)
         return base_output + lora_output
-
-    def get_all_parameters(self):
-        
-        params = list(self.linear.parameters())
-        for lora in self.lora_adapters.values():
-            params.extend(lora.parameters())
-        for quantizer in self.quantizers_weight.values():
-            params.extend(quantizer.parameters())
-        for quantizer in self.quantizers_input.values():
-            params.extend(quantizer.parameters())
-        return params
-
-    def get_active_parameters(self):
-        
-        bits_key = f'{self.current_bits}bit'
-        params = list(self.linear.parameters())
-        params.extend(self.lora_adapters[bits_key].parameters())
-        params.extend(self.quantizers_weight[bits_key].parameters())
-        params.extend(self.quantizers_input[bits_key].parameters())
-        return params

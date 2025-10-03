@@ -93,8 +93,6 @@ def evaluate(model: CPTModel, dataloader: DataLoader, device: str, precision: in
     }
 
 def load_pretrained_weights(model, model_config):
-    print("Loading pretrained GPT-2 weights...")
-
     from transformers import GPT2LMHeadModel
     pretrained = GPT2LMHeadModel.from_pretrained('gpt2')
 
@@ -153,8 +151,6 @@ def load_pretrained_weights(model, model_config):
                     module.shared_lora.lora_B.requires_grad = True
                     lora_count += 1
 
-    print(f"Enabled {lora_count} shared LoRA adapter pairs for training")
-
     del pretrained
     torch.cuda.empty_cache()
     gc.collect()
@@ -163,11 +159,6 @@ def load_pretrained_weights(model, model_config):
     frozen_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
     total_params = trainable_params + frozen_params
 
-    print("Pretrained weights loaded and frozen successfully")
-    print(f"  Total parameters: {total_params:,}")
-    print(f"  Frozen parameters: {frozen_params:,} ({100*frozen_params/total_params:.1f}%)")
-    print(f"  Trainable (LoRA) parameters: {trainable_params:,} ({100*trainable_params/total_params:.1f}%)")
-
 def main(args):
     config = get_config()
     training_config = config['training']
@@ -175,12 +166,10 @@ def main(args):
     cpt_config = config['cpt']
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
 
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     tokenizer.pad_token = tokenizer.eos_token
 
-    print("Loading datasets...")
     train_dataset = cpt_dataset.WikiTextDataset(
         training_config.train_split,
         tokenizer,
@@ -207,15 +196,12 @@ def main(args):
         num_workers=training_config.num_workers
     )
 
-    print("Creating CPT model...")
     model = CPTModel(config)
 
     load_pretrained_weights(model, model_config)
 
     model = model.to(device)
-    print(f"Model moved to {device}")
 
-    print("\nInitializing calibration manager...")
     calib_mgr = CalibrationManager(model, train_loader, device)
 
     if not calib_mgr.gradient_calibrated:
@@ -228,10 +214,7 @@ def main(args):
         total_epochs=training_config.num_epochs,
         total_cycles=cpt_config.total_cycles
     )
-    print(f"CPT: {cpt_config.total_cycles} cycles over {training_config.num_epochs} epochs")
-    print(f"Cycle length: {precision_scheduler.epochs_per_cycle} epochs")
 
-    print("Running Precision Range Test...")
     prt = PrecisionRangeTest(
         model,
         start_bits=cpt_config.prt_start_bits,
@@ -241,7 +224,6 @@ def main(args):
         target_bits=training_config.target_bits
     )
     lower_bound, upper_bound = prt.find_bounds(train_loader, nn.CrossEntropyLoss())
-    print(f"PRT Results: Lower bound = {lower_bound}-bit, Upper bound = {upper_bound}-bit")
     precision_scheduler.min_bits = lower_bound
     precision_scheduler.max_bits = upper_bound
 
@@ -260,9 +242,7 @@ def main(args):
         T_max=total_steps,
         eta_min=1e-6
     )
-    print(f"LR scheduler: T_max={total_steps} steps ({training_config.num_epochs} epochs, {len(train_loader)} batches/epoch)")
 
-    print("\nStarting CPT training with on-demand calibration...")
     best_val_loss = float('inf')
     prev_loss = None
     loss_history = []
@@ -272,14 +252,10 @@ def main(args):
 
         current_precision = precision_scheduler.get_precision_for_epoch(epoch)
         cycle_num = int(epoch / precision_scheduler.epochs_per_cycle)
-        print(f"\n{'='*70}")
-        print(f"Epoch {epoch+1}/{training_config.num_epochs} - Precision: {current_precision}-bit (Cycle {cycle_num+1}/{cpt_config.total_cycles})")
-        print(f"{'='*70}")
 
         calib_mgr.ensure_calibrated(current_precision)
 
         if current_precision not in calib_mgr.lora_calibrated_bits:
-            print(f"  Calibrating LoRA weight quantizers for {current_precision}-bit...")
             calib_mgr.calibrate_lora_weight_quantizers([current_precision])
             calib_mgr.lora_calibrated_bits.add(current_precision)
 
@@ -297,65 +273,27 @@ def main(args):
         loss_change = avg_epoch_loss - prev_loss if prev_loss is not None else 0.0
         prev_loss = avg_epoch_loss
 
-        print(f"  Loss: {avg_epoch_loss:.4f} (Δ={loss_change:+.4f}), LR: {current_lr:.2e}, Time: {epoch_time:.1f}s")
-
-        if loss_change > 0 and epoch > 0:
-            print(f"  ⚠️ Loss increased by {loss_change:.4f}")
-
-        if len(loss_history) >= 3:
-            recent_losses = loss_history[-3:]
-            if all(recent_losses[i] < recent_losses[i+1] for i in range(len(recent_losses)-1)):
-                print(f"  ⚠️ WARNING: Loss increasing for 3 consecutive epochs")
-
         if (epoch + 1) % 5 == 0 and torch.cuda.is_available():
             torch.cuda.empty_cache()
 
         if (epoch + 1) % training_config.eval_interval == 0:
-            print("Running validation...")
-
             precision = current_precision
             if precision in model_config.bit_widths:
                 calib_mgr.ensure_calibrated(precision)
                 val_results = evaluate(model, val_loader, device, precision)
-                print(f"  {precision}-bit - Loss: {val_results['loss']:.4f}, PPL: {val_results['perplexity']:.2f}")
 
                 if val_results['loss'] < best_val_loss:
                     best_val_loss = val_results['loss']
-                    print(f"  New best: {best_val_loss:.4f}")
 
-    print("\n" + "="*70)
-    print("Training completed!")
-    print(f"  Best Validation Loss: {best_val_loss:.4f}")
-    print(f"  Final Training Loss: {loss_history[-1]:.4f}")
-    if len(loss_history) > 1:
-        loss_improvement = loss_history[0] - loss_history[-1]
-        print(f"  Loss Improvement: {loss_improvement:.4f}")
-
-    print(f"\n{'='*70}")
-    print("Preparing to save target model...")
     target_bits = training_config.target_bits
-    print(f"Target precision: {target_bits}-bit")
 
-
-    print(f"Ensuring calibration for target precision {target_bits}-bit...")
     calib_mgr.ensure_calibrated(target_bits)
 
-
     if target_bits not in calib_mgr.lora_calibrated_bits:
-        print(f"  Calibrating LoRA weight quantizers for target precision {target_bits}-bit...")
         calib_mgr.calibrate_lora_weight_quantizers([target_bits])
         calib_mgr.lora_calibrated_bits.add(target_bits)
-        print(f"  ✓ LoRA weight quantizers calibrated for {target_bits}-bit")
-    else:
-        print(f"  ✓ LoRA weight quantizers already calibrated for {target_bits}-bit")
 
-    print("Saving target model...")
     saved_path = cpt_deploy.save_target_model(model, config, target_bits, 'final_models')
-    if saved_path:
-        print(f"✅ Saved: {saved_path}")
-    else:
-        print("❌ Save failed")
-    print("="*70)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Cyclic Precision Training')

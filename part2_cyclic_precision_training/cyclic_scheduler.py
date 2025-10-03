@@ -22,19 +22,12 @@ class CyclicPrecisionScheduler:
         self.current_epoch = 0
 
     def get_precision_for_epoch(self, epoch: int) -> int:
-
         position = epoch % self.epochs_per_cycle
-
         t = float(position) / self.epochs_per_cycle
 
         if self.schedule_type == 'cosine':
-
-
-
-
             precision = self.min_bits + 0.5 * (self.max_bits - self.min_bits) * (1 - math.cos(t * 2 * math.pi))
         elif self.schedule_type == 'triangular':
-
             if t < 0.5:
                 precision = self.min_bits + (self.max_bits - self.min_bits) * (2 * t)
             else:
@@ -63,10 +56,6 @@ class PrecisionRangeTest:
         precision_metrics = {}
         device = next(self.model.parameters()).device
         early_stop_threshold = 0.005
-
-        print(f"\n{'='*50}")
-        print(f"PRT: {self.start_bits} to {self.max_bits} bits")
-        print(f"{'='*50}")
 
         for bits in range(self.start_bits, self.max_bits + 1):
             self.model.set_precision(bits)
@@ -103,18 +92,14 @@ class PrecisionRangeTest:
             avg_loss = total_loss / num_batches if num_batches > 0 else float('inf')
             precision_metrics[bits] = {'accuracy': current_acc, 'loss': avg_loss}
 
-            print(f"  {bits:2d}-bit: Acc={current_acc:.4f}, Loss={avg_loss:.4f}")
-
             if bits > self.start_bits:
                 prev_acc = precision_metrics[bits - 1]['accuracy']
                 improvement = (current_acc - prev_acc) / max(prev_acc, 1e-6)
 
                 if improvement > self.threshold:
-                    print(f"\n✓ Found lower bound: {bits}-bit (improvement: {improvement:.2%})")
                     return bits
 
                 if improvement < early_stop_threshold and bits >= self.start_bits + 3:
-                    print(f"\n✓ Early stop at {bits}-bit")
                     return bits
 
         max_improvement = 0
@@ -128,12 +113,10 @@ class PrecisionRangeTest:
                     max_improvement = improvement
                     optimal_lower = bits
 
-        print(f"\n✓ Lower bound: {optimal_lower}-bit")
         return optimal_lower
 
     def find_bounds(self, dataloader, criterion) -> Tuple[int, int]:
         lower_bound = self.find_lower_bound(dataloader, criterion)
-
 
         upper_bound = min(self.target_bits + 4, self.max_bits)
         lower_bound = min(lower_bound, self.target_bits)

@@ -124,6 +124,15 @@ class TextFoolerAttack:
             orig_outputs = self.model(input_ids, labels=labels)
             orig_loss = orig_outputs['loss'].item()
             orig_perplexity = np.exp(orig_loss)
+            orig_logits = orig_outputs['logits']
+
+            # Compute original token-level accuracy (next-token prediction)
+            orig_predictions = orig_logits[0, :-1].argmax(dim=-1)
+            orig_labels = labels[0, 1:]
+            orig_mask = orig_labels != -100
+            orig_correct = (orig_predictions[orig_mask] == orig_labels[orig_mask]).sum().item()
+            orig_total = orig_mask.sum().item()
+            orig_accuracy = orig_correct / max(orig_total, 1)
 
         # Compute importance scores for each token position
         importance_scores = self.compute_importance_scores(input_ids[0], labels[0])
@@ -227,10 +236,19 @@ class TextFoolerAttack:
             adv_outputs = self.model(adv_ids, labels=adv_ids)
             adv_loss = adv_outputs['loss'].item()
             adv_perplexity = np.exp(adv_loss)
+            adv_logits = adv_outputs['logits']
 
-        # Success criterion: perplexity increase > 50% for language models
-        perplexity_increase = (adv_perplexity - orig_perplexity) / orig_perplexity
-        success = perplexity_increase > 0.5
+            # Compute adversarial token-level accuracy
+            adv_predictions = adv_logits[0, :-1].argmax(dim=-1)
+            adv_labels = adv_ids[0, 1:]
+            adv_mask = adv_labels != -100
+            adv_correct = (adv_predictions[adv_mask] == adv_labels[adv_mask]).sum().item()
+            adv_total = adv_mask.sum().item()
+            adv_accuracy = adv_correct / max(adv_total, 1)
+
+        # Success criterion: accuracy drop > 5% (primary metric)
+        accuracy_drop = orig_accuracy - adv_accuracy
+        success = accuracy_drop > 0.05
 
         return {
             'success': success,
@@ -238,211 +256,21 @@ class TextFoolerAttack:
             'adversarial_text': adversarial_text,
             'num_changes': num_changes,
             'perturb_ratio': num_changes / len(words) if len(words) > 0 else 0.0,
-            'original_loss': orig_loss,
-            'adversarial_loss': adv_loss,
+
+            # PRIMARY: Accuracy metrics
+            'original_accuracy': orig_accuracy,
+            'adversarial_accuracy': adv_accuracy,
+            'accuracy_drop': accuracy_drop,
+
+            # SECONDARY: Perplexity (for filtering nonsensical attacks)
             'original_perplexity': orig_perplexity,
             'adversarial_perplexity': adv_perplexity,
-            'perplexity_increase': perplexity_increase,
+            'perplexity_increase': (adv_perplexity - orig_perplexity) / orig_perplexity,
+
+            # Keep for compatibility
+            'original_loss': orig_loss,
+            'adversarial_loss': adv_loss,
             'loss_increase': (adv_loss - orig_loss) / orig_loss
-        }
-
-
-class GradientAttack:
-    """
-    Gradient-based attack (similar to HotFlip) for language models.
-    Uses gradients to find minimal perturbations in embedding space.
-    """
-
-    def __init__(self, model, tokenizer, device='cuda'):
-        """
-        Initialize gradient attacker.
-
-        Args:
-            model: Target model to attack
-            tokenizer: Tokenizer for the model
-            device: Device for computation
-        """
-        self.model = model
-        self.tokenizer = tokenizer
-        self.device = device
-        self.model.to(device)
-
-    def hotflip_attack(self, input_ids: torch.Tensor,
-                      labels: torch.Tensor,
-                      num_iterations: int = 10,
-                      epsilon: float = 0.1) -> Dict:
-        """
-        Perform HotFlip-style gradient attack.
-
-        Args:
-            input_ids: Input token IDs
-            labels: Target labels
-            num_iterations: Number of attack iterations
-            epsilon: Perturbation magnitude
-
-        Returns:
-            Dictionary with attack results
-        """
-        input_ids = input_ids.to(self.device)
-        labels = labels.to(self.device)
-
-        if input_ids.dim() == 1:
-            input_ids = input_ids.unsqueeze(0)
-        if labels.dim() == 1:
-            labels = labels.unsqueeze(0)
-
-        with torch.no_grad():
-            orig_outputs = self.model(input_ids, labels=labels)
-            orig_loss = orig_outputs['loss'].item()
-            orig_logits = orig_outputs['logits'].clone()
-
-        embedding_layer = self.model.transformer.wte
-        vocab_size = embedding_layer.weight.shape[0]
-
-        perturbed_ids = input_ids.clone()
-
-        for iteration in range(num_iterations):
-            self.model.zero_grad()
-
-            input_embeds = embedding_layer(perturbed_ids).clone().detach()
-            input_embeds.requires_grad = True
-
-            outputs = self.model(
-                inputs_embeds=input_embeds,
-                labels=labels
-            )
-
-            loss = outputs['loss']
-            loss.backward()
-
-            grad = input_embeds.grad
-
-            with torch.no_grad():
-                grad_norm = torch.norm(grad, dim=-1, keepdim=True)
-                grad_norm = torch.where(grad_norm > 0, grad_norm, torch.ones_like(grad_norm))
-                normalized_grad = grad / grad_norm
-
-                perturbation = epsilon * normalized_grad.sign()
-                perturbed_embeds = input_embeds + perturbation
-
-                all_embeddings = embedding_layer.weight
-                distances = torch.cdist(
-                    perturbed_embeds.view(-1, perturbed_embeds.shape[-1]),
-                    all_embeddings
-                )
-                new_token_ids = distances.argmin(dim=-1)
-                perturbed_ids = new_token_ids.view(perturbed_ids.shape)
-
-        with torch.no_grad():
-            adv_outputs = self.model(perturbed_ids, labels=labels)
-            adv_loss = adv_outputs['loss'].item()
-            adv_logits = adv_outputs['logits']
-
-        num_changed = (perturbed_ids != input_ids).sum().item()
-        total_tokens = input_ids.numel()
-
-        success = adv_loss > orig_loss * 1.2
-
-        return {
-            'success': success,
-            'original_ids': input_ids,
-            'perturbed_ids': perturbed_ids,
-            'num_changed_tokens': num_changed,
-            'change_ratio': num_changed / total_tokens,
-            'original_loss': orig_loss,
-            'adversarial_loss': adv_loss,
-            'loss_increase': (adv_loss - orig_loss) / orig_loss,
-            'iterations': num_iterations,
-            'epsilon': epsilon
-        }
-
-    def pgd_attack(self, input_ids: torch.Tensor,
-                  labels: torch.Tensor,
-                  epsilon: float = 0.3,
-                  alpha: float = 0.01,
-                  num_iterations: int = 20) -> Dict:
-        """
-        Projected Gradient Descent attack in embedding space.
-
-        Args:
-            input_ids: Input token IDs
-            labels: Target labels
-            epsilon: Maximum perturbation bound
-            alpha: Step size
-            num_iterations: Number of PGD iterations
-
-        Returns:
-            Dictionary with attack results
-        """
-        input_ids = input_ids.to(self.device)
-        labels = labels.to(self.device)
-
-        if input_ids.dim() == 1:
-            input_ids = input_ids.unsqueeze(0)
-        if labels.dim() == 1:
-            labels = labels.unsqueeze(0)
-
-        embedding_layer = self.model.transformer.wte
-        original_embeds = embedding_layer(input_ids).clone().detach()
-
-        with torch.no_grad():
-            orig_outputs = self.model(input_ids, labels=labels)
-            orig_loss = orig_outputs['loss'].item()
-
-        perturbed_embeds = original_embeds.clone().detach()
-        perturbed_embeds.requires_grad = True
-
-        for iteration in range(num_iterations):
-            self.model.zero_grad()
-
-            outputs = self.model(
-                inputs_embeds=perturbed_embeds,
-                labels=labels
-            )
-
-            loss = -outputs['loss']
-            loss.backward()
-
-            with torch.no_grad():
-                gradient = perturbed_embeds.grad
-                perturbed_embeds = perturbed_embeds - alpha * gradient.sign()
-
-                delta = perturbed_embeds - original_embeds
-                delta = torch.clamp(delta, -epsilon, epsilon)
-                perturbed_embeds = original_embeds + delta
-
-            perturbed_embeds = perturbed_embeds.clone().detach()
-            perturbed_embeds.requires_grad = True
-
-        with torch.no_grad():
-            all_embeddings = embedding_layer.weight
-            distances = torch.cdist(
-                perturbed_embeds.view(-1, perturbed_embeds.shape[-1]),
-                all_embeddings
-            )
-            perturbed_ids = distances.argmin(dim=-1).view(input_ids.shape)
-
-            adv_outputs = self.model(perturbed_ids, labels=labels)
-            adv_loss = adv_outputs['loss'].item()
-
-        perturbation_norm = torch.norm(perturbed_embeds - original_embeds, p=2).item()
-        num_changed = (perturbed_ids != input_ids).sum().item()
-
-        success = adv_loss > orig_loss * 1.2
-
-        return {
-            'success': success,
-            'original_ids': input_ids,
-            'perturbed_ids': perturbed_ids,
-            'perturbation_norm': perturbation_norm,
-            'num_changed_tokens': num_changed,
-            'change_ratio': num_changed / input_ids.numel(),
-            'original_loss': orig_loss,
-            'adversarial_loss': adv_loss,
-            'loss_increase': (adv_loss - orig_loss) / orig_loss,
-            'epsilon': epsilon,
-            'alpha': alpha,
-            'iterations': num_iterations
         }
 
 
@@ -634,6 +462,15 @@ class BERTAttack:
             orig_outputs = self.model(input_ids, labels=labels)
             orig_loss = orig_outputs['loss'].item()
             orig_perplexity = np.exp(orig_loss)
+            orig_logits = orig_outputs['logits']
+
+            # Compute original token-level accuracy
+            orig_predictions = orig_logits[0, :-1].argmax(dim=-1)
+            orig_labels = labels[0, 1:]
+            orig_mask = orig_labels != -100
+            orig_correct = (orig_predictions[orig_mask] == orig_labels[orig_mask]).sum().item()
+            orig_total = orig_mask.sum().item()
+            orig_accuracy = orig_correct / max(orig_total, 1)
 
         words = text.split()
         if len(words) < 2:
@@ -707,10 +544,19 @@ class BERTAttack:
             adv_outputs = self.model(adv_ids, labels=adv_ids)
             adv_loss = adv_outputs['loss'].item()
             adv_perplexity = np.exp(adv_loss)
+            adv_logits = adv_outputs['logits']
 
-        # Success criterion: perplexity increase > 50%
-        perplexity_increase = (adv_perplexity - orig_perplexity) / orig_perplexity
-        success = perplexity_increase > 0.5
+            # Compute adversarial token-level accuracy
+            adv_predictions = adv_logits[0, :-1].argmax(dim=-1)
+            adv_labels = adv_ids[0, 1:]
+            adv_mask = adv_labels != -100
+            adv_correct = (adv_predictions[adv_mask] == adv_labels[adv_mask]).sum().item()
+            adv_total = adv_mask.sum().item()
+            adv_accuracy = adv_correct / max(adv_total, 1)
+
+        # Success criterion: accuracy drop > 5% (primary metric)
+        accuracy_drop = orig_accuracy - adv_accuracy
+        success = accuracy_drop > 0.05
 
         return {
             'success': success,
@@ -718,11 +564,20 @@ class BERTAttack:
             'adversarial_text': adversarial_text,
             'num_changes': num_changes,
             'perturb_ratio': num_changes / len(words) if len(words) > 0 else 0.0,
-            'original_loss': orig_loss,
-            'adversarial_loss': adv_loss,
+
+            # PRIMARY: Accuracy metrics
+            'original_accuracy': orig_accuracy,
+            'adversarial_accuracy': adv_accuracy,
+            'accuracy_drop': accuracy_drop,
+
+            # SECONDARY: Perplexity (for filtering nonsensical attacks)
             'original_perplexity': orig_perplexity,
             'adversarial_perplexity': adv_perplexity,
-            'perplexity_increase': perplexity_increase,
+            'perplexity_increase': (adv_perplexity - orig_perplexity) / orig_perplexity,
+
+            # Keep for compatibility
+            'original_loss': orig_loss,
+            'adversarial_loss': adv_loss,
             'loss_increase': (adv_loss - orig_loss) / orig_loss
         }
 
@@ -746,7 +601,6 @@ class AttackEvaluator:
         self.device = device
 
         self.textfooler = TextFoolerAttack(model, tokenizer, device)
-        self.gradient = GradientAttack(model, tokenizer, device)
         self.bert_attack = None  # Lazy initialization due to BERT loading time
 
     def evaluate_textfooler(self, test_samples: List[Dict],
@@ -766,7 +620,14 @@ class AttackEvaluator:
             'successful_attacks': 0,
             'avg_num_changes': 0,
             'avg_perturb_ratio': 0,
-            'avg_loss_increase': 0,
+
+            # PRIMARY: Accuracy metrics
+            'avg_original_accuracy': 0,
+            'avg_adversarial_accuracy': 0,
+            'avg_accuracy_drop': 0,
+
+            # SECONDARY: For reference
+            'avg_perplexity_increase': 0,
             'attack_success_rate': 0
         }
 
@@ -790,68 +651,23 @@ class AttackEvaluator:
             results['avg_num_changes'] += attack_result['num_changes']
             results['avg_perturb_ratio'] += attack_result['perturb_ratio']
 
-            if 'loss_increase' in attack_result:
-                results['avg_loss_increase'] += attack_result['loss_increase']
+            # Accuracy metrics
+            if 'original_accuracy' in attack_result:
+                results['avg_original_accuracy'] += attack_result['original_accuracy']
+            if 'adversarial_accuracy' in attack_result:
+                results['avg_adversarial_accuracy'] += attack_result['adversarial_accuracy']
+            if 'accuracy_drop' in attack_result:
+                results['avg_accuracy_drop'] += attack_result['accuracy_drop']
+            if 'perplexity_increase' in attack_result:
+                results['avg_perplexity_increase'] += attack_result['perplexity_increase']
 
         if results['total_samples'] > 0:
             results['avg_num_changes'] /= results['total_samples']
             results['avg_perturb_ratio'] /= results['total_samples']
-            results['avg_loss_increase'] /= results['total_samples']
-            results['attack_success_rate'] = results['successful_attacks'] / results['total_samples']
-
-        return results
-
-    def evaluate_gradient(self, test_samples: List[Dict],
-                         attack_type: str = 'hotflip',
-                         max_samples: int = 50) -> Dict:
-        """
-        Evaluate gradient-based attack on test samples.
-
-        Args:
-            test_samples: List of test samples
-            attack_type: 'hotflip' or 'pgd'
-            max_samples: Maximum samples to evaluate
-
-        Returns:
-            Evaluation results
-        """
-        results = {
-            'total_samples': 0,
-            'successful_attacks': 0,
-            'avg_changed_tokens': 0,
-            'avg_change_ratio': 0,
-            'avg_loss_increase': 0,
-            'avg_perturbation_norm': 0,
-            'attack_success_rate': 0
-        }
-
-        num_samples = min(len(test_samples), max_samples)
-
-        for sample in test_samples[:num_samples]:
-            input_ids = sample['input_ids'].to(self.device)
-            labels = sample.get('labels', input_ids.clone())
-
-            if attack_type == 'hotflip':
-                attack_result = self.gradient.hotflip_attack(input_ids, labels)
-            else:
-                attack_result = self.gradient.pgd_attack(input_ids, labels)
-
-            results['total_samples'] += 1
-            if attack_result['success']:
-                results['successful_attacks'] += 1
-
-            results['avg_changed_tokens'] += attack_result['num_changed_tokens']
-            results['avg_change_ratio'] += attack_result['change_ratio']
-            results['avg_loss_increase'] += attack_result['loss_increase']
-
-            if 'perturbation_norm' in attack_result:
-                results['avg_perturbation_norm'] += attack_result['perturbation_norm']
-
-        if results['total_samples'] > 0:
-            results['avg_changed_tokens'] /= results['total_samples']
-            results['avg_change_ratio'] /= results['total_samples']
-            results['avg_loss_increase'] /= results['total_samples']
-            results['avg_perturbation_norm'] /= results['total_samples']
+            results['avg_original_accuracy'] /= results['total_samples']
+            results['avg_adversarial_accuracy'] /= results['total_samples']
+            results['avg_accuracy_drop'] /= results['total_samples']
+            results['avg_perplexity_increase'] /= results['total_samples']
             results['attack_success_rate'] = results['successful_attacks'] / results['total_samples']
 
         return results
@@ -878,8 +694,14 @@ class AttackEvaluator:
             'successful_attacks': 0,
             'avg_num_changes': 0,
             'avg_perturb_ratio': 0,
+
+            # PRIMARY: Accuracy metrics
+            'avg_original_accuracy': 0,
+            'avg_adversarial_accuracy': 0,
+            'avg_accuracy_drop': 0,
+
+            # SECONDARY: For reference
             'avg_perplexity_increase': 0,
-            'avg_loss_increase': 0,
             'attack_success_rate': 0
         }
 
@@ -903,16 +725,23 @@ class AttackEvaluator:
             results['avg_num_changes'] += attack_result['num_changes']
             results['avg_perturb_ratio'] += attack_result['perturb_ratio']
 
+            # Accuracy metrics
+            if 'original_accuracy' in attack_result:
+                results['avg_original_accuracy'] += attack_result['original_accuracy']
+            if 'adversarial_accuracy' in attack_result:
+                results['avg_adversarial_accuracy'] += attack_result['adversarial_accuracy']
+            if 'accuracy_drop' in attack_result:
+                results['avg_accuracy_drop'] += attack_result['accuracy_drop']
             if 'perplexity_increase' in attack_result:
                 results['avg_perplexity_increase'] += attack_result['perplexity_increase']
-            if 'loss_increase' in attack_result:
-                results['avg_loss_increase'] += attack_result['loss_increase']
 
         if results['total_samples'] > 0:
             results['avg_num_changes'] /= results['total_samples']
             results['avg_perturb_ratio'] /= results['total_samples']
+            results['avg_original_accuracy'] /= results['total_samples']
+            results['avg_adversarial_accuracy'] /= results['total_samples']
+            results['avg_accuracy_drop'] /= results['total_samples']
             results['avg_perplexity_increase'] /= results['total_samples']
-            results['avg_loss_increase'] /= results['total_samples']
             results['attack_success_rate'] = results['successful_attacks'] / results['total_samples']
 
         return results
