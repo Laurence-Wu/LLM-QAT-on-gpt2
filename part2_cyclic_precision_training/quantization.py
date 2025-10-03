@@ -23,7 +23,7 @@ class GradientQuantizer(torch.autograd.Function):
     def backward(ctx, grad_output):
         if ctx.quantizer is not None and ctx.quantizer.collecting_stats:
             return ctx.quantizer(grad_output), None
-        if ctx.quantizer is not None and ctx.quantizer.calibrated:
+        if ctx.quantizer is not None and (ctx.quantizer.num_bits in ctx.quantizer.calibrated_bits):
             return ctx.quantizer(grad_output), None
         return grad_output, None
 
@@ -41,12 +41,15 @@ class LearnableFakeQuantize(nn.Module):
 
         self._update_quant_range()
 
-        self.register_buffer('scale', torch.ones(1))
-        self.register_buffer('zero_point', torch.zeros(1))
+        # Per-precision calibration parameters (dict of tensors keyed by bit-width)
+        self.scales = {}
+        self.zero_points = {}
+        self.calibrated_bits = set()
+
+        # Global statistics collection buffers
         self.register_buffer('running_min', torch.zeros(1))
         self.register_buffer('running_max', torch.zeros(1))
 
-        self.calibrated = False
         self.collecting_stats = False
         self.num_batches_collected = 0
         self.temp_min = None
@@ -54,47 +57,52 @@ class LearnableFakeQuantize(nn.Module):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        
-        if self.is_input:
-            for buffer_name in ['scale', 'zero_point', 'running_min', 'running_max']:
-                key = prefix + buffer_name
-                if key in state_dict:
-                    loaded_tensor = state_dict[key]
-                    buffer = getattr(self, buffer_name, None)
-                    if buffer is not None:
-                        if loaded_tensor.dim() == 3 and loaded_tensor.shape[1] > 1:
-                            if self.quantizer_type == 'log':
+
+        # Handle old checkpoints with single scale/zero_point buffers
+        scale_key = prefix + 'scale'
+        zero_point_key = prefix + 'zero_point'
+
+        if scale_key in state_dict and zero_point_key in state_dict:
+            # Old format: single scale/zero_point
+            # Convert to new format: per-precision dicts
+            scale_val = state_dict[scale_key]
+            zero_point_val = state_dict[zero_point_key]
+
+            # Store in current precision
+            self.scales[self.num_bits] = scale_val.clone()
+            self.zero_points[self.num_bits] = zero_point_val.clone()
+            self.calibrated_bits.add(self.num_bits)
+
+            # Remove from state_dict to avoid errors
+            del state_dict[scale_key]
+            del state_dict[zero_point_key]
+
+        # Load running_min/max buffers normally
+        for buffer_name in ['running_min', 'running_max']:
+            key = prefix + buffer_name
+            if key in state_dict:
+                loaded_tensor = state_dict[key]
+                buffer = getattr(self, buffer_name, None)
+                if buffer is not None:
+                    if self.is_input and loaded_tensor.dim() == 3 and loaded_tensor.shape[1] > 1:
+                        if self.quantizer_type == 'log':
+                            reduced = loaded_tensor.max(dim=1, keepdim=True)[0]
+                        else:
+                            if 'min' in buffer_name:
+                                reduced = loaded_tensor.min(dim=1, keepdim=True)[0]
+                            elif 'max' in buffer_name:
                                 reduced = loaded_tensor.max(dim=1, keepdim=True)[0]
-                            else:
-                                if 'min' in buffer_name:
-                                    reduced = loaded_tensor.min(dim=1, keepdim=True)[0]
-                                elif 'max' in buffer_name:
-                                    reduced = loaded_tensor.max(dim=1, keepdim=True)[0]
-                                else:
-                                    reduced = loaded_tensor.max(dim=1, keepdim=True)[0]
-                            state_dict[key] = reduced
-                        buffer.resize_as_(state_dict[key])
-        else:
-            for buffer_name in ['scale', 'zero_point', 'running_min', 'running_max']:
-                key = prefix + buffer_name
-                if key in state_dict:
-                    buffer = getattr(self, buffer_name, None)
-                    if buffer is not None:
-                        buffer.resize_as_(state_dict[key])
+                        state_dict[key] = reduced
+                    buffer.resize_as_(state_dict[key])
 
         super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                       missing_keys, unexpected_keys, error_msgs)
-
-        if (prefix + 'scale' in state_dict and
-            prefix + 'zero_point' in state_dict):
-            self.calibrated = True
 
     def set_num_bits(self, value):
         old_bits = self.num_bits
         self.num_bits = max(1, min(value, 32))
         self._update_quant_range()
-        if old_bits != self.num_bits:
-            self.calibrated = False
+        # Don't reset calibration - per-precision calibration is managed by calibrated_bits set
 
     def _update_quant_range(self):
         if self.symmetric:
@@ -106,7 +114,6 @@ class LearnableFakeQuantize(nn.Module):
 
     def start_calibration(self):
         self.collecting_stats = True
-        self.calibrated = False
         self.num_batches_collected = 0
         self.temp_min = None
         self.temp_max = None
@@ -117,23 +124,32 @@ class LearnableFakeQuantize(nn.Module):
             self.running_max.resize_as_(self.temp_max).copy_(self.temp_max)
             with torch.no_grad():
                 if self.quantizer_type == 'log':
-                    log_range = self.running_max - self.running_min
-                    self.zero_point.resize_as_(self.running_max).copy_(self.running_min)
-                    self.scale.resize_as_(self.running_max).copy_(log_range)
+                    log_min = self.running_min
+                    log_max = self.running_max
+                    log_range = log_max - log_min
+
+                    # Store per-precision calibration
+                    self.zero_points[self.num_bits] = log_min.clone()
+                    self.scales[self.num_bits] = log_range.clone()
                 else:
                     if self.symmetric:
                         abs_max = torch.clamp(torch.max(torch.abs(self.running_min), torch.abs(self.running_max)), min=self.eps)
-                        self.scale.resize_as_(abs_max).copy_(abs_max / (2**(self.num_bits-1) - 1))
-                        self.zero_point.resize_as_(abs_max).zero_()
+                        scale = abs_max / (2**(self.num_bits-1) - 1)
+                        zero_point = torch.zeros_like(abs_max)
                     else:
                         range_val = torch.clamp(self.running_max - self.running_min, min=self.eps)
-                        self.scale.resize_as_(range_val).copy_(range_val / (2**self.num_bits - 1))
-                        self.zero_point.resize_as_(range_val).copy_(torch.round(-self.running_min / self.scale))
+                        scale = range_val / (2**self.num_bits - 1)
+                        zero_point = torch.round(-self.running_min / scale)
+
+                    # Store per-precision calibration
+                    self.scales[self.num_bits] = scale.clone()
+                    self.zero_points[self.num_bits] = zero_point.clone()
 
                 # Validate scales for numerical stability
-                scale_min = self.scale.min().item()
-                scale_max = self.scale.max().item()
-                scale_mean = self.scale.mean().item()
+                current_scale = self.scales[self.num_bits]
+                scale_min = current_scale.min().item()
+                scale_max = current_scale.max().item()
+                scale_mean = current_scale.mean().item()
 
                 if scale_min < 1e-6:
                     print(f"⚠️ WARNING: Very small scale detected!")
@@ -145,9 +161,9 @@ class LearnableFakeQuantize(nn.Module):
                     print(f"  Running max: {self.running_max.max().item():.2e}")
 
                 if debug:
-                    print(f"         Computed scale: mean={self.scale.mean().item():.6f}")
+                    print(f"         Computed scale: mean={scale_mean:.6f}")
 
-            self.calibrated = True
+            self.calibrated_bits.add(self.num_bits)
             self.collecting_stats = False
             self.temp_min = None
             self.temp_max = None
@@ -226,18 +242,22 @@ class LearnableFakeQuantize(nn.Module):
             self._collect_statistics_batch(x)
             return x
 
-        if not self.calibrated:
+        if self.num_bits not in self.calibrated_bits:
             return x
 
+        # Use per-precision calibration parameters
+        scale = self.scales[self.num_bits]
+        zero_point = self.zero_points[self.num_bits]
+
         if self.quantizer_type == 'minmax':
-            return self._quantize_minmax(x)
+            return self._quantize_minmax(x, scale, zero_point)
         elif self.quantizer_type == 'log':
-            return self._quantize_log(x)
+            return self._quantize_log(x, zero_point, scale)
         else:
             raise ValueError(f"Unknown quantizer type: {self.quantizer_type}. Supported types: 'minmax', 'log'")
 
-    def _quantize_minmax(self, x):
-        return apply_minmax_quantization(x, self.scale, self.zero_point, self.num_bits, self.symmetric)
+    def _quantize_minmax(self, x, scale, zero_point):
+        return apply_minmax_quantization(x, scale, zero_point, self.num_bits, self.symmetric)
 
-    def _quantize_log(self, x):
-        return apply_log_quantization(x, self.zero_point, self.scale, self.num_bits, self.symmetric)
+    def _quantize_log(self, x, zero_point, scale):
+        return apply_log_quantization(x, zero_point, scale, self.num_bits, self.symmetric)

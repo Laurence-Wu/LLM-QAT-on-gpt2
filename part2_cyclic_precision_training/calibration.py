@@ -83,10 +83,10 @@ class CalibrationManager:
                 q = module.quantizer_input
                 q.finish_calibration(debug=False)
 
-                if not q.calibrated:
-                    input_issues.append(f"{name}: not calibrated")
-                elif q.scale.abs().max().item() < 1e-9:
-                    input_issues.append(f"{name}: zero scale")
+                if bits not in q.calibrated_bits:
+                    input_issues.append(f"{name}: not calibrated at {bits}-bit")
+                elif bits in q.scales and q.scales[bits].abs().max().item() < 1e-9:
+                    input_issues.append(f"{name}: zero scale at {bits}-bit")
 
                 input_calibrated += 1
 
@@ -158,7 +158,7 @@ class CalibrationManager:
         calibrated_count = 0
         for i, (name, quantizer) in enumerate(grad_quantizers):
             quantizer.finish_calibration(debug=False)
-            if quantizer.calibrated:
+            if quantizer.num_bits in quantizer.calibrated_bits:
                 calibrated_count += 1
             if i < len(grad_quantizer_modes):
                 quantizer.train(grad_quantizer_modes[i])
@@ -230,7 +230,7 @@ class CalibrationManager:
 
                     quantizer.finish_calibration(debug=False)
 
-                    if quantizer.calibrated:
+                    if bits in quantizer.calibrated_bits:
                         calibrated_count += 1
                 except Exception as e:
                     print(f"    Warning {name}: {str(e)}")

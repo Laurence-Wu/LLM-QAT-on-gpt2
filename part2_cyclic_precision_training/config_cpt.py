@@ -8,7 +8,6 @@ class ModelConfig:
         self.layer_norm_epsilon = 1e-5
         self.embd_pdrop = 0.1
         self.bit_widths = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
-        self.default_bits = 8
 
         # True CPT: Single shared LoRA for all precisions
         self.shared_lora_rank = 16

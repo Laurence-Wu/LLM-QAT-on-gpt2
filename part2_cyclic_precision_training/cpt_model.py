@@ -111,7 +111,7 @@ class CPTLinear(nn.Module):
         lora_B_quant = GradientQuantizer.apply(lora_B_quant, self.shared_lora.grad_quantizer_B)
 
         # Compute LoRA output
-        lora_output = x @ lora_A_quant @ lora_B_quant.T
+        lora_output = x_quant @ lora_A_quant @ lora_B_quant.T
         return out + lora_output * self.shared_lora.scaling
 
 
@@ -221,7 +221,7 @@ class CPTModel(nn.Module):
         )
 
         self.apply(self._init_weights)
-        self.current_precision = model_config.default_bits
+        self.current_precision = config['training'].target_bits
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
