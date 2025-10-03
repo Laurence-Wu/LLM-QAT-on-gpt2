@@ -186,8 +186,8 @@ def save_target_model(model: CPTModel, config: dict, target_bits: int, output_di
             f.write(f"Model Path: {filename}\n")
             f.write(f"File Size: {file_size / (1024*1024):.2f} MB\n")
             f.write(f"Total Parameters: {sum(p.numel() for p in state_dict.values()):,}\n")
-            f.write(f"LoRA Rank: {config['model'].lora_rank_per_bit.get(target_bits, 0)}\n")
-            f.write(f"LoRA Alpha: {config['model'].lora_alpha_per_bit.get(target_bits, 0)}\n")
+            f.write(f"LoRA Rank: {config['model'].shared_lora_rank}\n")
+            f.write(f"LoRA Alpha: {config['model'].shared_lora_alpha}\n")
             f.write(f"Training Config:\n")
             f.write(f"  - Learning Rate: {config['training'].learning_rate}\n")
             f.write(f"  - Batch Size: {config['training'].batch_size}\n")
@@ -247,8 +247,8 @@ def save_final_models(model: CPTModel, config: dict, output_dir: str):
             'training_config': config['training'].__dict__,
             'bit_width': bits,  # CRITICAL: Save as integer, not f"{bits}bit"
             'timestamp': timestamp,
-            'lora_rank': config['model'].lora_rank_per_bit.get(bits, 0),
-            'lora_alpha': config['model'].lora_alpha_per_bit.get(bits, 0),
+            'lora_rank': config['model'].shared_lora_rank,
+            'lora_alpha': config['model'].shared_lora_alpha,
             'checkpoint_version': '1.1',  # Version tracking
             'pytorch_version': torch.__version__,
             'save_complete': False  # Flag to verify complete save
@@ -338,7 +338,8 @@ def save_final_models(model: CPTModel, config: dict, output_dir: str):
         f.write(f"Timestamp: {timestamp}\n")
         f.write(f"Bit widths: {config['model'].bit_widths}\n")
         f.write(f"Cyclic schedule: {config['cpt'].schedule_type}\n")
-        f.write(f"LoRA ranks: {config['model'].lora_rank_per_bit}\n")
+        f.write(f"Shared LoRA rank: {config['model'].shared_lora_rank}\n")
+        f.write(f"Shared LoRA alpha: {config['model'].shared_lora_alpha}\n")
         f.write("\nSaved models:\n")
         for bits, path in saved_models.items():
             f.write(f"  {bits}-bit: {path}\n")
