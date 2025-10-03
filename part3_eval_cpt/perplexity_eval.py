@@ -18,8 +18,8 @@ class PerplexityEvaluator:
         datasets_config = self.config.get('datasets', {})
 
         dataset_map = {
-            'wikitext2': ('WikiText2', 'wikitext', 'wikitext-2-raw-v1', 'test', False),
-            'wikitext103': ('WikiText103', 'wikitext', 'wikitext-103-raw-v1', 'test', False),
+            'wikitext2': ('WikiText2', 'wikitext', 'wikitext-2-raw-v1', 'validation', False),
+            'wikitext103': ('WikiText103', 'wikitext', 'wikitext-103-raw-v1', 'validation', False),
             'c4': ('C4', 'allenai/c4', 'en', 'validation', True)
         }
 
@@ -50,9 +50,7 @@ class PerplexityEvaluator:
         if not texts:
             return float('inf')
 
-        debug_sample_limit = 50
-        texts = texts[:debug_sample_limit]
-        print(f"  DEBUG: Processing {len(texts)} texts for debugging")
+        print(f"  Processing {len(texts)} texts")
 
         stride = self.config['stride']
         max_length = self.config['max_length']
