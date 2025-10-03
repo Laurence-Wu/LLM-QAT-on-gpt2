@@ -39,10 +39,14 @@ def save_target_model(model: CPTModel, config: dict, target_bits: int, output_di
     for key, value in state_dict.items():
         filtered_state_dict[key] = value
 
-    print(f"Original: {len(state_dict)} tensors")
-    print(f"Filtered: {len(filtered_state_dict)} tensors ({100*len(filtered_state_dict)/len(state_dict):.1f}%)")
+    print(f"Original: {len(state_dict)} items")
+    print(f"Filtered: {len(filtered_state_dict)} items ({100*len(filtered_state_dict)/len(state_dict):.1f}%)")
 
-    state_dict_size = sum(p.numel() * p.element_size() for p in filtered_state_dict.values())
+    state_dict_size = sum(
+        p.numel() * p.element_size()
+        for p in filtered_state_dict.values()
+        if isinstance(p, torch.Tensor)
+    )
     print(f"Size: {state_dict_size / (1024*1024):.2f} MB")
 
     # Create filename
@@ -128,7 +132,7 @@ def save_target_model(model: CPTModel, config: dict, target_bits: int, output_di
             f.write(f"Timestamp: {timestamp}\n")
             f.write(f"Model Path: {filename}\n")
             f.write(f"File Size: {file_size / (1024*1024):.2f} MB\n")
-            f.write(f"Total Parameters: {sum(p.numel() for p in state_dict.values()):,}\n")
+            f.write(f"Total Parameters: {sum(p.numel() for p in state_dict.values() if isinstance(p, torch.Tensor)):,}\n")
             f.write(f"LoRA Rank: {config['model'].shared_lora_rank}\n")
             f.write(f"LoRA Alpha: {config['model'].shared_lora_alpha}\n")
             f.write(f"Training Config:\n")

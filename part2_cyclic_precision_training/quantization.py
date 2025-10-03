@@ -55,9 +55,9 @@ class LearnableFakeQuantize(nn.Module):
         self.temp_min = None
         self.temp_max = None
 
-    def state_dict(self, destination=None, prefix='', keep_vars=False):
+    def state_dict(self, *args, destination=None, prefix='', keep_vars=False, **kwargs):
         # Get base state_dict from parent
-        state = super().state_dict(destination, prefix, keep_vars)
+        state = super().state_dict(*args, destination=destination, prefix=prefix, keep_vars=keep_vars, **kwargs)
 
         # Save per-precision scales
         for bits, scale_tensor in self.scales.items():
