@@ -613,7 +613,7 @@ class AttackEvaluator:
             max_samples: Maximum samples to evaluate
 
         Returns:
-            Evaluation results
+            Evaluation results with 'adversarial_examples' list
         """
         results = {
             'total_samples': 0,
@@ -628,7 +628,10 @@ class AttackEvaluator:
 
             # SECONDARY: For reference
             'avg_perplexity_increase': 0,
-            'attack_success_rate': 0
+            'attack_success_rate': 0,
+
+            # Store successful adversarial examples for defense evaluation
+            'adversarial_examples': []
         }
 
         num_samples = min(len(test_samples), max_samples)
@@ -647,6 +650,13 @@ class AttackEvaluator:
             results['total_samples'] += 1
             if attack_result['success']:
                 results['successful_attacks'] += 1
+                # Store successful adversarial example for defense evaluation
+                results['adversarial_examples'].append({
+                    'original_text': text,
+                    'adversarial_text': attack_result['adversarial_text'],
+                    'adversarial_accuracy': attack_result.get('adversarial_accuracy', 0),
+                    'original_accuracy': attack_result.get('original_accuracy', 0)
+                })
 
             results['avg_num_changes'] += attack_result['num_changes']
             results['avg_perturb_ratio'] += attack_result['perturb_ratio']
@@ -682,7 +692,7 @@ class AttackEvaluator:
             max_samples: Maximum samples to evaluate
 
         Returns:
-            Evaluation results
+            Evaluation results with 'adversarial_examples' list
         """
         # Lazy initialization of BERT-Attack
         if self.bert_attack is None:
@@ -702,7 +712,10 @@ class AttackEvaluator:
 
             # SECONDARY: For reference
             'avg_perplexity_increase': 0,
-            'attack_success_rate': 0
+            'attack_success_rate': 0,
+
+            # Store successful adversarial examples for defense evaluation
+            'adversarial_examples': []
         }
 
         num_samples = min(len(test_samples), max_samples)
@@ -721,6 +734,13 @@ class AttackEvaluator:
             results['total_samples'] += 1
             if attack_result['success']:
                 results['successful_attacks'] += 1
+                # Store successful adversarial example for defense evaluation
+                results['adversarial_examples'].append({
+                    'original_text': text,
+                    'adversarial_text': attack_result['adversarial_text'],
+                    'adversarial_accuracy': attack_result.get('adversarial_accuracy', 0),
+                    'original_accuracy': attack_result.get('original_accuracy', 0)
+                })
 
             results['avg_num_changes'] += attack_result['num_changes']
             results['avg_perturb_ratio'] += attack_result['perturb_ratio']

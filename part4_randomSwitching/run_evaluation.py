@@ -95,7 +95,8 @@ def evaluate_fixed_precision_baseline(model, tokenizer, test_samples: List[Dict]
                 'avg_accuracy_drop': textfooler_results['avg_accuracy_drop'],
                 'avg_original_accuracy': textfooler_results['avg_original_accuracy'],
                 'avg_adversarial_accuracy': textfooler_results['avg_adversarial_accuracy'],
-                'avg_perturbations': textfooler_results['avg_perturb_ratio']
+                'avg_perturbations': textfooler_results['avg_perturb_ratio'],
+                'adversarial_examples': textfooler_results['adversarial_examples']
             },
             'bert_attack': {
                 'attack_success_rate': bert_attack_results['attack_success_rate'],
@@ -104,14 +105,17 @@ def evaluate_fixed_precision_baseline(model, tokenizer, test_samples: List[Dict]
                 'avg_original_accuracy': bert_attack_results['avg_original_accuracy'],
                 'avg_adversarial_accuracy': bert_attack_results['avg_adversarial_accuracy'],
                 'avg_perturbations': bert_attack_results['avg_perturb_ratio'],
-                'avg_perplexity_increase': bert_attack_results['avg_perplexity_increase']
+                'avg_perplexity_increase': bert_attack_results['avg_perplexity_increase'],
+                'adversarial_examples': bert_attack_results['adversarial_examples']
             }
         }
 
     return results
 
 
-def evaluate_random_switching_defense(model, tokenizer, test_samples: List[Dict],
+def evaluate_random_switching_defense(model, tokenizer,
+                                     textfooler_adv_examples: List[Dict],
+                                     bert_adv_examples: List[Dict],
                                      bit_widths: List[int],
                                      switch_probabilities: List[float],
                                      device: str = 'cuda') -> Dict:
@@ -121,7 +125,8 @@ def evaluate_random_switching_defense(model, tokenizer, test_samples: List[Dict]
     Args:
         model: SP model
         tokenizer: Tokenizer
-        test_samples: Test samples
+        textfooler_adv_examples: Pre-generated TextFooler adversarial examples
+        bert_adv_examples: Pre-generated BERT-Attack adversarial examples
         bit_widths: Available bit widths
         switch_probabilities: List of switching probabilities to test
         device: Device for computation
@@ -144,82 +149,60 @@ def evaluate_random_switching_defense(model, tokenizer, test_samples: List[Dict]
 
         total_success_tf = 0
         total_success_bert = 0
-        total_samples = 0
 
-        # TextFooler defense evaluation
-        for i, sample in enumerate(tqdm(test_samples[:30], desc="TextFooler defense")):
-            model.set_precision(max(bit_widths))
+        # TextFooler defense evaluation using stored adversarial examples
+        for adv_example in tqdm(textfooler_adv_examples, desc="TextFooler defense"):
+            adv_text = adv_example['adversarial_text']
+            baseline_adv_accuracy = adv_example['adversarial_accuracy']
 
-            text = sample.get('text', '')
-            if not text:
-                text = tokenizer.decode(sample['input_ids'], skip_special_tokens=True)
+            adv_ids = tokenizer.encode(adv_text, return_tensors='pt').to(device)
 
-            textfooler = TextFoolerAttack(model, tokenizer, device)
-            attack_result = textfooler.generate_adversarial(text)
+            outputs_with_switch, precision = defender.forward_with_switching(
+                adv_ids, labels=adv_ids
+            )
 
-            if attack_result['success']:
-                adv_text = attack_result['adversarial_text']
-                adv_ids = tokenizer.encode(adv_text, return_tensors='pt').to(device)
+            # Compute accuracy with switching
+            switched_logits = outputs_with_switch['logits']
+            switched_predictions = switched_logits[0, :-1, :].argmax(dim=-1)
+            switched_labels = adv_ids[0, 1:]
+            switched_mask = switched_labels != -100
+            switched_correct = (switched_predictions[switched_mask] == switched_labels[switched_mask]).sum().item()
+            switched_total = switched_mask.sum().item()
+            switched_accuracy = switched_correct / max(switched_total, 1)
 
-                outputs_with_switch, precision = defender.forward_with_switching(
-                    adv_ids, labels=adv_ids
-                )
+            # Defense succeeds if accuracy recovers by >3% absolute
+            accuracy_recovery = switched_accuracy - baseline_adv_accuracy
+            if accuracy_recovery > 0.03:  # 3% threshold
+                total_success_tf += 1
 
-                # Compute accuracy with switching
-                switched_logits = outputs_with_switch['logits']
-                switched_predictions = switched_logits[0, :-1, :].argmax(dim=-1)
-                switched_labels = adv_ids[0, 1:]
-                switched_mask = switched_labels != -100
-                switched_correct = (switched_predictions[switched_mask] == switched_labels[switched_mask]).sum().item()
-                switched_total = switched_mask.sum().item()
-                switched_accuracy = switched_correct / max(switched_total, 1)
+        # BERT-Attack defense evaluation using stored adversarial examples
+        for adv_example in tqdm(bert_adv_examples, desc="BERT-Attack defense"):
+            adv_text = adv_example['adversarial_text']
+            baseline_adv_accuracy = adv_example['adversarial_accuracy']
 
-                # Defense succeeds if accuracy recovers by >3% absolute
-                if 'adversarial_accuracy' in attack_result:
-                    accuracy_recovery = switched_accuracy - attack_result['adversarial_accuracy']
-                    if accuracy_recovery > 0.03:  # 3% threshold
-                        total_success_tf += 1
+            adv_ids = tokenizer.encode(adv_text, return_tensors='pt').to(device)
 
-            total_samples += 1
+            outputs_with_switch, precision = defender.forward_with_switching(
+                adv_ids, labels=adv_ids
+            )
 
-        # BERT-Attack defense evaluation
-        from adversarial_attacks import BERTAttack
-        bert_attacker = BERTAttack(model, tokenizer, device)
+            # Compute accuracy with switching
+            switched_logits = outputs_with_switch['logits']
+            switched_predictions = switched_logits[0, :-1, :].argmax(dim=-1)
+            switched_labels = adv_ids[0, 1:]
+            switched_mask = switched_labels != -100
+            switched_correct = (switched_predictions[switched_mask] == switched_labels[switched_mask]).sum().item()
+            switched_total = switched_mask.sum().item()
+            switched_accuracy = switched_correct / max(switched_total, 1)
 
-        for i, sample in enumerate(tqdm(test_samples[:30], desc="BERT-Attack defense")):
-            model.set_precision(max(bit_widths))
+            # Defense succeeds if accuracy recovers by >3% absolute
+            accuracy_recovery = switched_accuracy - baseline_adv_accuracy
+            if accuracy_recovery > 0.03:  # 3% threshold
+                total_success_bert += 1
 
-            text = sample.get('text', '')
-            if not text:
-                text = tokenizer.decode(sample['input_ids'], skip_special_tokens=True)
-
-            attack_result = bert_attacker.generate_adversarial(text)
-
-            if attack_result['success']:
-                adv_text = attack_result['adversarial_text']
-                adv_ids = tokenizer.encode(adv_text, return_tensors='pt').to(device)
-
-                outputs_with_switch, precision = defender.forward_with_switching(
-                    adv_ids, labels=adv_ids
-                )
-
-                # Compute accuracy with switching
-                switched_logits = outputs_with_switch['logits']
-                switched_predictions = switched_logits[0, :-1, :].argmax(dim=-1)
-                switched_labels = adv_ids[0, 1:]
-                switched_mask = switched_labels != -100
-                switched_correct = (switched_predictions[switched_mask] == switched_labels[switched_mask]).sum().item()
-                switched_total = switched_mask.sum().item()
-                switched_accuracy = switched_correct / max(switched_total, 1)
-
-                # Defense succeeds if accuracy recovers by >3% absolute
-                if 'adversarial_accuracy' in attack_result:
-                    accuracy_recovery = switched_accuracy - attack_result['adversarial_accuracy']
-                    if accuracy_recovery > 0.03:  # 3% threshold
-                        total_success_bert += 1
-
-        defense_rate_tf = total_success_tf / max(total_samples, 1)
-        defense_rate_bert = total_success_bert / max(total_samples, 1)
+        # Calculate defense rates based on successful attacks only
+        defense_rate_tf = total_success_tf / max(len(textfooler_adv_examples), 1)
+        defense_rate_bert = total_success_bert / max(len(bert_adv_examples), 1)
 
         stats = defender.get_statistics()
 
@@ -446,9 +429,18 @@ def main():
         model, tokenizer, test_samples, bit_widths, device
     )
 
+    # Extract adversarial examples from baseline results for defense evaluation
+    # Use examples from the best-performing precision (highest bit-width = 32-bit)
+    best_precision = max(bit_widths)
+    textfooler_adv_examples = fixed_results[best_precision]['textfooler'].get('adversarial_examples', [])
+    bert_adv_examples = fixed_results[best_precision]['bert_attack'].get('adversarial_examples', [])
+
+    print(f"\nUsing {len(textfooler_adv_examples)} TextFooler and {len(bert_adv_examples)} BERT-Attack adversarial examples from {best_precision}-bit baseline")
+
     switching_results = evaluate_random_switching_defense(
-        model, tokenizer, test_samples, bit_widths,
-        switch_probs, device
+        model, tokenizer,
+        textfooler_adv_examples, bert_adv_examples,
+        bit_widths, switch_probs, device
     )
 
     comparison = compare_results(fixed_results, switching_results)

@@ -281,6 +281,7 @@ class DefenseEvaluator:
 
         total_loss = 0
         total_tokens = 0
+        total_correct = 0
 
         for sample in test_samples:
             input_ids = sample['input_ids'].to(self.device)
@@ -313,13 +314,23 @@ class DefenseEvaluator:
                 total_loss += outputs['loss'].item() * num_tokens
                 total_tokens += num_tokens
 
+                # Compute token-level accuracy
+                logits = outputs['logits']
+                predictions = logits[0, :-1, :].argmax(dim=-1)
+                target_labels = labels[0, 1:]
+                target_mask = target_labels != -100
+                correct = (predictions[target_mask] == target_labels[target_mask]).sum().item()
+                total_correct += correct
+
         avg_loss = total_loss / max(total_tokens, 1)
         perplexity = np.exp(avg_loss)
+        accuracy = total_correct / max(total_tokens, 1)
 
         return {
             'precision': precision,
             'perplexity': perplexity,
             'avg_loss': avg_loss,
+            'accuracy': accuracy,
             'total_tokens': total_tokens
         }
 
