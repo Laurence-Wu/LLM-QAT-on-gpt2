@@ -132,6 +132,15 @@ def load_cpt_model(model_path: str):
     else:
         print(f"  WARNING: No lora_weight_quantizers calibration in checkpoint!")
 
+    # Check for LoRA weight quantizer CALIBRATION (not just buffers)
+    lora_wq_calib_keys = [k for k in state_dict.keys() if 'lora_weight_quantizers' in k and ('_scales_' in k or '_zero_points_' in k)]
+    if lora_wq_calib_keys:
+        print(f"  LoRA weight quantizer CALIBRATION keys: {len(lora_wq_calib_keys)}")
+        print(f"    Sample: {lora_wq_calib_keys[:5]}")
+    else:
+        print(f"  WARNING: No LoRA weight quantizer calibration (_scales_/_zero_points_) in checkpoint!")
+        print(f"  Only found running_min/max buffers, which means LoRA quantizers were NEVER calibrated during training")
+
     # Also check grad_quantizer vs lora_weight_quantizers
     grad_q_keys = [k for k in state_dict.keys() if 'grad_quantizer' in k]
     print(f"  Gradient quantizer keys: {len(grad_q_keys)}")
