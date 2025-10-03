@@ -115,8 +115,8 @@ class CPTLinear(nn.Module):
             self.lora_weight_quantizers[f'{bits}bit'] = LearnableFakeQuantize(
                 num_bits=bits,
                 quantizer_type=quant_type,
-                channel_dim=0,
-                per_channel=True
+                channel_dim=None,
+                per_channel=False
             )
 
         max_bits = max([b for b in bit_widths if b < 32]) if any(b < 32 for b in bit_widths) else 8
