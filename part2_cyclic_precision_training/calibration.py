@@ -113,47 +113,6 @@ class CalibrationManager:
         torch.cuda.empty_cache()
         gc.collect()
 
-    def calibrate_lora_only(self, bits: int, num_batches: int = 10):
-        if bits >= 32:
-            return
-
-        lora_key = f'{bits}bit'
-        lora_calibrated = 0
-
-        for name, module in self.model.named_modules():
-            if not hasattr(module, 'lora_adapters'):
-                continue
-            if lora_key not in module.lora_adapters:
-                continue
-
-            lora_layer = module.lora_adapters[lora_key]
-
-            if hasattr(lora_layer, 'quantize_A') and hasattr(lora_layer, 'lora_A'):
-                try:
-                    lora_layer.quantize_A.set_num_bits(bits)
-                    lora_layer.quantize_A.start_calibration()
-                    with torch.no_grad():
-                        _ = lora_layer.quantize_A(lora_layer.lora_A)
-                    lora_layer.quantize_A.finish_calibration(debug=False)
-                    lora_calibrated += 1
-                except Exception as e:
-                    print(f"    Warning {name} quantize_A: {e}")
-
-            if hasattr(lora_layer, 'quantize_B') and hasattr(lora_layer, 'lora_B'):
-                try:
-                    lora_layer.quantize_B.set_num_bits(bits)
-                    lora_layer.quantize_B.start_calibration()
-                    with torch.no_grad():
-                        _ = lora_layer.quantize_B(lora_layer.lora_B)
-                    lora_layer.quantize_B.finish_calibration(debug=False)
-                    lora_calibrated += 1
-                except Exception as e:
-                    print(f"    Warning {name} quantize_B: {e}")
-
-        if lora_calibrated > 0:
-            torch.cuda.empty_cache()
-            gc.collect()
-
     def ensure_calibrated(self, bits: int):
         if bits >= 32:
             return

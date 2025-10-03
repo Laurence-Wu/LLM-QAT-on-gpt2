@@ -158,26 +158,20 @@ def load_pretrained_weights(model, model_config):
     model.lm_head.linear.weight.data = pretrained.lm_head.weight.data.clone()
     model.lm_head.linear.weight.requires_grad = False
 
-    # Now enable only LoRA adapter parameters
+    # Now enable only shared LoRA parameters (True CPT!)
     lora_count = 0
-    target_modules = ['c_attn', 'c_proj', 'fc_in', 'fc_out', 'lm_head']
+    from cpt_model import CPTLinear
 
     for name, module in model.named_modules():
-        # Check if this is a module with LoRA adapters
-        if not any(target in name for target in target_modules):
-            continue
-        if not hasattr(module, 'lora_adapters'):
-            continue
+        if isinstance(module, CPTLinear):
+            # Enable shared LoRA parameters
+            if hasattr(module, 'shared_lora') and module.shared_lora is not None:
+                if hasattr(module.shared_lora, 'lora_A'):
+                    module.shared_lora.lora_A.requires_grad = True
+                    module.shared_lora.lora_B.requires_grad = True
+                    lora_count += 1
 
-        # Enable gradients for LoRA adapters across all bit widths
-        for bit_key in module.lora_adapters.keys():
-            lora_layer = module.lora_adapters[bit_key]
-            if hasattr(lora_layer, 'lora_A'):
-                lora_layer.lora_A.requires_grad = True
-                lora_layer.lora_B.requires_grad = True
-                lora_count += 1
-
-    print(f"Enabled {lora_count} LoRA adapter pairs for training")
+    print(f"Enabled {lora_count} shared LoRA adapter pairs for training")
 
     del pretrained
     torch.cuda.empty_cache()

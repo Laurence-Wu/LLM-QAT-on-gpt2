@@ -408,10 +408,9 @@ def convert_to_int8(model: CPTModel, target_bits: int = 8):
                 if module.linear.bias is not None:
                     int8_state_dict[f"{prefix}bias"] = module.linear.bias.data.cpu()
 
-                # Store LoRA parameters for target precision
-                lora_key = f'lora_{target_bits}bit'
-                if lora_key in module.lora_adapters:
-                    lora = module.lora_adapters[lora_key]
+                # Store shared LoRA parameters
+                if hasattr(module, 'shared_lora') and module.shared_lora is not None:
+                    lora = module.shared_lora
                     if lora.lora_A is not None:
                         int8_state_dict[f"{prefix}lora.A"] = lora.lora_A.data.cpu()
                         int8_state_dict[f"{prefix}lora.B"] = lora.lora_B.data.cpu()

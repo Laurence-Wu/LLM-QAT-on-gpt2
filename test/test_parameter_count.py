@@ -46,6 +46,12 @@ def main():
     print(f"\nCreating CPTModel...")
     model = CPTModel(config)
 
+    # Load pretrained weights and freeze base model
+    print(f"\nLoading pretrained weights and freezing base model...")
+    sys.path.insert(0, part2_dir)
+    from main_cpt import load_pretrained_weights
+    load_pretrained_weights(model, config['model'])
+
     # Count parameters
     total_params, trainable_params = count_parameters(model)
     lora_params = count_lora_parameters(model)

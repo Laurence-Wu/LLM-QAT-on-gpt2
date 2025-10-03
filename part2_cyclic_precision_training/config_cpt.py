@@ -13,16 +13,6 @@ class ModelConfig:
         # True CPT: Single shared LoRA for all precisions
         self.shared_lora_rank = 16
         self.shared_lora_alpha = 32
-
-        # Legacy configs (deprecated - keeping for backward compatibility)
-        self.lora_rank_per_bit = {
-            2: 40, 3: 36, 4: 32, 5: 28, 6: 24, 7: 20, 8: 16, 9: 12, 10: 10,
-            11: 10, 12: 10, 13: 10, 14: 8, 15: 8, 16: 8, 17: 4, 18: 4, 32: 0
-        }
-        self.lora_alpha_per_bit = {
-            2: 40, 3: 36, 4: 32, 5: 28, 6: 24, 7: 20, 8: 16, 9: 12, 10: 10,
-            11: 10, 12: 10, 13: 10, 14: 8, 15: 8, 16: 8, 17: 4, 18: 4, 32: 0
-        }
         self.quantizer_type = 'log'
         self.quantizer_per_bit = {
             2: 'minmax', 3: 'minmax', 4: 'minmax', 5: 'log', 6: 'log', 7: 'log',

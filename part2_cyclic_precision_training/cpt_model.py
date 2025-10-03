@@ -87,7 +87,6 @@ class LoRAAdapter(nn.Module):
 
 class CPTLinear(nn.Module):
     def __init__(self, in_features: int, out_features: int, bit_widths: list = [4, 6, 8],
-                 lora_rank_per_bit: dict = None, lora_alpha_per_bit: dict = None,
                  quantizer_per_bit: dict = None, gradient_bits: int = 8, bias: bool = True,
                  shared_lora_rank: int = 16, shared_lora_alpha: int = 32):
         super().__init__()
@@ -101,13 +100,10 @@ class CPTLinear(nn.Module):
             in_features, out_features,
             rank=shared_lora_rank,
             alpha=shared_lora_alpha,
-            num_bits=8,  # Base quantization for LoRA weights themselves
+            num_bits=8,
             quantizer_type='log',
             gradient_bits=gradient_bits
         )
-
-        # Legacy support for old multi-adapter approach (deprecated)
-        self.lora_adapters = None  # Set to None to maintain backward compatibility
 
         # Quantizers for cycling LoRA at different precisions (True CPT!)
         if quantizer_per_bit is None:
@@ -170,13 +166,13 @@ class CPTLinear(nn.Module):
 
 
 class CPTSelfAttention(nn.Module):
-    def __init__(self, config, bit_widths: list, lora_rank_per_bit: dict, lora_alpha_per_bit: dict, quantizer_per_bit: dict = None, gradient_bits: int = 8, shared_lora_rank: int = 16, shared_lora_alpha: int = 32):
+    def __init__(self, config, bit_widths: list, quantizer_per_bit: dict = None, gradient_bits: int = 8, shared_lora_rank: int = 16, shared_lora_alpha: int = 32):
         super().__init__()
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.head_dim = self.n_embd // self.n_head
-        self.c_attn = CPTLinear(self.n_embd, 3 * self.n_embd, bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit, gradient_bits, shared_lora_rank=shared_lora_rank, shared_lora_alpha=shared_lora_alpha)
-        self.c_proj = CPTLinear(self.n_embd, self.n_embd, bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit, gradient_bits, shared_lora_rank=shared_lora_rank, shared_lora_alpha=shared_lora_alpha)
+        self.c_attn = CPTLinear(self.n_embd, 3 * self.n_embd, bit_widths, quantizer_per_bit, gradient_bits, shared_lora_rank=shared_lora_rank, shared_lora_alpha=shared_lora_alpha)
+        self.c_proj = CPTLinear(self.n_embd, self.n_embd, bit_widths, quantizer_per_bit, gradient_bits, shared_lora_rank=shared_lora_rank, shared_lora_alpha=shared_lora_alpha)
         self.attn_dropout = nn.Dropout(config.embd_pdrop)
         self.resid_dropout = nn.Dropout(config.embd_pdrop)
 
@@ -216,15 +212,15 @@ class CPTSelfAttention(nn.Module):
 
 
 class CPTBlock(nn.Module):
-    def __init__(self, config, bit_widths: list, lora_rank_per_bit: dict, lora_alpha_per_bit: dict, quantizer_per_bit: dict = None, gradient_bits: int = 8, shared_lora_rank: int = 16, shared_lora_alpha: int = 32):
+    def __init__(self, config, bit_widths: list, quantizer_per_bit: dict = None, gradient_bits: int = 8, shared_lora_rank: int = 16, shared_lora_alpha: int = 32):
         super().__init__()
         self.ln_1 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
         self.ln_2 = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
         self.bit_widths = bit_widths
-        self.attn = CPTSelfAttention(config, bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit, gradient_bits, shared_lora_rank, shared_lora_alpha)
+        self.attn = CPTSelfAttention(config, bit_widths, quantizer_per_bit, gradient_bits, shared_lora_rank, shared_lora_alpha)
         self.mlp = nn.ModuleDict({
-            'fc_in': CPTLinear(config.n_embd, 4 * config.n_embd, bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit, gradient_bits, shared_lora_rank=shared_lora_rank, shared_lora_alpha=shared_lora_alpha),
-            'fc_out': CPTLinear(4 * config.n_embd, config.n_embd, bit_widths, lora_rank_per_bit, lora_alpha_per_bit, quantizer_per_bit, gradient_bits, shared_lora_rank=shared_lora_rank, shared_lora_alpha=shared_lora_alpha)
+            'fc_in': CPTLinear(config.n_embd, 4 * config.n_embd, bit_widths, quantizer_per_bit, gradient_bits, shared_lora_rank=shared_lora_rank, shared_lora_alpha=shared_lora_alpha),
+            'fc_out': CPTLinear(4 * config.n_embd, config.n_embd, bit_widths, quantizer_per_bit, gradient_bits, shared_lora_rank=shared_lora_rank, shared_lora_alpha=shared_lora_alpha)
         })
         self.mlp_dropout = nn.Dropout(config.embd_pdrop)
 
@@ -262,16 +258,14 @@ class CPTModel(nn.Module):
         self.drop = nn.Dropout(model_config.embd_pdrop)
 
         self.h = nn.ModuleList([
-            CPTBlock(model_config, model_config.bit_widths, model_config.lora_rank_per_bit,
-                    model_config.lora_alpha_per_bit, model_config.quantizer_per_bit, model_config.gradient_bits,
-                    model_config.shared_lora_rank, model_config.shared_lora_alpha)
+            CPTBlock(model_config, model_config.bit_widths, model_config.quantizer_per_bit,
+                    model_config.gradient_bits, model_config.shared_lora_rank, model_config.shared_lora_alpha)
             for _ in range(model_config.n_layer)
         ])
 
         self.ln_f = nn.LayerNorm(model_config.n_embd, eps=model_config.layer_norm_epsilon)
         self.lm_head = CPTLinear(
             model_config.n_embd, model_config.vocab_size, model_config.bit_widths,
-            model_config.lora_rank_per_bit, model_config.lora_alpha_per_bit,
             model_config.quantizer_per_bit, model_config.gradient_bits, bias=False,
             shared_lora_rank=model_config.shared_lora_rank, shared_lora_alpha=model_config.shared_lora_alpha
         )
