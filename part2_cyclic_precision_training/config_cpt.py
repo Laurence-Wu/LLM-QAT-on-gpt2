@@ -14,7 +14,7 @@ class ModelConfig:
         self.shared_lora_alpha = 32
         self.quantizer_type = 'log'
         self.quantizer_per_bit = {
-            2: 'minmax', 3: 'minmax', 4: 'minmax', 5: 'log', 6: 'log', 7: 'log',
+            2: 'log', 3: 'log', 4: 'log', 5: 'log', 6: 'log', 7: 'log',
             8: 'log', 9: 'log', 10: 'log', 11: 'log', 12: 'log', 13: 'log',
             14: 'log', 15: 'log', 16: 'log', 17: 'log', 18: 'log', 32: None
         }
@@ -48,7 +48,7 @@ class TrainingConfig:
         self.adam_epsilon = 1e-8
         self.adam_betas = (0.9, 0.999)
         self.max_grad_norm = 1.0
-        self.num_epochs = 60
+        self.num_epochs = 600
         self.gradient_accumulation_steps = 3
         self.target_bits = 5
         self.eval_interval = 50
