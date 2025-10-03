@@ -121,14 +121,14 @@ class CalibrationManager:
         grad_quantizer_modes = []
         for name, module in self.model.named_modules():
             if isinstance(module, LoRAAdapter):
-                # Calibrate grad_quantizer_A
+
                 if hasattr(module, 'grad_quantizer_A') and module.grad_quantizer_A is not None:
                     grad_quantizer_modes.append(module.grad_quantizer_A.training)
                     module.grad_quantizer_A.eval()
                     module.grad_quantizer_A.start_calibration()
                     grad_quantizers.append((f"{name}.grad_A", module.grad_quantizer_A))
 
-                # Calibrate grad_quantizer_B
+
                 if hasattr(module, 'grad_quantizer_B') and module.grad_quantizer_B is not None:
                     grad_quantizer_modes.append(module.grad_quantizer_B.training)
                     module.grad_quantizer_B.eval()
@@ -142,8 +142,8 @@ class CalibrationManager:
         original_mode = self.model.training
         original_precision = self.model.current_precision
 
-        # CRITICAL: Set to FP32 (no quantization) during gradient calibration
-        # This avoids needing weight/input quantizers to be calibrated first
+
+
         self.model.set_precision(32)
         self.model.train()
 
@@ -162,7 +162,7 @@ class CalibrationManager:
         except StopIteration:
             print("  Warning: No batches for gradient calibration")
 
-        # Restore original precision and mode
+
         self.model.set_precision(original_precision)
         if not original_mode:
             self.model.eval()
@@ -187,25 +187,25 @@ class CalibrationManager:
 
         from cpt_model import CPTLinear
 
-        # Collect all LoRA weight quantizers across all precisions
+
         lora_quantizers_by_bits = {}
         for bits in bit_widths:
             if bits >= 32:
                 continue
             lora_quantizers_by_bits[bits] = []
 
-        # Find all CPTLinear modules and their LoRA weight quantizers
+
         for name, module in self.model.named_modules():
             if isinstance(module, CPTLinear):
                 if not hasattr(module, 'shared_lora') or module.shared_lora is None:
                     continue
 
-                # Get the shared LoRA adapter
+
                 shared_lora = module.shared_lora
                 if not hasattr(shared_lora, 'lora_A') or shared_lora.lora_A is None:
                     continue
 
-                # Calibrate quantizers for each precision
+
                 for bits in bit_widths:
                     if bits >= 32:
                         continue
@@ -217,7 +217,7 @@ class CalibrationManager:
                     quantizer = module.lora_weight_quantizers[lora_key]
                     lora_quantizers_by_bits[bits].append((name, quantizer, shared_lora))
 
-        # Calibrate each precision's quantizers
+
         for bits in bit_widths:
             if bits >= 32 or bits not in lora_quantizers_by_bits:
                 continue
@@ -235,9 +235,9 @@ class CalibrationManager:
                     quantizer.start_calibration()
 
                     with torch.no_grad():
-                        # Calibrate on lora_A
+
                         _ = quantizer(shared_lora.lora_A)
-                        # Calibrate on lora_B
+
                         _ = quantizer(shared_lora.lora_B)
 
                     quantizer.finish_calibration(debug=False)

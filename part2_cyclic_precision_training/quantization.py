@@ -1,4 +1,3 @@
-
 import os
 import sys
 import torch
@@ -11,7 +10,6 @@ from quantization_methods import (
     apply_minmax_quantization,
     apply_log_quantization
 )
-
 
 class GradientQuantizer(torch.autograd.Function):
     @staticmethod
@@ -41,12 +39,12 @@ class LearnableFakeQuantize(nn.Module):
 
         self._update_quant_range()
 
-        # Per-precision calibration parameters (dict of tensors keyed by bit-width)
+
         self.scales = {}
         self.zero_points = {}
         self.calibrated_bits = set()
 
-        # Global statistics collection buffers
+
         self.register_buffer('running_min', torch.zeros(1))
         self.register_buffer('running_max', torch.zeros(1))
 
@@ -56,20 +54,20 @@ class LearnableFakeQuantize(nn.Module):
         self.temp_max = None
 
     def state_dict(self, *args, destination=None, prefix='', keep_vars=False, **kwargs):
-        # Get base state_dict from parent
+
         state = super().state_dict(*args, destination=destination, prefix=prefix, keep_vars=keep_vars, **kwargs)
 
-        # Save per-precision scales
+
         for bits, scale_tensor in self.scales.items():
             key = f'{prefix}_scales_{bits}'
             state[key] = scale_tensor if keep_vars else scale_tensor.clone()
 
-        # Save per-precision zero_points
+
         for bits, zp_tensor in self.zero_points.items():
             key = f'{prefix}_zero_points_{bits}'
             state[key] = zp_tensor if keep_vars else zp_tensor.clone()
 
-        # Save calibrated_bits set as list
+
         if self.calibrated_bits:
             state[f'{prefix}_calibrated_bits'] = list(self.calibrated_bits)
 
@@ -78,21 +76,21 @@ class LearnableFakeQuantize(nn.Module):
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
 
-        # Initialize empty dicts
+
         self.scales = {}
         self.zero_points = {}
         self.calibrated_bits = set()
 
-        debug_load = False  # Set to True to debug loading
+        debug_load = False
 
-        # Extract per-precision calibration from state_dict
+
         keys_to_remove = []
 
         for key in list(state_dict.keys()):
             if key.startswith(prefix):
                 suffix = key[len(prefix):]
 
-                # Extract scales
+
                 if suffix.startswith('_scales_'):
                     bits_str = suffix.replace('_scales_', '')
                     try:
@@ -103,7 +101,7 @@ class LearnableFakeQuantize(nn.Module):
                     except ValueError:
                         pass
 
-                # Extract zero_points
+
                 elif suffix.startswith('_zero_points_'):
                     bits_str = suffix.replace('_zero_points_', '')
                     try:
@@ -113,23 +111,23 @@ class LearnableFakeQuantize(nn.Module):
                     except ValueError:
                         pass
 
-                # Extract calibrated_bits list
+
                 elif suffix == '_calibrated_bits':
                     if isinstance(state_dict[key], list):
                         self.calibrated_bits = set(state_dict[key])
                     keys_to_remove.append(key)
 
-        # Remove extracted keys from state_dict
+
         for key in keys_to_remove:
             del state_dict[key]
 
-        # Handle old checkpoints with single scale/zero_point buffers (backward compatibility)
+
         scale_key = prefix + 'scale'
         zero_point_key = prefix + 'zero_point'
 
         if scale_key in state_dict and zero_point_key in state_dict:
-            # Old format: single scale/zero_point
-            # Convert to new format: per-precision dicts
+
+
             scale_val = state_dict[scale_key]
             zero_point_val = state_dict[zero_point_key]
 
@@ -138,19 +136,19 @@ class LearnableFakeQuantize(nn.Module):
                 print(f"      scale shape: {scale_val.shape}, zero_point shape: {zero_point_val.shape}")
                 print(f"      Storing for {self.num_bits}-bit precision")
 
-            # Store in current precision
+
             self.scales[self.num_bits] = scale_val.clone()
             self.zero_points[self.num_bits] = zero_point_val.clone()
             self.calibrated_bits.add(self.num_bits)
 
-            # Remove from state_dict to avoid errors
+
             del state_dict[scale_key]
             del state_dict[zero_point_key]
         else:
             if debug_load and not keys_to_remove:
                 print(f"    No calibration data found for {prefix}")
 
-        # Load running_min/max buffers normally
+
         for buffer_name in ['running_min', 'running_max']:
             key = prefix + buffer_name
             if key in state_dict:
@@ -175,7 +173,6 @@ class LearnableFakeQuantize(nn.Module):
         old_bits = self.num_bits
         self.num_bits = max(1, min(value, 32))
         self._update_quant_range()
-        # Don't reset calibration - per-precision calibration is managed by calibrated_bits set
 
     def _update_quant_range(self):
         if self.symmetric:
@@ -201,7 +198,7 @@ class LearnableFakeQuantize(nn.Module):
                     log_max = self.running_max
                     log_range = log_max - log_min
 
-                    # Store per-precision calibration
+
                     self.zero_points[self.num_bits] = log_min.clone()
                     self.scales[self.num_bits] = log_range.clone()
                 else:
@@ -214,11 +211,11 @@ class LearnableFakeQuantize(nn.Module):
                         scale = range_val / (2**self.num_bits - 1)
                         zero_point = torch.round(-self.running_min / scale)
 
-                    # Store per-precision calibration
+
                     self.scales[self.num_bits] = scale.clone()
                     self.zero_points[self.num_bits] = zero_point.clone()
 
-                # Validate scales for numerical stability
+
                 current_scale = self.scales[self.num_bits]
                 scale_min = current_scale.min().item()
                 scale_max = current_scale.max().item()
@@ -316,8 +313,8 @@ class LearnableFakeQuantize(nn.Module):
             return x
 
         if self.num_bits not in self.calibrated_bits:
-            # CRITICAL: During actual training (not evaluation/PRT), this is a fatal error
-            # Check both training mode AND gradient enabled (PRT uses no_grad)
+
+
             if self.training and torch.is_grad_enabled():
                 raise RuntimeError(
                     f"FATAL: Quantizer not calibrated for {self.num_bits}-bit precision during training!\n"
@@ -328,7 +325,7 @@ class LearnableFakeQuantize(nn.Module):
                     f"  Training cannot proceed with uncalibrated quantizers."
                 )
             else:
-                # During eval/PRT/no_grad, warn once and return unquantized
+
                 if not hasattr(self, '_warned_not_calibrated'):
                     print(f"WARNING: Quantizer not calibrated for {self.num_bits}-bit precision")
                     print(f"  Calibrated bits: {self.calibrated_bits}")
@@ -337,7 +334,7 @@ class LearnableFakeQuantize(nn.Module):
                     self._warned_not_calibrated = True
                 return x
 
-        # Use per-precision calibration parameters
+
         scale = self.scales[self.num_bits]
         zero_point = self.zero_points[self.num_bits]
 

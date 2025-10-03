@@ -34,7 +34,6 @@ class LoRAAdapter(nn.Module):
 
         self.calibration_mode = False
 
-
 class CPTLinear(nn.Module):
     def __init__(self, in_features: int, out_features: int, bit_widths: list = [4, 6, 8],
                  quantizer_per_bit: dict = None, gradient_bits: int = 8, bias: bool = True,
@@ -45,7 +44,7 @@ class CPTLinear(nn.Module):
         self.bit_widths = bit_widths
         self.linear = nn.Linear(in_features, out_features, bias=bias)
 
-        # True CPT: Single shared LoRA for all precisions
+
         self.shared_lora = LoRAAdapter(
             in_features, out_features,
             rank=shared_lora_rank,
@@ -55,7 +54,7 @@ class CPTLinear(nn.Module):
             gradient_bits=gradient_bits
         )
 
-        # Quantizers for cycling LoRA at different precisions (True CPT!)
+
         if quantizer_per_bit is None:
             quantizer_per_bit = {bits: 'log' for bits in bit_widths}
 
@@ -101,19 +100,18 @@ class CPTLinear(nn.Module):
         if self.calibration_mode:
             return out
 
-        # True CPT: Quantize SHARED LoRA at current precision
+
         lora_quantizer = self.lora_weight_quantizers[f'{self.current_bits}bit']
         lora_A_quant = lora_quantizer(self.shared_lora.lora_A)
         lora_B_quant = lora_quantizer(self.shared_lora.lora_B)
 
-        # Apply gradient quantizers
+
         lora_A_quant = GradientQuantizer.apply(lora_A_quant, self.shared_lora.grad_quantizer_A)
         lora_B_quant = GradientQuantizer.apply(lora_B_quant, self.shared_lora.grad_quantizer_B)
 
-        # Compute LoRA output
+
         lora_output = x_quant @ lora_A_quant @ lora_B_quant.T
         return out + lora_output * self.shared_lora.scaling
-
 
 class CPTSelfAttention(nn.Module):
     def __init__(self, config, bit_widths: list, quantizer_per_bit: dict = None, gradient_bits: int = 8, shared_lora_rank: int = 16, shared_lora_alpha: int = 32):
@@ -147,17 +145,17 @@ class CPTSelfAttention(nn.Module):
 
         present_key_value = (key, value)
 
-        # Compute attention scores
+
         attn_weights = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(self.head_dim)
 
-        # Apply causal mask to prevent attending to future tokens
-        # key.size(2) accounts for past_key_value concatenation
+
+
         kv_seq_len = key.size(2)
         causal_mask = torch.tril(torch.ones(kv_seq_len, kv_seq_len, device=query.device, dtype=torch.bool))
         causal_mask = causal_mask.view(1, 1, kv_seq_len, kv_seq_len)
         attn_weights = attn_weights.masked_fill(~causal_mask[:, :, -seq_len:, :], float('-inf'))
 
-        # Apply padding mask if provided
+
         if attention_mask is not None:
             attn_weights = attn_weights + attention_mask
 
@@ -169,7 +167,6 @@ class CPTSelfAttention(nn.Module):
         attn_output = self.resid_dropout(attn_output)
 
         return attn_output, present_key_value
-
 
 class CPTBlock(nn.Module):
     def __init__(self, config, bit_widths: list, quantizer_per_bit: dict = None, gradient_bits: int = 8, shared_lora_rank: int = 16, shared_lora_alpha: int = 32):
@@ -205,7 +202,6 @@ class CPTBlock(nn.Module):
         hidden_states = residual + hidden_states
 
         return hidden_states, present_key_value
-
 
 class CPTModel(nn.Module):
     def __init__(self, config):

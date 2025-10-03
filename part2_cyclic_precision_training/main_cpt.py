@@ -27,7 +27,6 @@ from calibration import CalibrationManager
 import deploy as cpt_deploy
 import dataset as cpt_dataset
 
-
 def train_epoch_with_cpt(
     model: CPTModel,
     train_loader: DataLoader,
@@ -62,7 +61,6 @@ def train_epoch_with_cpt(
 
     return total_loss / num_batches
 
-
 def evaluate(model: CPTModel, dataloader: DataLoader, device: str, precision: int = 8) -> Dict[str, float]:
     model.eval()
     model.set_precision(precision)
@@ -78,8 +76,8 @@ def evaluate(model: CPTModel, dataloader: DataLoader, device: str, precision: in
             outputs = model(input_ids=input_ids, labels=labels)
             loss = outputs.loss
 
-            # Model shifts labels by 1 (predicts labels[1:] from logits[:-1])
-            # so actual tokens used = seq_len - 1
+
+
             batch_size, seq_len = labels.shape
             actual_tokens = batch_size * (seq_len - 1)
 
@@ -93,7 +91,6 @@ def evaluate(model: CPTModel, dataloader: DataLoader, device: str, precision: in
         'loss': avg_loss,
         'perplexity': perplexity
     }
-
 
 def load_pretrained_weights(model, model_config):
     print("Loading pretrained GPT-2 weights...")
@@ -170,7 +167,6 @@ def load_pretrained_weights(model, model_config):
     print(f"  Total parameters: {total_params:,}")
     print(f"  Frozen parameters: {frozen_params:,} ({100*frozen_params/total_params:.1f}%)")
     print(f"  Trainable (LoRA) parameters: {trainable_params:,} ({100*trainable_params/total_params:.1f}%)")
-
 
 def main(args):
     config = get_config()
@@ -316,7 +312,7 @@ def main(args):
 
         if (epoch + 1) % training_config.eval_interval == 0:
             print("Running validation...")
-            # Only evaluate at current training precision
+
             precision = current_precision
             if precision in model_config.bit_widths:
                 calib_mgr.ensure_calibrated(precision)
@@ -340,11 +336,11 @@ def main(args):
     target_bits = training_config.target_bits
     print(f"Target precision: {target_bits}-bit")
 
-    # Ensure all quantizers are calibrated for target_bits before saving
+
     print(f"Ensuring calibration for target precision {target_bits}-bit...")
     calib_mgr.ensure_calibrated(target_bits)
 
-    # CRITICAL: Ensure LoRA weight quantizers are calibrated for target_bits
+
     if target_bits not in calib_mgr.lora_calibrated_bits:
         print(f"  Calibrating LoRA weight quantizers for target precision {target_bits}-bit...")
         calib_mgr.calibrate_lora_weight_quantizers([target_bits])
@@ -360,7 +356,6 @@ def main(args):
     else:
         print("❌ Save failed")
     print("="*70)
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Cyclic Precision Training')

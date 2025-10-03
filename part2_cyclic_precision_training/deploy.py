@@ -1,8 +1,3 @@
-"""
-Deployment utilities for saving CPT models.
-Compatible with Part 3 evaluation scripts.
-"""
-
 import torch
 import torch.nn as nn
 import os
@@ -10,19 +5,7 @@ import time
 from typing import Dict, Optional
 from cpt_model import CPTModel
 
-
-
-
 def save_target_model(model: CPTModel, config: dict, target_bits: int, output_dir: str):
-    """
-    Save CPT model at target precision only (filtered state_dict).
-
-    Args:
-        model: CPT model
-        config: Configuration dictionary
-        target_bits: Target precision to save (e.g., 6 for 6-bit)
-        output_dir: Directory to save the model
-    """
     import traceback
     os.makedirs(output_dir, exist_ok=True)
     timestamp = time.strftime('%Y%m%d_%H%M%S')
@@ -49,13 +32,11 @@ def save_target_model(model: CPTModel, config: dict, target_bits: int, output_di
     )
     print(f"Size: {state_dict_size / (1024*1024):.2f} MB")
 
-    # Create filename
     filename = os.path.join(output_dir, f"cpt_model_{target_bits}bit_target_{timestamp}.pth")
     print(f"Saving to: {filename}")
 
-    # Save checkpoint with filtered state_dict
     checkpoint = {
-        'model_state_dict': filtered_state_dict,  # Filtered!
+        'model_state_dict': filtered_state_dict,
         'model_config': config['model'].__dict__,
         'training_config': config['training'].__dict__,
         'cpt_config': config['cpt'].__dict__,
@@ -69,30 +50,25 @@ def save_target_model(model: CPTModel, config: dict, target_bits: int, output_di
         'model_type': 'CPT_TARGET'
     }
 
-    # Save with error handling
     max_retries = 3
     retry_count = 0
     save_successful = False
 
     while retry_count < max_retries and not save_successful:
         try:
-            # Clear any GPU cache before saving
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-            # Save checkpoint
             torch.save(checkpoint, filename, pickle_protocol=4)
 
-            # Verify saved file
             time.sleep(0.5)
             file_size = os.path.getsize(filename)
             print(f"File saved, size: {file_size / (1024*1024):.2f} MB")
 
-            # Verify integrity
             print("Verifying checkpoint integrity...")
             test_load = torch.load(filename, map_location='cpu', weights_only=False)
 
-            # Check critical fields
             assert 'model_state_dict' in test_load, "Missing model_state_dict"
             assert 'bit_width' in test_load, "Missing bit_width"
             assert test_load['bit_width'] == target_bits, f"Bit width mismatch: {test_load['bit_width']} != {target_bits}"
@@ -111,7 +87,7 @@ def save_target_model(model: CPTModel, config: dict, target_bits: int, output_di
             else:
                 print(f"❌ ERROR saving {target_bits}-bit model after {max_retries} attempts")
                 traceback.print_exc()
-                # Try to remove corrupted file
+
                 if os.path.exists(filename):
                     try:
                         os.remove(filename)
@@ -122,7 +98,7 @@ def save_target_model(model: CPTModel, config: dict, target_bits: int, output_di
     print(f"{'='*60}\n")
 
     if save_successful:
-        # Save summary file
+
         summary_file = os.path.join(output_dir, f"cpt_target_model_summary_{timestamp}.txt")
         with open(summary_file, 'w') as f:
             f.write("CPT Target Model Summary\n")
