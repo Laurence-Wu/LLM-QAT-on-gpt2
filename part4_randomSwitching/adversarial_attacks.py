@@ -76,7 +76,7 @@ class TextFoolerAttack:
 
         self.model.zero_grad()
 
-        input_embeds = self.model.transformer.wte(input_ids)
+        input_embeds = self.model.transformer.wte(input_ids).clone().detach()
         input_embeds.requires_grad = True
 
         outputs = self.model(
@@ -254,7 +254,7 @@ class GradientAttack:
         for iteration in range(num_iterations):
             self.model.zero_grad()
 
-            input_embeds = embedding_layer(perturbed_ids)
+            input_embeds = embedding_layer(perturbed_ids).clone().detach()
             input_embeds.requires_grad = True
 
             outputs = self.model(
@@ -333,13 +333,13 @@ class GradientAttack:
             labels = labels.unsqueeze(0)
 
         embedding_layer = self.model.transformer.wte
-        original_embeds = embedding_layer(input_ids).detach()
+        original_embeds = embedding_layer(input_ids).clone().detach()
 
         with torch.no_grad():
             orig_outputs = self.model(input_ids, labels=labels)
             orig_loss = orig_outputs['loss'].item()
 
-        perturbed_embeds = original_embeds.clone()
+        perturbed_embeds = original_embeds.clone().detach()
         perturbed_embeds.requires_grad = True
 
         for iteration in range(num_iterations):
@@ -361,7 +361,7 @@ class GradientAttack:
                 delta = torch.clamp(delta, -epsilon, epsilon)
                 perturbed_embeds = original_embeds + delta
 
-            perturbed_embeds = perturbed_embeds.detach()
+            perturbed_embeds = perturbed_embeds.clone().detach()
             perturbed_embeds.requires_grad = True
 
         with torch.no_grad():
