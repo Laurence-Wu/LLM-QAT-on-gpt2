@@ -21,7 +21,8 @@ class CyclicPrecisionScheduler:
         self.cycle_count = 0
         self.current_epoch = 0
 
-    def get_precision_at_position(self, position: int) -> int:
+    def get_precision_at_position(self, epoch: int) -> int:
+        position = epoch % self.epochs_per_cycle
         if self.schedule_type == 'cosine':
             t = float(position / self.epochs_per_cycle)
             T = self.epochs_per_cycle
@@ -152,5 +153,7 @@ class PrecisionRangeTest:
 
     def find_bounds(self, dataloader, criterion) -> Tuple[int, int]:
         lower_bound = self.find_lower_bound(dataloader, criterion)
-        upper_bound = min(self.target_bits, self.max_bits)
+        # Add +1 to ensure target_bits is included in CPT cycling range
+        # Example: target_bits=8 → upper_bound=9, so CPT cycles [lower, 9] which includes 8
+        upper_bound = min(self.target_bits + 1, self.max_bits)
         return lower_bound, upper_bound

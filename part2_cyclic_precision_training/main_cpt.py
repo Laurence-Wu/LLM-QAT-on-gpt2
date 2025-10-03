@@ -330,10 +330,24 @@ def main(args):
         print(f"  Loss Improvement: {loss_improvement:.4f}")
 
     print(f"\n{'='*70}")
-    print("Saving target model...")
+    print("Preparing to save target model...")
     target_bits = training_config.target_bits
     print(f"Target precision: {target_bits}-bit")
 
+    # Ensure all quantizers are calibrated for target_bits before saving
+    print(f"Ensuring calibration for target precision {target_bits}-bit...")
+    calib_mgr.ensure_calibrated(target_bits)
+
+    # CRITICAL: Ensure LoRA weight quantizers are calibrated for target_bits
+    if target_bits not in calib_mgr.lora_calibrated_bits:
+        print(f"  Calibrating LoRA weight quantizers for target precision {target_bits}-bit...")
+        calib_mgr.calibrate_lora_weight_quantizers([target_bits])
+        calib_mgr.lora_calibrated_bits.add(target_bits)
+        print(f"  ✓ LoRA weight quantizers calibrated for {target_bits}-bit")
+    else:
+        print(f"  ✓ LoRA weight quantizers already calibrated for {target_bits}-bit")
+
+    print("Saving target model...")
     saved_path = cpt_deploy.save_target_model(model, config, target_bits, 'final_models')
     if saved_path:
         print(f"✅ Saved: {saved_path}")

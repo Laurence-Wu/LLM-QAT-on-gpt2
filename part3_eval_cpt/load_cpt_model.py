@@ -189,6 +189,40 @@ def load_cpt_model(model_path: str):
             print(f"      - Scales: {list(lora_wq.scales.keys())}")
             print(f"      - Zero points: {list(lora_wq.zero_points.keys())}")
 
+    # Emergency calibration for LoRA weight quantizers if missing from checkpoint
+    print("\nChecking for missing LoRA weight quantizer calibration...")
+    emergency_calibration_count = 0
+    for name, module in model.named_modules():
+        if module.__class__.__name__ == 'CPTLinear':
+            for bits_key, lora_wq in module.lora_weight_quantizers.items():
+                bits = int(bits_key.replace('bit', ''))
+                if bits not in lora_wq.calibrated_bits:
+                    print(f"  WARNING: {name}.lora_weight_quantizers.{bits_key} not calibrated!")
+                    print(f"  Performing emergency calibration using LoRA weights...")
+
+                    # Get LoRA weights
+                    if hasattr(module, 'shared_lora') and module.shared_lora is not None:
+                        lora_A = module.shared_lora.lora_A
+                        lora_B = module.shared_lora.lora_B
+
+                        if lora_A is not None and lora_B is not None:
+                            # Run calibration
+                            lora_wq.set_num_bits(bits)
+                            lora_wq.start_calibration()
+                            with torch.no_grad():
+                                _ = lora_wq(lora_A)
+                                _ = lora_wq(lora_B)
+                            lora_wq.finish_calibration(debug=False)
+                            emergency_calibration_count += 1
+                            print(f"  ✓ Emergency calibration completed for {bits}-bit")
+                        else:
+                            print(f"  ✗ Cannot calibrate: LoRA weights not found")
+
+    if emergency_calibration_count > 0:
+        print(f"\n✓ Performed emergency calibration for {emergency_calibration_count} LoRA weight quantizers")
+    else:
+        print("✓ All LoRA weight quantizers already calibrated")
+
     model = model.cuda()
     model.eval()
 
