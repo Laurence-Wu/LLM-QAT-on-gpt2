@@ -23,7 +23,7 @@ class CyclicPrecisionScheduler:
 
     def get_precision_for_epoch(self, epoch: int) -> int:
         if epoch % self.epochs_per_cycle == 0:
-            position = epoch
+            position = self.epochs_per_cycle
         else :
             position = epoch % self.epochs_per_cycle
         if self.schedule_type == 'cosine':
