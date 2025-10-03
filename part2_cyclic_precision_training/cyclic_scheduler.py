@@ -21,7 +21,7 @@ class CyclicPrecisionScheduler:
         self.cycle_count = 0
         self.current_epoch = 0
 
-    def get_precision_at_position(self, epoch: int) -> int:
+    def get_precision_for_epoch(self, epoch: int) -> int:
         position = epoch % self.epochs_per_cycle
         if self.schedule_type == 'cosine':
             t = float(position / self.epochs_per_cycle)
@@ -36,6 +36,7 @@ class CyclicPrecisionScheduler:
                 precision = self.max_bits - (self.max_bits - self.min_bits) * (2 * (t - T/2) / T)
         else:
             raise ValueError(f"Unknown schedule type: {self.schedule_type}")
+        print(precision)
         return self._round_to_nearest_bitwidth(precision)
 
     def _round_to_nearest_bitwidth(self, precision: float) -> int:
@@ -43,30 +44,6 @@ class CyclicPrecisionScheduler:
         min_idx = distances.index(min(distances))
         return self.bit_widths[min_idx]
 
-    def get_precision_for_epoch(self, epoch: int) -> int:
-        return self.get_precision_at_position(epoch)
-
-    def cycle(self) -> int:
-        position = self.global_cycle % self.epochs_per_cycle
-        precision = self.get_precision_at_position(position)
-        self.global_cycle += 1
-        if position == self.epochs_per_cycle - 1:
-            self.cycle_count += 1
-        return precision
-
-    def get_current_cycle_info(self) -> dict:
-        cycle_num = int(self.current_epoch / self.epochs_per_cycle)
-        cycle_progress = (self.current_epoch / self.epochs_per_cycle) % 1.0
-        return {
-            'epoch': self.current_epoch,
-            'cycle_num': cycle_num,
-            'total_cycles': self.total_cycles,
-            'current_precision': self.get_precision_for_epoch(self.current_epoch),
-            'cycle_progress': cycle_progress
-        }
-
-    def reset(self):
-        self.current_epoch = 0
 
 
 class PrecisionRangeTest:
