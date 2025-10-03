@@ -20,7 +20,7 @@ from simplified_random_switching import (
     SimplifiedRandomSwitching,
     DefenseEvaluator
 )
-from adversarial_attacks import TextFoolerAttack, GradientAttack, AttackEvaluator
+from adversarial_attacks import TextFoolerAttack, AttackEvaluator
 from wikitext_evaluation import prepare_wikitext2_samples, WikiTextEvaluator
 
 
@@ -57,6 +57,8 @@ def evaluate_fixed_precision_baseline(model, tokenizer, test_samples: List[Dict]
             test_samples[:50], precision
         )
 
+        if 'accuracy' in clean_results:
+            print(f"  Clean accuracy: {clean_results['accuracy']:.2%}")
         print(f"  Clean perplexity: {clean_results['perplexity']:.2f}")
         print(f"  Clean loss: {clean_results['avg_loss']:.3f}")
 
@@ -66,15 +68,10 @@ def evaluate_fixed_precision_baseline(model, tokenizer, test_samples: List[Dict]
         )
 
         print(f"    Attack success rate: {textfooler_results['attack_success_rate']:.2%}")
+        print(f"    Avg original accuracy: {textfooler_results['avg_original_accuracy']:.2%}")
+        print(f"    Avg adversarial accuracy: {textfooler_results['avg_adversarial_accuracy']:.2%}")
+        print(f"    Avg accuracy drop: {textfooler_results['avg_accuracy_drop']:.2%}")
         print(f"    Avg perturbation ratio: {textfooler_results['avg_perturb_ratio']:.2%}")
-
-        print("  Testing Gradient attack (HotFlip)...")
-        gradient_results = attack_evaluator.evaluate_gradient(
-            test_samples[:30], attack_type='hotflip', max_samples=30
-        )
-
-        print(f"    Attack success rate: {gradient_results['attack_success_rate']:.2%}")
-        print(f"    Avg changed tokens: {gradient_results['avg_change_ratio']:.2%}")
 
         print("  Testing BERT-Attack...")
         bert_attack_results = attack_evaluator.evaluate_bert_attack(
@@ -82,11 +79,12 @@ def evaluate_fixed_precision_baseline(model, tokenizer, test_samples: List[Dict]
         )
 
         print(f"    Attack success rate: {bert_attack_results['attack_success_rate']:.2%}")
+        print(f"    Avg original accuracy: {bert_attack_results['avg_original_accuracy']:.2%}")
+        print(f"    Avg adversarial accuracy: {bert_attack_results['avg_adversarial_accuracy']:.2%}")
+        print(f"    Avg accuracy drop: {bert_attack_results['avg_accuracy_drop']:.2%}")
         print(f"    Avg perturbation ratio: {bert_attack_results['avg_perturb_ratio']:.2%}")
-        print(f"    Avg perplexity increase: {bert_attack_results['avg_perplexity_increase']:.2%}")
 
         defense_rate_tf = 1 - textfooler_results['attack_success_rate']
-        defense_rate_grad = 1 - gradient_results['attack_success_rate']
         defense_rate_bert = 1 - bert_attack_results['attack_success_rate']
 
         results[precision] = {
@@ -94,16 +92,17 @@ def evaluate_fixed_precision_baseline(model, tokenizer, test_samples: List[Dict]
             'textfooler': {
                 'attack_success_rate': textfooler_results['attack_success_rate'],
                 'defense_rate': defense_rate_tf,
+                'avg_accuracy_drop': textfooler_results['avg_accuracy_drop'],
+                'avg_original_accuracy': textfooler_results['avg_original_accuracy'],
+                'avg_adversarial_accuracy': textfooler_results['avg_adversarial_accuracy'],
                 'avg_perturbations': textfooler_results['avg_perturb_ratio']
-            },
-            'gradient': {
-                'attack_success_rate': gradient_results['attack_success_rate'],
-                'defense_rate': defense_rate_grad,
-                'avg_changes': gradient_results['avg_change_ratio']
             },
             'bert_attack': {
                 'attack_success_rate': bert_attack_results['attack_success_rate'],
                 'defense_rate': defense_rate_bert,
+                'avg_accuracy_drop': bert_attack_results['avg_accuracy_drop'],
+                'avg_original_accuracy': bert_attack_results['avg_original_accuracy'],
+                'avg_adversarial_accuracy': bert_attack_results['avg_adversarial_accuracy'],
                 'avg_perturbations': bert_attack_results['avg_perturb_ratio'],
                 'avg_perplexity_increase': bert_attack_results['avg_perplexity_increase']
             }
