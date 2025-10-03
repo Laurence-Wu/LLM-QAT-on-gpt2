@@ -17,7 +17,10 @@ class LoRAAdapter(nn.Module):
         self.scaling = alpha / rank if rank > 0 else 1.0
 
         if rank > 0:
-            self.lora_A = nn.Parameter(torch.randn(in_features, rank) * 0.01)
+            # Kaiming initialization for lora_A (down-projection) - follows LoRA paper
+            self.lora_A = nn.Parameter(torch.empty(in_features, rank))
+            nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
+            # Zero initialization for lora_B (up-projection) - ensures BA = 0 at start
             self.lora_B = nn.Parameter(torch.zeros(out_features, rank))
             self.quantize_A = LearnableFakeQuantize(
                 num_bits=num_bits, quantizer_type=quantizer_type, channel_dim=0, per_channel=True
