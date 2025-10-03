@@ -16,18 +16,25 @@ class ModelConfig:
             4: 'minmax',
             5: 'minmax',
             6: 'log',
+            7: 'log',
             8: 'log',
+            9: 'log',
+            10: 'log',
+            11: 'log',
+            12: 'log',
+            13: 'log',
+            14: 'log',
+            15: 'log',
             16: 'log',
-            24: 'log',
             32: None
         }
         self.lora_rank = 16
         self.lora_alpha = 32
         self.bit_widths = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32]
         self.teacher_bits = 32
-        self.lora_rank_per_bit = {3: 64, 4: 64, 5: 64, 32: 0}
-        self.lora_alpha_per_bit = {3: 64, 4: 64, 5: 64, 32: 0}
-        self.activation_bits_per_bit = {3: 3, 4: 4, 5: 5, 32: 32}
+        self.lora_rank_per_bit = {3: 64, 4: 64, 5: 64, 6: 64, 7: 64, 8: 64, 9: 64, 10: 64, 11: 64, 12: 64, 13: 64, 14: 64, 15: 64, 16: 64, 32: 0}
+        self.lora_alpha_per_bit = {3: 64, 4: 64, 5: 64, 6: 64, 7: 64, 8: 64, 9: 64, 10: 64, 11: 64, 12: 64, 13: 64, 14: 64, 15: 64, 16: 64, 32: 0}
+        self.activation_bits_per_bit = {3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, 10: 10, 11: 11, 12: 12, 13: 13, 14: 14, 15: 15, 16: 16, 32: 32}
         self.per_channel_quantization = True
 
 
