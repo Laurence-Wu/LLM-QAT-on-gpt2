@@ -30,7 +30,7 @@ class ModelConfig:
         }
         self.lora_rank = 16
         self.lora_alpha = 32
-        self.bit_widths = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 32]
+        self.bit_widths = [4,32]
         self.teacher_bits = 32
         self.lora_rank_per_bit = {3: 64, 4: 64, 5: 64, 6: 64, 7: 64, 8: 64, 9: 64, 10: 64, 11: 64, 12: 64, 13: 64, 14: 64, 15: 64, 16: 64, 32: 0}
         self.lora_alpha_per_bit = {3: 64, 4: 64, 5: 64, 6: 64, 7: 64, 8: 64, 9: 64, 10: 64, 11: 64, 12: 64, 13: 64, 14: 64, 15: 64, 16: 64, 32: 0}
