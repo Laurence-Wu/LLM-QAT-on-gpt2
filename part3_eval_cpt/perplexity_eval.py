@@ -70,7 +70,7 @@ class PerplexityEvaluator:
             input_ids = self.tokenizer(text, return_tensors='pt', truncation=True,
                                       max_length=max_length * 10, padding=False).input_ids.to(self.device)
 
-            if input_ids.size(1) < 2:
+            if input_ids.size(1) < 32:
                 continue
 
             prev_end_loc = 0
@@ -78,7 +78,7 @@ class PerplexityEvaluator:
             for begin_loc in range(0, input_ids.size(1), stride):
                 end_loc = min(begin_loc + max_length, input_ids.size(1))
 
-                if end_loc - begin_loc < 2:
+                if end_loc - begin_loc < 32:
                     break
 
                 target_start = max(prev_end_loc, begin_loc)
@@ -100,6 +100,24 @@ class PerplexityEvaluator:
                         print(f"    Logits std: {logits.std().item():.4f}")
                         print(f"    Logits min: {logits.min().item():.4f}")
                         print(f"    Logits max: {logits.max().item():.4f}")
+
+                        # Analyze logit distribution
+                        positive_count = (logits > 0).sum().item()
+                        total_logits = logits.numel()
+                        print(f"    Positive logits: {positive_count}/{total_logits} ({100*positive_count/total_logits:.1f}%)")
+
+                        # Top-k prediction confidence for last token
+                        last_token_logits = logits[0, -1, :]
+                        probs = torch.nn.functional.softmax(last_token_logits, dim=-1)
+                        top5 = probs.topk(5)
+                        print(f"    Top-5 probs: {[f'{p:.4f}' for p in top5.values.tolist()]}")
+                        top5_tokens = self.tokenizer.convert_ids_to_tokens(top5.indices.tolist())
+                        print(f"    Top-5 tokens: {top5_tokens}")
+
+                        # Window information
+                        print(f"    Window size: {window_ids.size(1)} tokens")
+                        preview_text = self.tokenizer.decode(window_ids[0, :min(20, window_ids.size(1))])
+                        print(f"    Window text preview: {preview_text}")
 
                     shift_logits = logits[..., :-1, :].contiguous()
                     shift_labels = window_ids[..., 1:].contiguous()
