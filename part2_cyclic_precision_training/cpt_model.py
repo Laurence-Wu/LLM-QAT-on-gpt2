@@ -65,7 +65,7 @@ class CPTLinear(nn.Module):
             self.lora_weight_quantizers[f'{bits}bit'] = LearnableFakeQuantize(
                 num_bits=bits,
                 quantizer_type=quant_type,
-                channel_dim=1,
+                channel_dim=0,
                 per_channel=True
             )
 

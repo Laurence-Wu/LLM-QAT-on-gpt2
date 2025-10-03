@@ -316,15 +316,16 @@ def main(args):
 
         if (epoch + 1) % training_config.eval_interval == 0:
             print("Running validation...")
-            for precision in [current_precision, training_config.target_bits]:
-                if precision in model_config.bit_widths:
-                    calib_mgr.ensure_calibrated(precision)
-                    val_results = evaluate(model, val_loader, device, precision)
-                    print(f"  {precision}-bit - Loss: {val_results['loss']:.4f}, PPL: {val_results['perplexity']:.2f}")
+            # Only evaluate at current training precision
+            precision = current_precision
+            if precision in model_config.bit_widths:
+                calib_mgr.ensure_calibrated(precision)
+                val_results = evaluate(model, val_loader, device, precision)
+                print(f"  {precision}-bit - Loss: {val_results['loss']:.4f}, PPL: {val_results['perplexity']:.2f}")
 
-                    if precision == training_config.target_bits and val_results['loss'] < best_val_loss:
-                        best_val_loss = val_results['loss']
-                        print(f"  New best: {best_val_loss:.4f}")
+                if val_results['loss'] < best_val_loss:
+                    best_val_loss = val_results['loss']
+                    print(f"  New best: {best_val_loss:.4f}")
 
     print("\n" + "="*70)
     print("Training completed!")
