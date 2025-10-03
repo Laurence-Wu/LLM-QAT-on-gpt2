@@ -65,11 +65,44 @@ def load_cpt_model(model_path: str):
     model = CPTModel(config)
     model.config = config
 
+    print("Loading pretrained GPT-2 base weights...")
+    from transformers import GPT2LMHeadModel
+    import gc
+
+    pretrained = GPT2LMHeadModel.from_pretrained('gpt2')
+
+    model.wte.weight.data = pretrained.transformer.wte.weight.data.clone()
+    model.wpe.weight.data = pretrained.transformer.wpe.weight.data.clone()
+
+    for i in range(len(pretrained.transformer.h)):
+        model.h[i].ln_1.weight.data = pretrained.transformer.h[i].ln_1.weight.data.clone()
+        model.h[i].ln_1.bias.data = pretrained.transformer.h[i].ln_1.bias.data.clone()
+        model.h[i].ln_2.weight.data = pretrained.transformer.h[i].ln_2.weight.data.clone()
+        model.h[i].ln_2.bias.data = pretrained.transformer.h[i].ln_2.bias.data.clone()
+
+        model.h[i].attn.c_attn.linear.weight.data = pretrained.transformer.h[i].attn.c_attn.weight.data.t().contiguous()
+        model.h[i].attn.c_attn.linear.bias.data = pretrained.transformer.h[i].attn.c_attn.bias.data.clone()
+        model.h[i].attn.c_proj.linear.weight.data = pretrained.transformer.h[i].attn.c_proj.weight.data.t().contiguous()
+        model.h[i].attn.c_proj.linear.bias.data = pretrained.transformer.h[i].attn.c_proj.bias.data.clone()
+
+        model.h[i].mlp['fc_in'].linear.weight.data = pretrained.transformer.h[i].mlp.c_fc.weight.data.t().contiguous()
+        model.h[i].mlp['fc_in'].linear.bias.data = pretrained.transformer.h[i].mlp.c_fc.bias.data.clone()
+        model.h[i].mlp['fc_out'].linear.weight.data = pretrained.transformer.h[i].mlp.c_proj.weight.data.t().contiguous()
+        model.h[i].mlp['fc_out'].linear.bias.data = pretrained.transformer.h[i].mlp.c_proj.bias.data.clone()
+
+    model.ln_f.weight.data = pretrained.transformer.ln_f.weight.data.clone()
+    model.ln_f.bias.data = pretrained.transformer.ln_f.bias.data.clone()
+    model.lm_head.linear.weight.data = pretrained.lm_head.weight.data.clone()
+
+    del pretrained
+    gc.collect()
+    print("Pretrained base weights loaded")
+
     if checkpoint_bit_width:
         model.set_precision(checkpoint_bit_width)
 
     model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-    print("Model weights loaded")
+    print("Checkpoint weights loaded (LoRA + trained LayerNorms)")
 
     first_linear = None
     for name, module in model.named_modules():
