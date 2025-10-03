@@ -159,7 +159,9 @@ def evaluate_random_switching_defense(model, tokenizer, test_samples: List[Dict]
             input_ids = sample['input_ids'].to(device)
             labels = sample.get('labels', input_ids.clone()).to(device)
 
-            model.set_precision(8)
+            # Use the highest non-FP32 precision available for gradient attack
+            attack_precision = max([b for b in bit_widths if b < 32]) if any(b < 32 for b in bit_widths) else max(bit_widths)
+            model.set_precision(attack_precision)
 
             gradient_attack = GradientAttack(model, tokenizer, device)
             attack_result = gradient_attack.hotflip_attack(input_ids, labels)
