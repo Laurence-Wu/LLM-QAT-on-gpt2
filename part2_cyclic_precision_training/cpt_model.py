@@ -147,7 +147,17 @@ class CPTSelfAttention(nn.Module):
 
         present_key_value = (key, value)
 
+        # Compute attention scores
         attn_weights = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(self.head_dim)
+
+        # Apply causal mask to prevent attending to future tokens
+        # key.size(2) accounts for past_key_value concatenation
+        kv_seq_len = key.size(2)
+        causal_mask = torch.tril(torch.ones(kv_seq_len, kv_seq_len, device=query.device, dtype=torch.bool))
+        causal_mask = causal_mask.view(1, 1, kv_seq_len, kv_seq_len)
+        attn_weights = attn_weights.masked_fill(~causal_mask[:, :, -seq_len:, :], float('-inf'))
+
+        # Apply padding mask if provided
         if attention_mask is not None:
             attn_weights = attn_weights + attention_mask
 

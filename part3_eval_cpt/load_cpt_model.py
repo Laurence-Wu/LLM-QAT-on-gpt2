@@ -114,16 +114,28 @@ def load_cpt_model(model_path: str):
         name, module = first_linear
         print(f"\nDEBUG: Quantizer status for {name}:")
         print(f"  Weight quantizer:")
-        print(f"    - Calibrated: {module.quantizer_weight.calibrated}")
+        current_bits_w = module.quantizer_weight.num_bits
+        print(f"    - Current precision: {current_bits_w}-bit")
+        print(f"    - Calibrated bits: {module.quantizer_weight.calibrated_bits}")
+        print(f"    - Calibrated at {current_bits_w}-bit: {current_bits_w in module.quantizer_weight.calibrated_bits}")
         print(f"    - per_channel: {module.quantizer_weight.per_channel}")
-        print(f"    - Scale shape: {module.quantizer_weight.scale.shape}")
-        print(f"    - Scale mean: {module.quantizer_weight.scale.mean().item():.6f}")
-        print(f"    - Scale std: {module.quantizer_weight.scale.std().item():.6f}")
+        if current_bits_w in module.quantizer_weight.scales:
+            print(f"    - Scale shape: {module.quantizer_weight.scales[current_bits_w].shape}")
+            print(f"    - Scale mean: {module.quantizer_weight.scales[current_bits_w].mean().item():.6f}")
+            print(f"    - Scale std: {module.quantizer_weight.scales[current_bits_w].std().item():.6f}")
+        else:
+            print(f"    - Scale: Not calibrated at {current_bits_w}-bit")
         print(f"  Input quantizer:")
-        print(f"    - Calibrated: {module.quantizer_input.calibrated}")
+        current_bits_i = module.quantizer_input.num_bits
+        print(f"    - Current precision: {current_bits_i}-bit")
+        print(f"    - Calibrated bits: {module.quantizer_input.calibrated_bits}")
+        print(f"    - Calibrated at {current_bits_i}-bit: {current_bits_i in module.quantizer_input.calibrated_bits}")
         print(f"    - per_channel: {module.quantizer_input.per_channel}")
-        print(f"    - Scale shape: {module.quantizer_input.scale.shape}")
-        print(f"    - Scale mean: {module.quantizer_input.scale.mean().item():.6f}")
+        if current_bits_i in module.quantizer_input.scales:
+            print(f"    - Scale shape: {module.quantizer_input.scales[current_bits_i].shape}")
+            print(f"    - Scale mean: {module.quantizer_input.scales[current_bits_i].mean().item():.6f}")
+        else:
+            print(f"    - Scale: Not calibrated at {current_bits_i}-bit")
 
     model = model.cuda()
     model.eval()
