@@ -22,7 +22,10 @@ class CyclicPrecisionScheduler:
         self.current_epoch = 0
 
     def get_precision_for_epoch(self, epoch: int) -> int:
-        position = epoch % self.epochs_per_cycle
+        if epoch % self.epochs_per_cycle == 0:
+            position = epoch
+        else :
+            position = epoch % self.epochs_per_cycle
         if self.schedule_type == 'cosine':
             t = float(position / self.epochs_per_cycle)
             T = self.epochs_per_cycle
@@ -36,7 +39,6 @@ class CyclicPrecisionScheduler:
                 precision = self.max_bits - (self.max_bits - self.min_bits) * (2 * (t - T/2) / T)
         else:
             raise ValueError(f"Unknown schedule type: {self.schedule_type}")
-        print(precision)
         return self._round_to_nearest_bitwidth(precision)
 
     def _round_to_nearest_bitwidth(self, precision: float) -> int:
