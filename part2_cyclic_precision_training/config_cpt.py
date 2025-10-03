@@ -7,7 +7,7 @@ class ModelConfig:
         self.n_head = 12
         self.layer_norm_epsilon = 1e-5
         self.embd_pdrop = 0.1
-        self.bit_widths = [4, 32]
+        self.bit_widths = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 32]
 
 
         self.shared_lora_rank = 16
@@ -30,7 +30,7 @@ class ModelConfig:
 
 class CPTConfig:
     def __init__(self):
-        self.total_cycles = 6
+        self.total_cycles = 15
         self.schedule_type = 'cosine'
         self.prt_start_bits = 2
         self.prt_threshold = 0.01
@@ -48,7 +48,7 @@ class TrainingConfig:
         self.adam_epsilon = 1e-8
         self.adam_betas = (0.9, 0.999)
         self.max_grad_norm = 1.0
-        self.num_epochs = 600
+        self.num_epochs = 150
         self.gradient_accumulation_steps = 3
         self.target_bits = 5
         self.eval_interval = 50
