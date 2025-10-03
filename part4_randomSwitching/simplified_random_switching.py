@@ -288,10 +288,19 @@ class DefenseEvaluator:
             attention_mask = sample.get('attention_mask')
             labels = sample.get('labels')
 
+            # Add batch dimension if needed
+            if input_ids.dim() == 1:
+                input_ids = input_ids.unsqueeze(0)
+
             if attention_mask is not None:
                 attention_mask = attention_mask.to(self.device)
+                if attention_mask.dim() == 1:
+                    attention_mask = attention_mask.unsqueeze(0)
+
             if labels is not None:
                 labels = labels.to(self.device)
+                if labels.dim() == 1:
+                    labels = labels.unsqueeze(0)
 
             outputs = defender.forward_without_switching(
                 input_ids, attention_mask, labels, precision
@@ -343,10 +352,19 @@ class DefenseEvaluator:
             attention_mask = sample.get('attention_mask')
             labels = sample.get('labels')
 
+            # Add batch dimension if needed
+            if input_ids.dim() == 1:
+                input_ids = input_ids.unsqueeze(0)
+
             if attention_mask is not None:
                 attention_mask = attention_mask.to(self.device)
+                if attention_mask.dim() == 1:
+                    attention_mask = attention_mask.unsqueeze(0)
+
             if labels is not None:
                 labels = labels.to(self.device)
+                if labels.dim() == 1:
+                    labels = labels.unsqueeze(0)
 
             outputs, precision = defender.forward_with_switching(
                 input_ids, attention_mask, labels
