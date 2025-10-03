@@ -33,7 +33,7 @@ def load_sp_model_with_bit_config(checkpoint_path: str, device: str = 'cuda'):
     """
     print(f"Loading SP model from {checkpoint_path}")
 
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
 
     if isinstance(checkpoint, dict):
         model_state = checkpoint.get('model_state_dict', checkpoint)
