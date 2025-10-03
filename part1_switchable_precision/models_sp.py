@@ -297,17 +297,24 @@ class SPModel(nn.Module):
         
         return self.current_bit_width
 
-    def forward(self, input_ids, attention_mask=None, use_checkpoint=False,
+    def forward(self, input_ids=None, inputs_embeds=None, attention_mask=None, use_checkpoint=False,
                 output_hidden_states=False):
-        
-        device = input_ids.device
-        B, T = input_ids.shape
 
-        token_embeddings = self.wte(input_ids)
-        position_ids = torch.arange(0, T, dtype=torch.long, device=device).unsqueeze(0)
-        position_embeddings = self.wpe(position_ids)
+        if inputs_embeds is not None:
+            hidden_states = inputs_embeds
+            B, T = hidden_states.shape[:2]
+            device = hidden_states.device
+        else:
+            if input_ids is None:
+                raise ValueError("Either input_ids or inputs_embeds must be provided")
+            device = input_ids.device
+            B, T = input_ids.shape
 
-        hidden_states = self.drop(token_embeddings + position_embeddings)
+            token_embeddings = self.wte(input_ids)
+            position_ids = torch.arange(0, T, dtype=torch.long, device=device).unsqueeze(0)
+            position_embeddings = self.wpe(position_ids)
+
+            hidden_states = self.drop(token_embeddings + position_embeddings)
 
         all_hidden_states = [] if output_hidden_states else None
 
@@ -411,18 +418,20 @@ class SPLMHeadModel(nn.Module):
         
         return self.transformer.get_current_precision()
 
-    def forward(self, input_ids, labels=None, attention_mask=None,
+    def forward(self, input_ids=None, inputs_embeds=None, labels=None, attention_mask=None,
                 use_checkpoint=False, output_hidden_states=False,
                 return_dict=False):
-        
+
         if output_hidden_states:
             hidden_states, all_hidden_states = self.transformer(
-                input_ids, attention_mask, use_checkpoint,
+                input_ids, inputs_embeds=inputs_embeds, attention_mask=attention_mask,
+                use_checkpoint=use_checkpoint,
                 output_hidden_states=True
             )
         else:
             hidden_states = self.transformer(
-                input_ids, attention_mask, use_checkpoint,
+                input_ids, inputs_embeds=inputs_embeds, attention_mask=attention_mask,
+                use_checkpoint=use_checkpoint,
                 output_hidden_states=False
             )
             all_hidden_states = None
