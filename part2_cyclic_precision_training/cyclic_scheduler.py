@@ -39,6 +39,7 @@ class CyclicPrecisionScheduler:
                 precision = self.max_bits - (self.max_bits - self.min_bits) * (2 * (t - T/2) / T)
         else:
             raise ValueError(f"Unknown schedule type: {self.schedule_type}")
+        print(precision)
         return self._round_to_nearest_bitwidth(precision)
 
     def _round_to_nearest_bitwidth(self, precision: float) -> int:
