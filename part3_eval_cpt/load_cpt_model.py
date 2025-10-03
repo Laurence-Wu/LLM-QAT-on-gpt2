@@ -124,6 +124,18 @@ def load_cpt_model(model_path: str):
     quantizer_keys = [k for k in state_dict.keys() if 'quantizer' in k]
     print(f"  Total quantizer-related keys in checkpoint: {len(quantizer_keys)}")
 
+    # Check specifically for lora_weight_quantizers
+    lora_wq_keys = [k for k in state_dict.keys() if 'lora_weight_quantizers' in k]
+    if lora_wq_keys:
+        print(f"  LoRA weight quantizer keys: {len(lora_wq_keys)}")
+        print(f"    Sample: {lora_wq_keys[:5]}")
+    else:
+        print(f"  WARNING: No lora_weight_quantizers calibration in checkpoint!")
+
+    # Also check grad_quantizer vs lora_weight_quantizers
+    grad_q_keys = [k for k in state_dict.keys() if 'grad_quantizer' in k]
+    print(f"  Gradient quantizer keys: {len(grad_q_keys)}")
+
     model.load_state_dict(checkpoint['model_state_dict'], strict=False)
     print("Checkpoint weights loaded (LoRA + trained LayerNorms)")
 
@@ -159,6 +171,14 @@ def load_cpt_model(model_path: str):
             print(f"    - Scale mean: {module.quantizer_input.scales[current_bits_i].mean().item():.6f}")
         else:
             print(f"    - Scale: Not calibrated at {current_bits_i}-bit")
+
+        # Check LoRA weight quantizers specifically
+        print(f"  LoRA weight quantizers:")
+        for bits_key, lora_wq in module.lora_weight_quantizers.items():
+            print(f"    {bits_key}:")
+            print(f"      - Calibrated bits: {lora_wq.calibrated_bits}")
+            print(f"      - Scales: {list(lora_wq.scales.keys())}")
+            print(f"      - Zero points: {list(lora_wq.zero_points.keys())}")
 
     model = model.cuda()
     model.eval()
