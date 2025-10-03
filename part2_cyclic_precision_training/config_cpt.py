@@ -48,9 +48,9 @@ class TrainingConfig:
         self.adam_epsilon = 1e-8
         self.adam_betas = (0.9, 0.999)
         self.max_grad_norm = 1.0
-        self.num_epochs = 600
+        self.num_epochs = 60
         self.gradient_accumulation_steps = 3
-        self.target_bits = 4
+        self.target_bits = 8
         self.eval_interval = 50
         self.empty_cache_interval = 25
         self.num_workers = 0
