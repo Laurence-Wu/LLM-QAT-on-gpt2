@@ -135,6 +135,11 @@ class CalibrationManager:
             return
 
         original_mode = self.model.training
+        original_precision = self.model.current_precision
+
+        # CRITICAL: Set to FP32 (no quantization) during gradient calibration
+        # This avoids needing weight/input quantizers to be calibrated first
+        self.model.set_precision(32)
         self.model.train()
 
         train_iter = iter(self.train_loader)
@@ -152,6 +157,8 @@ class CalibrationManager:
         except StopIteration:
             print("  Warning: No batches for gradient calibration")
 
+        # Restore original precision and mode
+        self.model.set_precision(original_precision)
         if not original_mode:
             self.model.eval()
 
