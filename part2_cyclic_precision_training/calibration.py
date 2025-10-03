@@ -109,6 +109,11 @@ class CalibrationManager:
             self._calibrate_precision(bits, num_batches=10)
             self.calibrated_bits.add(bits)
 
+        if bits not in self.lora_calibrated_bits:
+            print(f"  Calibrating LoRA weight quantizers for {bits}-bit...")
+            self.calibrate_lora_weight_quantizers([bits])
+            self.lora_calibrated_bits.add(bits)
+
     def calibrate_gradient_quantizers(self):
         print("\nCalibrating gradient quantizers...")
 
