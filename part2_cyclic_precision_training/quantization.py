@@ -55,10 +55,73 @@ class LearnableFakeQuantize(nn.Module):
         self.temp_min = None
         self.temp_max = None
 
+    def state_dict(self, destination=None, prefix='', keep_vars=False):
+        # Get base state_dict from parent
+        state = super().state_dict(destination, prefix, keep_vars)
+
+        # Save per-precision scales
+        for bits, scale_tensor in self.scales.items():
+            key = f'{prefix}_scales_{bits}'
+            state[key] = scale_tensor if keep_vars else scale_tensor.clone()
+
+        # Save per-precision zero_points
+        for bits, zp_tensor in self.zero_points.items():
+            key = f'{prefix}_zero_points_{bits}'
+            state[key] = zp_tensor if keep_vars else zp_tensor.clone()
+
+        # Save calibrated_bits set as list
+        if self.calibrated_bits:
+            state[f'{prefix}_calibrated_bits'] = list(self.calibrated_bits)
+
+        return state
+
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
 
-        # Handle old checkpoints with single scale/zero_point buffers
+        # Initialize empty dicts
+        self.scales = {}
+        self.zero_points = {}
+        self.calibrated_bits = set()
+
+        # Extract per-precision calibration from state_dict
+        keys_to_remove = []
+
+        for key in list(state_dict.keys()):
+            if key.startswith(prefix):
+                suffix = key[len(prefix):]
+
+                # Extract scales
+                if suffix.startswith('_scales_'):
+                    bits_str = suffix.replace('_scales_', '')
+                    try:
+                        bits = int(bits_str)
+                        self.scales[bits] = state_dict[key].clone()
+                        self.calibrated_bits.add(bits)
+                        keys_to_remove.append(key)
+                    except ValueError:
+                        pass
+
+                # Extract zero_points
+                elif suffix.startswith('_zero_points_'):
+                    bits_str = suffix.replace('_zero_points_', '')
+                    try:
+                        bits = int(bits_str)
+                        self.zero_points[bits] = state_dict[key].clone()
+                        keys_to_remove.append(key)
+                    except ValueError:
+                        pass
+
+                # Extract calibrated_bits list
+                elif suffix == '_calibrated_bits':
+                    if isinstance(state_dict[key], list):
+                        self.calibrated_bits = set(state_dict[key])
+                    keys_to_remove.append(key)
+
+        # Remove extracted keys from state_dict
+        for key in keys_to_remove:
+            del state_dict[key]
+
+        # Handle old checkpoints with single scale/zero_point buffers (backward compatibility)
         scale_key = prefix + 'scale'
         zero_point_key = prefix + 'zero_point'
 
