@@ -31,7 +31,7 @@ class ModelConfig:
 
 class CPTConfig:
     def __init__(self):
-        self.total_cycles = 5
+        self.total_cycles = 25
         self.schedule_type = 'cosine'
         self.prt_start_bits = 2
         self.prt_threshold = 0.01
