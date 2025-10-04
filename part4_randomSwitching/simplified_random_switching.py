@@ -157,8 +157,7 @@ class SimplifiedRandomSwitching:
             outputs = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-                labels=labels,
-                return_dict=True
+                labels=labels
             )
 
         return outputs, precision
@@ -174,8 +173,7 @@ class SimplifiedRandomSwitching:
             outputs = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-                labels=labels,
-                return_dict=True
+                labels=labels
             )
 
         return outputs
