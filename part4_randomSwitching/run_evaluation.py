@@ -31,7 +31,7 @@ def evaluate_fixed_precision_baseline(model, tokenizer, test_samples: List[Dict]
     results = {}
 
     for precision in bit_widths:
-        if precision == 32 or precision 4:
+        if precision == 32 or precision == 4:
             print(f"\nEvaluating at fixed {precision}-bit precision...")
 
             model.set_precision(precision)
