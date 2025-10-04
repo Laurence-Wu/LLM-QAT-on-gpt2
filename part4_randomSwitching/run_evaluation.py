@@ -247,9 +247,20 @@ def generate_report(fixed_results: Dict, switching_results: Dict,
         }
     }
 
+    import copy
+    report_json = copy.deepcopy(report)
+
+    if 'fixed_precision_results' in report_json:
+        for precision_key in report_json['fixed_precision_results']:
+            precision_data = report_json['fixed_precision_results'][precision_key]
+            if 'textfooler' in precision_data:
+                precision_data['textfooler'].pop('adversarial_examples', None)
+            if 'bert_attack' in precision_data:
+                precision_data['bert_attack'].pop('adversarial_examples', None)
+
     output_file = output_path / 'evaluation_results.json'
     with open(output_file, 'w') as f:
-        json.dump(report, f, indent=2)
+        json.dump(report_json, f, indent=2)
 
     print(f"\nResults saved to: {output_file}")
 
@@ -291,6 +302,13 @@ def main():
         default=None,
         help="Bit widths to evaluate (e.g., --bit_widths 3 4 5). Overrides checkpoint bit widths."
     )
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        choices=['sp', 'cpt'],
+        default='sp',
+        help="Model type: sp (switchable precision) or cpt (cyclic precision training)"
+    )
 
     args = parser.parse_args()
 
@@ -309,14 +327,21 @@ def main():
     print("="*60)
     print("ADVERSARIAL ROBUSTNESS EVALUATION WITH RANDOM SWITCHING")
     print("="*60)
-    print(f"\nCheckpoint: {args.checkpoint}")
+    print(f"\nModel type: {args.model_type.upper()}")
+    print(f"Checkpoint: {args.checkpoint}")
     print(f"Number of samples: {num_samples}")
     print(f"Switch probabilities: {switch_probs}")
     print(f"Output directory: {output_path}")
 
-    model, tokenizer, checkpoint_bit_widths, saved_precision = load_sp_model_with_bit_config(
-        args.checkpoint, device
-    )
+    if args.model_type == 'cpt':
+        from simplified_random_switching import load_cpt_model_with_config
+        model, tokenizer, checkpoint_bit_widths, saved_precision = load_cpt_model_with_config(
+            args.checkpoint, device
+        )
+    else:
+        model, tokenizer, checkpoint_bit_widths, saved_precision = load_sp_model_with_bit_config(
+            args.checkpoint, device
+        )
 
     if args.bit_widths is not None:
         bit_widths = args.bit_widths
@@ -324,7 +349,7 @@ def main():
         print(f"(Checkpoint has bit widths: {checkpoint_bit_widths})")
     else:
         bit_widths = checkpoint_bit_widths
-        print(f"\nLoaded SP model with bit widths: {bit_widths}")
+        print(f"\nLoaded {args.model_type.upper()} model with bit widths: {bit_widths}")
 
     if saved_precision:
         print(f"Model was saved at {saved_precision}-bit precision")
@@ -358,7 +383,7 @@ def main():
     )
 
     report['model_info'] = {
-        'type': 'sp',
+        'type': args.model_type,
         'checkpoint': args.checkpoint,
         'bit_widths': bit_widths,
         'saved_precision': saved_precision
@@ -369,9 +394,20 @@ def main():
         'dataset': 'WikiText-2'
     }
 
-    report_file = output_path / 'evaluation_results_sp.json'
+    import copy
+    report_enhanced_json = copy.deepcopy(report)
+
+    if 'fixed_precision_results' in report_enhanced_json:
+        for precision_key in report_enhanced_json['fixed_precision_results']:
+            precision_data = report_enhanced_json['fixed_precision_results'][precision_key]
+            if 'textfooler' in precision_data:
+                precision_data['textfooler'].pop('adversarial_examples', None)
+            if 'bert_attack' in precision_data:
+                precision_data['bert_attack'].pop('adversarial_examples', None)
+
+    report_file = output_path / f'evaluation_results_{args.model_type}.json'
     with open(report_file, 'w') as f:
-        json.dump(report, f, indent=2)
+        json.dump(report_enhanced_json, f, indent=2)
     print(f"\nEnhanced report saved to: {report_file}")
 
     print("\n" + "="*60)

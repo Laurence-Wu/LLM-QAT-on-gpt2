@@ -12,6 +12,51 @@ from part1_switchable_precision.models_sp import SPLMHeadModel
 from transformers import GPT2Tokenizer, GPT2Config
 from part1_switchable_precision.config_sp import ModelConfig
 
+def load_cpt_model_with_config(checkpoint_path: str, device: str = 'cuda'):
+    cpt_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           'part2_cyclic_precision_training')
+    sys.path.insert(0, cpt_dir)
+
+    from cpt_model import CPTModel
+    from config_cpt import get_config
+
+    print(f"Loading CPT model from {checkpoint_path}")
+
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+
+    model_config_dict = checkpoint.get('model_config', {})
+    training_config_dict = checkpoint.get('training_config', {})
+    cpt_config_dict = checkpoint.get('cpt_config', {})
+
+    config = get_config()
+
+    for key, value in model_config_dict.items():
+        if hasattr(config['model'], key):
+            setattr(config['model'], key, value)
+    for key, value in training_config_dict.items():
+        if hasattr(config['training'], key):
+            setattr(config['training'], key, value)
+    for key, value in cpt_config_dict.items():
+        if hasattr(config['cpt'], key):
+            setattr(config['cpt'], key, value)
+
+    model = CPTModel(config)
+    model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+    model = model.to(device)
+    model.eval()
+
+    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    tokenizer.pad_token = tokenizer.eos_token
+
+    bit_widths = config['model'].bit_widths
+    target_precision = checkpoint.get('target_precision', 5)
+
+    print(f"CPT model loaded successfully")
+    print(f"  Available bit widths: {bit_widths}")
+    print(f"  Target precision: {target_precision}-bit")
+
+    return model, tokenizer, bit_widths, target_precision
+
 def load_sp_model_with_bit_config(checkpoint_path: str, device: str = 'cuda'):
     print(f"Loading SP model from {checkpoint_path}")
 
