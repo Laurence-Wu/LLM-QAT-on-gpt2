@@ -16,8 +16,8 @@ from simplified_random_switching import (
     SimplifiedRandomSwitching,
     DefenseEvaluator
 )
-from adversarial_attacks import TextFoolerAttack, AttackEvaluator
-from wikitext_evaluation import prepare_wikitext2_samples, WikiTextEvaluator
+from adversarial_attacks import AttackEvaluator
+from wikitext_evaluation import prepare_wikitext2_samples
 
 def evaluate_fixed_precision_baseline(model, tokenizer, test_samples: List[Dict],
                                      bit_widths: List[int], device: str = 'cuda') -> Dict:
@@ -386,21 +386,10 @@ def main():
         'dataset': 'WikiText-2'
     }
 
-    import copy
-    report_enhanced_json = copy.deepcopy(report)
-
-    if 'fixed_precision_results' in report_enhanced_json:
-        for precision_key in report_enhanced_json['fixed_precision_results']:
-            precision_data = report_enhanced_json['fixed_precision_results'][precision_key]
-            if 'textfooler' in precision_data:
-                precision_data['textfooler'].pop('adversarial_examples', None)
-            if 'bert_attack' in precision_data:
-                precision_data['bert_attack'].pop('adversarial_examples', None)
-
     report_file = output_path / f'evaluation_results_{args.model_type}.json'
     with open(report_file, 'w') as f:
-        json.dump(report_enhanced_json, f, indent=2)
-    print(f"\nEnhanced report saved to: {report_file}")
+        json.dump(report, f, indent=2)
+    print(f"\nReport saved to: {report_file}")
 
     print("\n" + "="*60)
     print("EVALUATION COMPLETE")

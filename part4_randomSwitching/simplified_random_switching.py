@@ -237,11 +237,6 @@ class SimplifiedRandomSwitching:
             'precision_counts': dict(precision_counts)
         }
 
-    def reset_statistics(self):
-        self.precision_history = []
-        self.switch_count = 0
-        self.total_forwards = 0
-
 class DefenseEvaluator:
 
     def __init__(self, model, tokenizer, bit_widths: List[int], device: str = 'cuda'):
@@ -307,82 +302,3 @@ class DefenseEvaluator:
             'accuracy': accuracy,
             'total_tokens': total_tokens
         }
-
-    def evaluate_random_switching(self, test_samples: List[Dict],
-                                 switch_probability: float) -> Dict:
-        defender = SimplifiedRandomSwitching(
-            self.model, self.bit_widths, switch_probability, self.device
-        )
-
-        total_loss = 0
-        correct_predictions = 0
-        total_predictions = 0
-        precision_at_prediction = []
-
-        for sample in test_samples:
-            input_ids = sample['input_ids'].to(self.device)
-            attention_mask = sample.get('attention_mask')
-            labels = sample.get('labels')
-
-            if input_ids.dim() == 1:
-                input_ids = input_ids.unsqueeze(0)
-
-            if attention_mask is not None:
-                attention_mask = attention_mask.to(self.device)
-                if attention_mask.dim() == 1:
-                    attention_mask = attention_mask.unsqueeze(0)
-
-            if labels is not None:
-                labels = labels.to(self.device)
-                if labels.dim() == 1:
-                    labels = labels.unsqueeze(0)
-
-            outputs, precision = defender.forward_with_switching(
-                input_ids, attention_mask, labels
-            )
-            precision_at_prediction.append(precision)
-
-            if labels is not None and outputs.get('loss') is not None:
-                total_loss += outputs['loss'].item()
-
-            predictions = outputs['logits'].argmax(dim=-1)
-            if labels is not None:
-                mask = labels != -100
-                correct_predictions += (predictions[mask] == labels[mask]).sum().item()
-                total_predictions += mask.sum().item()
-
-        accuracy = correct_predictions / max(total_predictions, 1)
-        avg_loss = total_loss / max(len(test_samples), 1)
-
-        stats = defender.get_statistics()
-
-        return {
-            'switch_probability': switch_probability,
-            'accuracy': accuracy,
-            'avg_loss': avg_loss,
-            'correct_predictions': correct_predictions,
-            'total_predictions': total_predictions,
-            'switching_stats': stats,
-            'precision_at_prediction': precision_at_prediction
-        }
-
-if __name__ == "__main__":
-    print("Testing SimplifiedRandomSwitching module...")
-
-    checkpoint_path = "path/to/model.pth"
-
-    try:
-        model, tokenizer, bit_widths, saved_precision = load_sp_model_with_bit_config(
-            checkpoint_path
-        )
-
-        defender = SimplifiedRandomSwitching(model, bit_widths)
-
-        test_input = tokenizer("This is a test sentence.", return_tensors='pt')
-        outputs, precision = defender.forward_with_switching(test_input['input_ids'])
-
-        print(f"Test successful! Used {precision}-bit precision")
-        print(f"Output shape: {outputs['logits'].shape}")
-
-    except FileNotFoundError:
-        print("Please provide a valid checkpoint path to test")
