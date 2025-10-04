@@ -304,7 +304,7 @@ def main():
         default=100,
         help="Number of WikiText-2 samples to use for evaluation (default: 100)"
     )
-    
+
 
     args = parser.parse_args()
 
@@ -339,13 +339,9 @@ def main():
             args.checkpoint, device
         )
 
-    if args.bit_widths is not None:
-        bit_widths = args.bit_widths
-        print(f"\nUsing specified bit widths: {bit_widths}")
-        print(f"(Checkpoint has bit widths: {checkpoint_bit_widths})")
-    else:
-        bit_widths = checkpoint_bit_widths
-        print(f"\nLoaded {args.model_type.upper()} model with bit widths: {bit_widths}")
+
+    bit_widths = checkpoint_bit_widths
+
 
     if saved_precision:
         print(f"Model was saved at {saved_precision}-bit precision")
