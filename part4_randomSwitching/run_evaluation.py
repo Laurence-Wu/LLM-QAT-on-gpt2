@@ -117,17 +117,15 @@ def evaluate_random_switching_defense(model, tokenizer,
             orig_accuracy = adv_example['original_accuracy']
             adv_accuracy_at_32bit = adv_example['adversarial_accuracy']
 
-            original_labels = adv_example['original_labels'].to(device)
-
             adv_ids = tokenizer.encode(adv_text, return_tensors='pt').to(device)
 
             outputs_with_switch, precision = defender.forward_with_switching(
-                adv_ids, labels=original_labels
+                adv_ids, labels=adv_ids
             )
 
             switched_logits = outputs_with_switch['logits']
             switched_predictions = switched_logits[0, :-1, :].argmax(dim=-1)
-            switched_labels = original_labels[0, 1:]
+            switched_labels = adv_ids[0, 1:]
             switched_mask = switched_labels != -100
             switched_correct = (switched_predictions[switched_mask] == switched_labels[switched_mask]).sum().item()
             switched_total = switched_mask.sum().item()
@@ -147,17 +145,15 @@ def evaluate_random_switching_defense(model, tokenizer,
             orig_accuracy = adv_example['original_accuracy']
             adv_accuracy_at_32bit = adv_example['adversarial_accuracy']
 
-            original_labels = adv_example['original_labels'].to(device)
-
             adv_ids = tokenizer.encode(adv_text, return_tensors='pt').to(device)
 
             outputs_with_switch, precision = defender.forward_with_switching(
-                adv_ids, labels=original_labels
+                adv_ids, labels=adv_ids
             )
 
             switched_logits = outputs_with_switch['logits']
             switched_predictions = switched_logits[0, :-1, :].argmax(dim=-1)
-            switched_labels = original_labels[0, 1:]
+            switched_labels = adv_ids[0, 1:]
             switched_mask = switched_labels != -100
             switched_correct = (switched_predictions[switched_mask] == switched_labels[switched_mask]).sum().item()
             switched_total = switched_mask.sum().item()
