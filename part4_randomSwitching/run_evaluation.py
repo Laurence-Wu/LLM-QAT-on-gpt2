@@ -298,6 +298,14 @@ def main():
         help="Directory to save evaluation outputs"
     )
 
+    parser.add_argument(
+        "--num_samples",
+        type=int,
+        default=100,
+        help="Number of WikiText-2 samples to use for evaluation (default: 100)"
+    )
+    
+
     args = parser.parse_args()
 
     if not torch.cuda.is_available():
