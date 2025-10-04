@@ -291,6 +291,12 @@ def main():
         default='sp',
         help="Model type: sp (switchable precision) or cpt (cyclic precision training)"
     )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="./outputs",
+        help="Directory to save evaluation outputs"
+    )
 
     args = parser.parse_args()
 
