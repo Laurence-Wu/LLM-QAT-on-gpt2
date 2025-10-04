@@ -90,10 +90,46 @@ def load_sp_model_with_bit_config(checkpoint_path: str, device: str = 'cuda'):
     gpt2_config.quantization_bits = saved_model_config.get('quantization_bits', model_cfg.quantization_bits)
     gpt2_config.lora_rank = saved_model_config.get('lora_rank', model_cfg.lora_rank)
     gpt2_config.lora_alpha = saved_model_config.get('lora_alpha', model_cfg.lora_alpha)
-    gpt2_config.lora_rank_per_bit = saved_model_config.get('lora_rank_per_bit', model_cfg.lora_rank_per_bit)
-    gpt2_config.lora_alpha_per_bit = saved_model_config.get('lora_alpha_per_bit', model_cfg.lora_alpha_per_bit)
-    gpt2_config.activation_bits_per_bit = saved_model_config.get('activation_bits_per_bit', model_cfg.activation_bits_per_bit)
-    gpt2_config.quantizer_per_bit = saved_model_config.get('quantizer_per_bit', model_cfg.quantizer_per_bit)
+
+    # Get per-bit configurations from checkpoint or defaults
+    lora_rank_per_bit = saved_model_config.get('lora_rank_per_bit', model_cfg.lora_rank_per_bit)
+    lora_alpha_per_bit = saved_model_config.get('lora_alpha_per_bit', model_cfg.lora_alpha_per_bit)
+    activation_bits_per_bit = saved_model_config.get('activation_bits_per_bit', model_cfg.activation_bits_per_bit)
+    quantizer_per_bit = saved_model_config.get('quantizer_per_bit', model_cfg.quantizer_per_bit)
+
+    # Ensure all bit widths have entries in per-bit dictionaries
+    for bits in bit_widths:
+        if bits not in lora_rank_per_bit:
+            if bits == 32:
+                lora_rank_per_bit[bits] = 0
+            elif bits == 2:
+                lora_rank_per_bit[bits] = lora_rank_per_bit.get(3, 64)
+            else:
+                lora_rank_per_bit[bits] = 64
+
+        if bits not in lora_alpha_per_bit:
+            if bits == 32:
+                lora_alpha_per_bit[bits] = 0
+            elif bits == 2:
+                lora_alpha_per_bit[bits] = lora_alpha_per_bit.get(3, 64)
+            else:
+                lora_alpha_per_bit[bits] = 64
+
+        if bits not in activation_bits_per_bit:
+            activation_bits_per_bit[bits] = bits
+
+        if bits not in quantizer_per_bit:
+            if bits == 32:
+                quantizer_per_bit[bits] = None
+            elif bits <= 4:
+                quantizer_per_bit[bits] = 'minmax'
+            else:
+                quantizer_per_bit[bits] = 'log'
+
+    gpt2_config.lora_rank_per_bit = lora_rank_per_bit
+    gpt2_config.lora_alpha_per_bit = lora_alpha_per_bit
+    gpt2_config.activation_bits_per_bit = activation_bits_per_bit
+    gpt2_config.quantizer_per_bit = quantizer_per_bit
     gpt2_config.bit_widths = bit_widths
 
     print(f"Model configuration loaded from checkpoint:")
