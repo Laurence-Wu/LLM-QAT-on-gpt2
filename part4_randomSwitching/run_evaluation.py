@@ -25,70 +25,70 @@ def evaluate_fixed_precision_baseline(model, tokenizer, test_samples: List[Dict]
     print("BASELINE: Fixed Precision Evaluation")
     print("="*60)
 
+    # Use the highest precision as baseline (typically 32-bit for best quality)
+    baseline_precision = max(bit_widths)
+    print(f"\nEvaluating baseline at {baseline_precision}-bit precision...")
+
     evaluator = DefenseEvaluator(model, tokenizer, bit_widths, device)
     attack_evaluator = AttackEvaluator(model, tokenizer, device)
 
-    results = {}
+    model.set_precision(baseline_precision)
 
-    for precision in bit_widths:
-        if precision == 32 or precision == 4:
-            print(f"\nEvaluating at fixed {precision}-bit precision...")
+    clean_results = evaluator.evaluate_fixed_precision(
+        test_samples[:50], baseline_precision
+    )
 
-            model.set_precision(precision)
+    if 'accuracy' in clean_results:
+        print(f"  Clean accuracy: {clean_results['accuracy']:.2%}")
+    print(f"  Clean perplexity: {clean_results['perplexity']:.2f}")
+    print(f"  Clean loss: {clean_results['avg_loss']:.3f}")
 
-            clean_results = evaluator.evaluate_fixed_precision(
-                test_samples[:50], precision
-            )
+    print("  Testing TextFooler attack...")
+    textfooler_results = attack_evaluator.evaluate_textfooler(
+        test_samples[:30], max_samples=30
+    )
 
-            if 'accuracy' in clean_results:
-                print(f"  Clean accuracy: {clean_results['accuracy']:.2%}")
-            print(f"  Clean perplexity: {clean_results['perplexity']:.2f}")
-            print(f"  Clean loss: {clean_results['avg_loss']:.3f}")
+    print(f"    Attack success rate: {textfooler_results['attack_success_rate']:.2%}")
+    print(f"    Avg original accuracy: {textfooler_results['avg_original_accuracy']:.2%}")
+    print(f"    Avg adversarial accuracy: {textfooler_results['avg_adversarial_accuracy']:.2%}")
+    print(f"    Avg accuracy drop: {textfooler_results['avg_accuracy_drop']:.2%}")
+    print(f"    Avg perturbation ratio: {textfooler_results['avg_perturb_ratio']:.2%}")
 
-            print("  Testing TextFooler attack...")
-            textfooler_results = attack_evaluator.evaluate_textfooler(
-                test_samples[:30], max_samples=30
-            )
+    print("  Testing BERT-Attack...")
+    bert_attack_results = attack_evaluator.evaluate_bert_attack(
+        test_samples[:30], max_samples=30
+    )
 
-            print(f"    Attack success rate: {textfooler_results['attack_success_rate']:.2%}")
-            print(f"    Avg original accuracy: {textfooler_results['avg_original_accuracy']:.2%}")
-            print(f"    Avg adversarial accuracy: {textfooler_results['avg_adversarial_accuracy']:.2%}")
-            print(f"    Avg accuracy drop: {textfooler_results['avg_accuracy_drop']:.2%}")
-            print(f"    Avg perturbation ratio: {textfooler_results['avg_perturb_ratio']:.2%}")
+    print(f"    Attack success rate: {bert_attack_results['attack_success_rate']:.2%}")
+    print(f"    Avg original accuracy: {bert_attack_results['avg_original_accuracy']:.2%}")
+    print(f"    Avg adversarial accuracy: {bert_attack_results['avg_adversarial_accuracy']:.2%}")
+    print(f"    Avg accuracy drop: {bert_attack_results['avg_accuracy_drop']:.2%}")
+    print(f"    Avg perturbation ratio: {bert_attack_results['avg_perturb_ratio']:.2%}")
 
-            print("  Testing BERT-Attack...")
-            bert_attack_results = attack_evaluator.evaluate_bert_attack(
-                test_samples[:30], max_samples=30
-            )
-
-            print(f"    Attack success rate: {bert_attack_results['attack_success_rate']:.2%}")
-            print(f"    Avg original accuracy: {bert_attack_results['avg_original_accuracy']:.2%}")
-            print(f"    Avg adversarial accuracy: {bert_attack_results['avg_adversarial_accuracy']:.2%}")
-            print(f"    Avg accuracy drop: {bert_attack_results['avg_accuracy_drop']:.2%}")
-            print(f"    Avg perturbation ratio: {bert_attack_results['avg_perturb_ratio']:.2%}")
-
-            results[precision] = {
-                'clean_performance': clean_results,
-                'textfooler': {
-                    'attack_success_rate': textfooler_results['attack_success_rate'],
-                    'avg_accuracy_drop': textfooler_results['avg_accuracy_drop'],
-                    'avg_original_accuracy': textfooler_results['avg_original_accuracy'],
-                    'avg_adversarial_accuracy': textfooler_results['avg_adversarial_accuracy'],
-                    'avg_perturbations': textfooler_results['avg_perturb_ratio'],
-                    'adversarial_examples': textfooler_results['adversarial_examples']
-                },
-                'bert_attack': {
-                    'attack_success_rate': bert_attack_results['attack_success_rate'],
-                    'avg_accuracy_drop': bert_attack_results['avg_accuracy_drop'],
-                    'avg_original_accuracy': bert_attack_results['avg_original_accuracy'],
-                    'avg_adversarial_accuracy': bert_attack_results['avg_adversarial_accuracy'],
-                    'avg_perturbations': bert_attack_results['avg_perturb_ratio'],
-                    'avg_perplexity_increase': bert_attack_results['avg_perplexity_increase'],
-                    'adversarial_examples': bert_attack_results['adversarial_examples']
-                }
+    results = {
+        baseline_precision: {
+            'clean_performance': clean_results,
+            'textfooler': {
+                'attack_success_rate': textfooler_results['attack_success_rate'],
+                'avg_accuracy_drop': textfooler_results['avg_accuracy_drop'],
+                'avg_original_accuracy': textfooler_results['avg_original_accuracy'],
+                'avg_adversarial_accuracy': textfooler_results['avg_adversarial_accuracy'],
+                'avg_perturbations': textfooler_results['avg_perturb_ratio'],
+                'adversarial_examples': textfooler_results['adversarial_examples']
+            },
+            'bert_attack': {
+                'attack_success_rate': bert_attack_results['attack_success_rate'],
+                'avg_accuracy_drop': bert_attack_results['avg_accuracy_drop'],
+                'avg_original_accuracy': bert_attack_results['avg_original_accuracy'],
+                'avg_adversarial_accuracy': bert_attack_results['avg_adversarial_accuracy'],
+                'avg_perturbations': bert_attack_results['avg_perturb_ratio'],
+                'avg_perplexity_increase': bert_attack_results['avg_perplexity_increase'],
+                'adversarial_examples': bert_attack_results['adversarial_examples']
             }
+        }
+    }
 
-        return results
+    return results
 
 def evaluate_random_switching_defense(model, tokenizer,
                                      textfooler_adv_examples: List[Dict],
