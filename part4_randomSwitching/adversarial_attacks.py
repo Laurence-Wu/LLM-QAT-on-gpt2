@@ -39,6 +39,18 @@ class TextFoolerAttack:
         self.model.to(device)
         self.model.eval()
 
+        # Detect model type and set embedding layer reference
+        if hasattr(self.model, 'transformer') and hasattr(self.model.transformer, 'wte'):
+            # SP model: has transformer.wte
+            self.wte = self.model.transformer.wte
+            self.model_type = 'sp'
+        elif hasattr(self.model, 'wte'):
+            # CPT model: has wte directly
+            self.wte = self.model.wte
+            self.model_type = 'cpt'
+        else:
+            raise AttributeError(f"Model type {type(self.model).__name__} does not have 'wte' or 'transformer.wte' attribute")
+
     def get_synonyms(self, word: str, pos_tag: Optional[str] = None) -> List[str]:
         """
         Get synonyms for a word using WordNet.
@@ -77,18 +89,46 @@ class TextFoolerAttack:
 
         self.model.zero_grad()
 
-        input_embeds = self.model.transformer.wte(input_ids).clone().detach()
+        # Get embeddings using the detected embedding layer
+        input_embeds = self.wte(input_ids).clone().detach()
         input_embeds.requires_grad = True
 
-        outputs = self.model(
-            inputs_embeds=input_embeds.unsqueeze(0) if input_embeds.dim() == 2 else input_embeds,
-            labels=labels.unsqueeze(0) if labels.dim() == 1 else labels
-        )
+        # For SP model, can use inputs_embeds; for CPT model, need different approach
+        if self.model_type == 'sp':
+            outputs = self.model(
+                inputs_embeds=input_embeds.unsqueeze(0) if input_embeds.dim() == 2 else input_embeds,
+                labels=labels.unsqueeze(0) if labels.dim() == 1 else labels
+            )
+            loss = outputs['loss'] if isinstance(outputs, dict) else outputs.loss
+            loss.backward()
+            grad_norm = torch.norm(input_embeds.grad, dim=-1)
+        else:
+            # CPT model doesn't support inputs_embeds, use token-level masking approach
+            # Compute importance by measuring loss change when each token is replaced
+            base_input = input_ids.unsqueeze(0) if input_ids.dim() == 1 else input_ids
+            base_labels = labels.unsqueeze(0) if labels.dim() == 1 else labels
 
-        loss = outputs['loss'] if isinstance(outputs, dict) else outputs.loss
-        loss.backward()
+            with torch.no_grad():
+                base_outputs = self.model(base_input, labels=base_labels)
+                base_loss = base_outputs['loss'] if isinstance(base_outputs, dict) else base_outputs.loss
 
-        grad_norm = torch.norm(input_embeds.grad, dim=-1)
+            importance_scores = torch.zeros(input_ids.shape[0], device=self.device)
+
+            # Compute importance by token masking
+            for i in range(input_ids.shape[0]):
+                masked_input = input_ids.clone()
+                # Replace with a common token (period token)
+                masked_input[i] = self.tokenizer.encode('.', add_special_tokens=False)[0]
+                masked_input_batch = masked_input.unsqueeze(0)
+
+                with torch.no_grad():
+                    masked_outputs = self.model(masked_input_batch, labels=base_labels)
+                    masked_loss = masked_outputs['loss'] if isinstance(masked_outputs, dict) else masked_outputs.loss
+
+                # Importance = absolute loss change
+                importance_scores[i] = abs(masked_loss.item() - base_loss.item())
+
+            grad_norm = importance_scores
 
         return grad_norm
 
@@ -172,7 +212,7 @@ class TextFoolerAttack:
 
         # Get original embeddings for semantic similarity
         with torch.no_grad():
-            orig_embeds = self.model.transformer.wte(input_ids[0])
+            orig_embeds = self.wte(input_ids[0])
             orig_embed_mean = orig_embeds.mean(dim=0)
 
         for word_idx, importance in word_importance[:max_changes]:
@@ -202,7 +242,7 @@ class TextFoolerAttack:
 
                 # Check semantic similarity via embeddings
                 with torch.no_grad():
-                    temp_embeds = self.model.transformer.wte(temp_ids[0])
+                    temp_embeds = self.wte(temp_ids[0])
                     temp_embed_mean = temp_embeds.mean(dim=0)
                     similarity = F.cosine_similarity(orig_embed_mean.unsqueeze(0),
                                                      temp_embed_mean.unsqueeze(0)).item()
@@ -300,6 +340,18 @@ class BERTAttack:
         self.device = device
         self.model.to(device)
         self.model.eval()
+
+        # Detect model type and set embedding layer reference
+        if hasattr(self.model, 'transformer') and hasattr(self.model.transformer, 'wte'):
+            # SP model: has transformer.wte
+            self.wte = self.model.transformer.wte
+            self.model_type = 'sp'
+        elif hasattr(self.model, 'wte'):
+            # CPT model: has wte directly
+            self.wte = self.model.wte
+            self.model_type = 'cpt'
+        else:
+            raise AttributeError(f"Model type {type(self.model).__name__} does not have 'wte' or 'transformer.wte' attribute")
 
         # Load BERT for masked language modeling
         print(f"Loading BERT model: {bert_model_name} for word substitution...")
@@ -426,8 +478,8 @@ class BERTAttack:
             True if similarity >= threshold
         """
         with torch.no_grad():
-            orig_embeds = self.model.transformer.wte(orig_ids)
-            adv_embeds = self.model.transformer.wte(adv_ids)
+            orig_embeds = self.wte(orig_ids)
+            adv_embeds = self.wte(adv_ids)
 
             orig_mean = orig_embeds.mean(dim=0)
             adv_mean = adv_embeds.mean(dim=0)
