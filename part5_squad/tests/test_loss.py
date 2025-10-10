@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 from transformers import GPT2Config
 from models_squad import SPQuestionAnsweringModel
+from test_utils import freeze_weights_like_production
 
 
 def test_qa_loss_computation():
@@ -64,9 +65,8 @@ def test_gradient_flow():
     # Set to 32-bit precision (no quantization/calibration needed)
     model.set_precision(32)
 
-    # Freeze embeddings (matching actual training setup where only LoRA + QA heads are trained)
-    model.transformer.wte.weight.requires_grad = False
-    model.transformer.wpe.weight.requires_grad = False
+    # Apply production-like freezing (matching main_squad.py load_pretrained_weights)
+    freeze_weights_like_production(model)
 
     # Create dummy input
     batch_size = 2
