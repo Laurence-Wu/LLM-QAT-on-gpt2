@@ -1,16 +1,16 @@
 """
-Part 1: Switchable Precision (SP) Implementation
-Multi-precision training with separate LoRA adapters for each bit-width.
+Part 5: Switchable Precision for SQuAD Question Answering
+Multi-precision training with separate LoRA adapters for each bit-width on SQuAD dataset.
 """
 
-from .models_sp import SPModel, SPLMHeadModel
-from .config_sp import ModelConfig, TrainingConfig
-from .train_sp import train_sp
+from .models_squad import SPModel, SPQuestionAnsweringModel
+from .config_squad import ModelConfig, TrainingConfig
+from .train_squad import train_squad
 
 __all__ = [
     'SPModel',
-    'SPLMHeadModel',
+    'SPQuestionAnsweringModel',
     'ModelConfig',
     'TrainingConfig',
-    'train_sp'
+    'train_squad'
 ]
