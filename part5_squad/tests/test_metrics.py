@@ -71,8 +71,9 @@ def test_f1_score():
     # Partial overlap
     f1 = f1_score("the big cat", ["the cat"])
     assert 0 < f1 < 1, "Partial overlap should give 0 < F1 < 1"
-    # Expected: precision = 2/3, recall = 2/2, F1 = 2 * (2/3 * 1) / (2/3 + 1) = 0.8
-    assert abs(f1 - 0.8) < 0.01, f"Expected F1≈0.8, got {f1}"
+    # Expected: After normalization "big cat" vs "cat"
+    # precision = 1/2, recall = 1/1, F1 = 2 * (1/2 * 1) / (1/2 + 1) ≈ 0.667
+    assert abs(f1 - 0.667) < 0.01, f"Expected F1≈0.667, got {f1}"
 
     # No overlap
     assert f1_score("dog", ["cat"]) == 0.0, \
