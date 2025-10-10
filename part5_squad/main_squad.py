@@ -7,19 +7,14 @@ import json
 from datetime import datetime
 from transformers import GPT2Config, GPT2TokenizerFast
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-sys.path.insert(0, current_dir)
-sys.path.insert(0, parent_dir)
-
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True,max_split_size_mb:512'
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
-from models_squad import SPQuestionAnsweringModel
-from dataset_squad import create_squad_dataloaders
-from deploy import save_squad_checkpoints
-from config_squad import ModelConfig, TrainingConfig
-from train_squad import train_squad
+from part5_squad.models_squad import SPQuestionAnsweringModel
+from part5_squad.dataset_squad import create_squad_dataloaders
+from part5_squad.deploy import save_squad_checkpoints
+from part5_squad.config_squad import ModelConfig, TrainingConfig
+from part5_squad.train_squad import train_squad
 
 def initialize_model(model_config, device):
     """

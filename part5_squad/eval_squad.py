@@ -6,10 +6,7 @@ import json
 import os
 import sys
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, current_dir)
-
-from squad_metrics import evaluate_squad
+from part5_squad.squad_metrics import evaluate_squad
 
 
 def extract_answer(start_logits, end_logits, input_ids, tokenizer,

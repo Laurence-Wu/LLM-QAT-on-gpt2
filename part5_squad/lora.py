@@ -5,10 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, current_dir)
-
-from part1_switchable_precision.quantization import LearnableFakeQuantize
+from part5_squad.quantization import LearnableFakeQuantize
 
 class LoRALayer(nn.Module):
     

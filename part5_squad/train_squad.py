@@ -11,10 +11,7 @@ import json
 import time
 import random
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, current_dir)
-
-from distillation_manager_qa import DistillationManagerQA
+from part5_squad.distillation_manager_qa import DistillationManagerQA
 
 def cleanup_memory():
 

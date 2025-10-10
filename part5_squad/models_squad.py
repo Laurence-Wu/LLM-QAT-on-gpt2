@@ -9,11 +9,8 @@ from typing import Optional, Dict, List, Tuple
 from transformers import GPT2Config
 from torch.utils.checkpoint import checkpoint
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, current_dir)
-
-from lora import SPLinearWithLoRA
-from switchable_batchnorm import SwitchableLayerNorm
+from part5_squad.lora import SPLinearWithLoRA
+from part5_squad.switchable_batchnorm import SwitchableLayerNorm
 
 class SPAttention(nn.Module):
 
