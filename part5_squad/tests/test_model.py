@@ -67,6 +67,9 @@ def test_forward_pass():
     model = SPQuestionAnsweringModel(config)
     model.eval()
 
+    # Set to 32-bit precision (no quantization/calibration needed)
+    model.set_precision(32)
+
     # Create dummy input
     batch_size = 2
     seq_length = 384
@@ -139,6 +142,9 @@ def test_loss_computation():
 
     model = SPQuestionAnsweringModel(config)
     model.eval()
+
+    # Set to 32-bit precision (no quantization/calibration needed)
+    model.set_precision(32)
 
     # Create dummy input
     batch_size = 2

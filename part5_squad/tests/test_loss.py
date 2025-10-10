@@ -61,6 +61,9 @@ def test_gradient_flow():
     model = SPQuestionAnsweringModel(config)
     model.train()
 
+    # Set to 32-bit precision (no quantization/calibration needed)
+    model.set_precision(32)
+
     # Create dummy input
     batch_size = 2
     seq_length = 128  # Smaller for testing

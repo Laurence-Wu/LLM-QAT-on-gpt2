@@ -22,6 +22,41 @@ class MockConfig:
     gradient_accumulation_steps = 4
 
 
+def calibrate_model_simple(model, bits):
+    """Simple calibration for testing - calibrates weight and input quantizers"""
+    if bits >= 32:
+        return  # No calibration needed for full precision
+
+    bits_key = f'{bits}bit'
+    model.set_precision(bits)
+
+    # Calibrate weight quantizers
+    for module in model.modules():
+        if hasattr(module, 'quantizers_weight') and bits_key in module.quantizers_weight:
+            quantizer = module.quantizers_weight[bits_key]
+            quantizer.start_calibration()
+            with torch.no_grad():
+                # Get weight from module
+                if hasattr(module, 'linear') and hasattr(module.linear, 'weight'):
+                    _ = quantizer(module.linear.weight)
+            quantizer.finish_calibration()
+
+    # Calibrate input quantizers with dummy forward pass
+    for module in model.modules():
+        if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
+            module.quantizers_input[bits_key].start_calibration()
+
+    # Run dummy forward pass to collect input statistics
+    with torch.no_grad():
+        dummy_input = torch.randint(0, 50257, (1, 128))
+        _ = model(dummy_input)
+
+    # Finish input calibration
+    for module in model.modules():
+        if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
+            module.quantizers_input[bits_key].finish_calibration()
+
+
 def test_single_training_step():
     """Test one training step end-to-end"""
     print("Testing single training step...")
@@ -98,6 +133,9 @@ def test_teacher_student_cycle():
 
     model = SPQuestionAnsweringModel(config)
     model.train()
+
+    # Calibrate 7-bit quantizers before using them
+    calibrate_model_simple(model, 7)
 
     distill_mgr = DistillationManagerQA(model, 32, MockConfig())
 
