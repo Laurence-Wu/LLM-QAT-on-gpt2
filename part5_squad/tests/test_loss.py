@@ -64,6 +64,10 @@ def test_gradient_flow():
     # Set to 32-bit precision (no quantization/calibration needed)
     model.set_precision(32)
 
+    # Freeze embeddings (matching actual training setup where only LoRA + QA heads are trained)
+    model.transformer.wte.weight.requires_grad = False
+    model.transformer.wpe.weight.requires_grad = False
+
     # Create dummy input
     batch_size = 2
     seq_length = 128  # Smaller for testing

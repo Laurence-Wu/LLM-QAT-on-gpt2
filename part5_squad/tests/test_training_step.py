@@ -41,6 +41,21 @@ def calibrate_model_simple(model, bits):
                     _ = quantizer(module.linear.weight)
             quantizer.finish_calibration()
 
+    # Calibrate LoRA quantizers
+    for module in model.modules():
+        if hasattr(module, 'lora_adapters') and bits_key in module.lora_adapters:
+            lora_layer = module.lora_adapters[bits_key]
+            if hasattr(lora_layer, 'quantize_A') and lora_layer.quantize_A is not None:
+                lora_layer.quantize_A.start_calibration()
+                with torch.no_grad():
+                    _ = lora_layer.quantize_A(lora_layer.lora_A)
+                lora_layer.quantize_A.finish_calibration()
+            if hasattr(lora_layer, 'quantize_B') and lora_layer.quantize_B is not None:
+                lora_layer.quantize_B.start_calibration()
+                with torch.no_grad():
+                    _ = lora_layer.quantize_B(lora_layer.lora_B)
+                lora_layer.quantize_B.finish_calibration()
+
     # Calibrate input quantizers with dummy forward pass
     for module in model.modules():
         if hasattr(module, 'quantizers_input') and bits_key in module.quantizers_input:
