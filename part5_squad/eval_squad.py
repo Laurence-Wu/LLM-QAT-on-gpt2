@@ -42,25 +42,25 @@ def extract_answer(start_logits, end_logits, input_ids, tokenizer,
 
     for start_idx in start_top_indices:
         for end_idx in end_top_indices:
-            start_idx = start_idx.item()
-            end_idx = end_idx.item()
+            start_pos = start_idx.item()
+            end_pos = end_idx.item()
 
             # Validate span
-            if end_idx < start_idx:
+            if end_pos < start_pos:
                 continue
-            if end_idx - start_idx + 1 > max_answer_length:
+            if end_pos - start_pos + 1 > max_answer_length:
                 continue
             # Exclude question part if specified
-            if question_length and start_idx < question_length:
+            if question_length and start_pos < question_length:
                 continue
 
             # Score is sum of log probabilities
-            score = (start_logits[start_idx] + end_logits[end_idx]).item()
+            score = (start_logits[start_pos] + end_logits[end_pos]).item()
 
             if score > best_score:
                 best_score = score
-                best_start = start_idx
-                best_end = end_idx
+                best_start = start_pos
+                best_end = end_pos
 
     # Decode answer
     answer_tokens = input_ids[best_start:best_end+1]
