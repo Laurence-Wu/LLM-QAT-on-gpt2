@@ -68,12 +68,12 @@ def test_beam_search():
     end_logits = torch.randn(seq_length)
 
     # Best individual positions
-    start_logits[5] = 8.0  # High start
-    end_logits[3] = 8.0    # High end (but before start!)
+    start_logits[5] = 6.0  # High start (but no good valid end after it)
+    end_logits[3] = 7.0    # High end (but before start!)
 
     # Best valid span
-    start_logits[10] = 7.0  # Slightly lower start
-    end_logits[15] = 7.0    # But valid end
+    start_logits[10] = 7.0  # Highest valid start
+    end_logits[15] = 8.0    # Highest valid end
 
     input_ids = torch.randint(0, 50257, (seq_length,))
 
