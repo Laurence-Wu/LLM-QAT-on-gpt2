@@ -1,0 +1,20 @@
+{
+  "device": "cuda",
+  "squad_v1": {
+    "dataset_name": "squad",
+    "split": "validation",
+    "max_answer_length": 30,
+    "n_best_size": 20,
+    "max_examples": null
+  },
+  "squad_v2": {
+    "dataset_name": "squad_v2",
+    "split": "validation",
+    "max_answer_length": 30,
+    "n_best_size": 20,
+    "max_examples": null
+  },
+  "output": {
+    "save_format": "json"
+  }
+}
