@@ -275,27 +275,34 @@ def load_squad_model_from_checkpoint(checkpoint_path, device):
 
     print(f"Checkpoint bit-width: {bit_width}")
 
-    # Create GPT2Config following main_squad.py initialize_model() (lines 30-49)
+    # Create GPT2Config following main_squad.py initialize_model() and part3_eval_sp pattern
+    # model_config is a dictionary, not an object (saved by deploy.py lines 50-56)
     gpt2_config = GPT2Config(
-        vocab_size=model_config.vocab_size,
-        n_positions=model_config.n_positions,
-        n_embd=model_config.n_embd,
-        n_layer=model_config.n_layer,
-        n_head=model_config.n_head,
+        vocab_size=model_config['vocab_size'],
+        n_positions=model_config['n_positions'],
+        n_embd=model_config['n_embd'],
+        n_layer=model_config['n_layer'],
+        n_head=model_config['n_head'],
         activation_function='gelu_new',
-        layer_norm_epsilon=model_config.layer_norm_epsilon,
-        embd_pdrop=model_config.embd_pdrop
+        layer_norm_epsilon=model_config.get('layer_norm_epsilon', 1e-5),
+        embd_pdrop=model_config.get('embd_pdrop', 0.1)
     )
 
-    # Add switchable precision config
-    gpt2_config.quantization_bits = model_config.quantization_bits
-    gpt2_config.lora_rank = model_config.lora_rank
-    gpt2_config.lora_alpha = model_config.lora_alpha
-    gpt2_config.lora_rank_per_bit = model_config.lora_rank_per_bit
-    gpt2_config.lora_alpha_per_bit = model_config.lora_alpha_per_bit
-    gpt2_config.activation_bits_per_bit = model_config.activation_bits_per_bit
-    gpt2_config.quantizer_per_bit = model_config.quantizer_per_bit
-    gpt2_config.bit_widths = model_config.bit_widths
+    # Add switchable precision config (following part3_eval_sp pattern)
+    gpt2_config.quantization_bits = model_config.get('quantization_bits', 8)
+    gpt2_config.lora_rank = model_config.get('lora_rank', 16)
+    gpt2_config.lora_alpha = model_config.get('lora_alpha', 32)
+    gpt2_config.lora_rank_per_bit = model_config['lora_rank_per_bit']
+    gpt2_config.lora_alpha_per_bit = model_config['lora_alpha_per_bit']
+    gpt2_config.activation_bits_per_bit = model_config['activation_bits_per_bit']
+    gpt2_config.quantizer_per_bit = model_config['quantizer_per_bit']
+    gpt2_config.bit_widths = model_config['bit_widths']
+
+    # Convert string keys to int if needed (part3_eval_sp lines 61-64)
+    for attr_name in ['lora_rank_per_bit', 'lora_alpha_per_bit', 'activation_bits_per_bit', 'quantizer_per_bit']:
+        attr_val = getattr(gpt2_config, attr_name)
+        if isinstance(attr_val, dict):
+            setattr(gpt2_config, attr_name, {int(k) if isinstance(k, str) else k: v for k, v in attr_val.items()})
 
     # Create QA model
     print("Initializing SPQuestionAnsweringModel...")
