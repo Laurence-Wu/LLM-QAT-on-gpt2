@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 from transformers import GPT2Config
 from models_squad import SPQuestionAnsweringModel
-from test_utils import freeze_weights_like_production
+from part5_squad.tests.test_utils import freeze_weights_like_production
 
 
 def test_qa_loss_computation():

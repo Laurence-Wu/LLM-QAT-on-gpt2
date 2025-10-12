@@ -346,14 +346,12 @@ class SPQuestionAnsweringModel(nn.Module):
 
         # Separate heads for start and end positions (Option A - better performance)
         self.qa_dropout = nn.Dropout(0.1)
-        self.qa_start = nn.Linear(config.n_embd, 1, bias=True)
-        self.qa_end = nn.Linear(config.n_embd, 1, bias=True)
+        self.qa_start = nn.Linear(config.n_embd, 1, bias=False)  # FIX: bias=False for better QAT
+        self.qa_end = nn.Linear(config.n_embd, 1, bias=False)    # FIX: bias=False for better QAT
 
-        # Initialize QA heads
-        nn.init.normal_(self.qa_start.weight, std=0.02)
-        nn.init.zeros_(self.qa_start.bias)
-        nn.init.normal_(self.qa_end.weight, std=0.02)
-        nn.init.zeros_(self.qa_end.bias)
+        # Better initialization for QAT
+        nn.init.xavier_uniform_(self.qa_start.weight)
+        nn.init.xavier_uniform_(self.qa_end.weight)
 
     def set_precision(self, bits) -> int:
         """Set quantization precision for entire model"""

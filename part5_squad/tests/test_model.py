@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 from transformers import GPT2Config
 from models_squad import SPQuestionAnsweringModel
-from test_utils import freeze_weights_like_production, get_trainable_param_count
+from part5_squad.tests.test_utils import freeze_weights_like_production, get_trainable_param_count
 
 
 def test_model_initialization():
@@ -197,11 +197,9 @@ def test_weight_freezing():
     assert not model.transformer.wte.weight.requires_grad, "wte should be frozen"
     assert not model.transformer.wpe.weight.requires_grad, "wpe should be frozen"
 
-    # Check QA heads are trainable
+    # Check QA heads are trainable (bias=False so only check weights)
     assert model.qa_start.weight.requires_grad, "qa_start should be trainable"
     assert model.qa_end.weight.requires_grad, "qa_end should be trainable"
-    assert model.qa_start.bias.requires_grad, "qa_start bias should be trainable"
-    assert model.qa_end.bias.requires_grad, "qa_end bias should be trainable"
 
     # Check base transformer weights are frozen
     assert not model.transformer.h[0].attn.c_attn.linear.weight.requires_grad, \
