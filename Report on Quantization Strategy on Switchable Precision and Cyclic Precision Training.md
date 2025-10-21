@@ -4,6 +4,19 @@
 
 ## 1. [Step 4] What is the task accuracy achieved after applying various quantization bit-width configurations to the SQuAD dataset?
 
+Results demonstrated with  [Squad Dataset:](https://rajpurkar.github.io/SQuAD-explorer/)
+
+|       | Exact Match | F1    |
+| ----- | ----------- | ----- |
+| INT4  | 45.31       | 59.07 |
+| INT8  | 55.58       | 68.53 |
+| INT16 | 53.39       | 66.08 |
+| INT32 | 53.67       | 66.40 |
+
+// The reason that INT8 is performing so well might be the fact that I am using the log quant.
+
+Results demonstrated with wikiText103 finetuning:
+
 |       | WikiText103 perplexity | BoolQ | HellaSwag | WinoGrande | Accuracy  Average |
 | ----- | ---------------------- | ----- | --------- | ---------- | ----------------- |
 | INT4  | 54.5                   | 61.2  | 30.2      | 53.2       | 47.8              |
