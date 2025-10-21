@@ -39,8 +39,8 @@ For BF16 evaluation, you need:
 Evaluate a Part 5 SQuAD checkpoint at all precisions (FP32, FP16, BF16):
 
 ```bash
-cd part1_switchable_precision/additionalBP
-python eval_squad_fp.py --checkpoint ../../part5_squad/squad_qa_32bit_FP32_20241021_123456.pth
+cd part5_squad/additionalBP
+python eval_squad_fp.py --checkpoint ../squad_qa_32bit_FP32_20241021_123456.pth
 ```
 
 ### Advanced Options
@@ -103,7 +103,7 @@ Example summary:
 ======================================================================
 EVALUATION SUMMARY
 ======================================================================
-Model: ../../part5_squad/squad_qa_32bit_FP32_20241021_123456.pth
+Model: ../squad_qa_32bit_FP32_20241021_123456.pth
 Device: cuda
 
 SQuAD v1.1:
@@ -128,7 +128,7 @@ Results are automatically saved to `fp_comparison_results_<timestamp>.json`:
 
 ```json
 {
-  "model_path": "../../part5_squad/squad_qa_32bit_FP32_20241021_123456.pth",
+  "model_path": "../squad_qa_32bit_FP32_20241021_123456.pth",
   "timestamp": "2025-10-21 14:30:00",
   "device": "cuda",
   "squad_v1": {
@@ -259,8 +259,8 @@ python main_squad.py
 
 3. Run FP16/BF16 evaluation:
 ```bash
-cd ../part1_switchable_precision/additionalBP
-python eval_squad_fp.py --checkpoint ../../part5_squad/squad_qa_32bit_FP32_20241021_123456.pth
+cd additionalBP
+python eval_squad_fp.py --checkpoint ../squad_qa_32bit_FP32_20241021_123456.pth
 ```
 
 4. Review results in console output and JSON file

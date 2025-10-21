@@ -11,7 +11,8 @@ from transformers import GPT2Config, GPT2TokenizerFast
 
 # Add parent directory to path for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(os.path.dirname(current_dir))
+part5_dir = os.path.dirname(current_dir)
+project_root = os.path.dirname(part5_dir)
 sys.path.insert(0, project_root)
 
 from part5_squad.squad_metrics import evaluate_squad
