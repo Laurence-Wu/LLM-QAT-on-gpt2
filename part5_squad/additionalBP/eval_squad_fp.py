@@ -100,7 +100,7 @@ def load_squad_model_from_checkpoint(checkpoint_path, device):
         Tuple of (model, bit_width)
     """
     print(f"Loading checkpoint from {checkpoint_path}...")
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
 
     # Extract configs from checkpoint
     model_config = checkpoint.get('model_config')
