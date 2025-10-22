@@ -310,9 +310,9 @@ def evaluate_fp16(checkpoint_path, dataset, tokenizer, device, config):
     # Load model at original precision
     model, bit_width = load_squad_model_from_checkpoint(checkpoint_path, device)
 
-    # Cast to FP16
-    print("Casting model to FP16...")
-    model = model.half()
+    # Switch to FP16 via set_precision flag
+    print("Setting model to FP16...")
+    model.set_precision(16.0)
     model.eval()
 
     # Evaluate
@@ -364,9 +364,9 @@ def evaluate_bf16(checkpoint_path, dataset, tokenizer, device, config):
     # Load model at original precision
     model, bit_width = load_squad_model_from_checkpoint(checkpoint_path, device)
 
-    # Cast to BF16
-    print("Casting model to BF16...")
-    model = model.bfloat16()
+    # Switch to BF16 via set_precision flag
+    print("Setting model to BF16...")
+    model.set_precision(16.5)
     model.eval()
 
     # Evaluate

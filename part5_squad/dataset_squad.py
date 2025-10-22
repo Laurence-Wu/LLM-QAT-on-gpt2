@@ -30,6 +30,7 @@ class SQuADDataset(Dataset):
         self.doc_stride = doc_stride
         self.max_query_length = max_query_length
         self.verify_spans = verify_spans
+        self.version = version
 
         # Load SQuAD dataset
         dataset_name = 'squad' if version == 'v1' else 'squad_v2'

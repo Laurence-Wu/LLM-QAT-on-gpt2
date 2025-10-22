@@ -93,7 +93,17 @@ class SwitchableLayerNorm(nn.Module):
             key = str(precision)
             self.ln_layers[key] = LayerNormCompat(self, key)
 
-    def set_precision(self, precision: int) -> int:
+    def set_precision(self, precision) -> int:
+        # FP16/BF16 flags: Use highest available precision level for parameter selection
+        if precision in [16.0, 16.5]:
+            # Use 32-bit LayerNorm params if available, else highest
+            if 32 in self.precision_levels:
+                self.current_precision = 32
+            else:
+                self.current_precision = max(self.precision_levels)
+            return precision  # Return the flag value
+
+        # Regular INT quantization path
         if precision not in self.precision_levels:
             raise ValueError(f"Precision {precision} not supported. Available: {self.precision_levels}")
         self.current_precision = precision

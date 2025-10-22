@@ -100,10 +100,11 @@ class SPLinearWithLoRA(nn.Module):
         self.calibration_mode = False
 
     def set_precision(self, bits) -> int:
-        if bits >= 32:
-            self.current_bits = 32
-            bits_key = f"{bits}bits"
+        # FP32/FP16/BF16: Bypass quantization
+        if bits >= 32 or bits in [16.0, 16.5]:
+            self.current_bits = bits
             return bits
+        # INT quantization path
         self.current_bits = bits
         bits_key = f'{bits}bit'
         self.quantizers_weight[bits_key].set_num_bits(bits)
@@ -122,11 +123,13 @@ class SPLinearWithLoRA(nn.Module):
         return self.lora_adapters[f'{self.current_bits}bit']
 
     def forward(self, x):
-        
-        if self.current_bits >= 32:
+
+        # FP32/FP16/BF16: Use unquantized weights
+        if self.current_bits >= 32 or self.current_bits in [16.0, 16.5]:
             output = F.linear(x, self.linear.weight, self.linear.bias)
             return output
 
+        # INT quantization path
         bits_key = f'{self.current_bits}bit'
 
         if bits_key not in self.quantizers_weight or bits_key not in self.quantizers_input:

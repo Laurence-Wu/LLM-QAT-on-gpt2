@@ -48,8 +48,10 @@ class SPAttention(nn.Module):
 
     def set_precision(self, bits) -> int:
         self.current_bit_width = bits
-        self.c_attn.set_precision(bits)
-        self.c_proj.set_precision(bits)
+        # FP16/BF16: Skip quantizer setting (handled by dtype cast)
+        if bits not in [16.0, 16.5]:
+            self.c_attn.set_precision(bits)
+            self.c_proj.set_precision(bits)
         return self.current_bit_width
 
     def forward(self, hidden_states, attention_mask=None):
@@ -111,7 +113,11 @@ class SPMLP(nn.Module):
         self.act = nn.GELU()
 
     def set_precision(self, bits) -> int:
+        # FP16/BF16: Skip validation and quantizer setting
+        if bits in [16.0, 16.5]:
+            return bits
 
+        # Regular INT quantization path
         if bits not in self.bit_widths:
             raise ValueError(f"Bit width {bits} not in configured widths {self.bit_widths}")
         self.c_fc.set_precision(bits)
@@ -142,6 +148,13 @@ class SPBlock(nn.Module):
         self.mlp = SPMLP(config, bit_widths)
 
     def set_precision(self, bits) -> int:
+        # FP16/BF16: Skip component precision setting (handled by dtype cast)
+        if bits in [16.0, 16.5]:
+            self.attn.set_precision(bits)
+            self.mlp.set_precision(bits)
+            return bits
+
+        # Regular INT quantization path
         self.ln_1.set_precision(bits)
         self.attn.set_precision(bits)
         self.ln_2.set_precision(bits)
@@ -219,6 +232,20 @@ class SPModel(nn.Module):
                     self.ln_f.biases[str(precision)].requires_grad = True
 
     def set_precision(self, bits) -> int:
+        # Special flag: BF16 dtype casting
+        if bits == 16.5:
+            self.to(torch.bfloat16)
+            self.current_bit_width = 16.5
+            # Don't set component precision - handled by dtype cast
+            return self.current_bit_width
+
+        # Special flag: FP16 dtype casting
+        elif bits == 16.0:
+            self.half()  # Cast to torch.float16
+            self.current_bit_width = 16.0
+            return self.current_bit_width
+
+        # Regular INT quantization or FP32
         if bits not in self.bit_widths:
             raise ValueError(f"Bit width {bits} not in configured widths {self.bit_widths}")
         self.current_bit_width = bits
