@@ -382,7 +382,17 @@ class SPQuestionAnsweringModel(nn.Module):
 
     def set_precision(self, bits) -> int:
         """Set quantization precision for entire model"""
-        return self.transformer.set_precision(bits)
+        # Convert transformer backbone first
+        result = self.transformer.set_precision(bits)
+
+        # Match QA heads to transformer's current dtype
+        transformer_dtype = self.transformer.wte.weight.dtype
+
+        if transformer_dtype != self.qa_start.weight.dtype:
+            self.qa_start = self.qa_start.to(transformer_dtype)
+            self.qa_end = self.qa_end.to(transformer_dtype)
+
+        return result
 
     def disable_lora_for_calibration(self):
         """Disable LoRA during calibration phase"""
