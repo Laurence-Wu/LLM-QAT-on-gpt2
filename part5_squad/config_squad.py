@@ -38,7 +38,7 @@ class ModelConfig:
         # LoRA Configuration (same as part1)
         self.lora_rank = 16
         self.lora_alpha = 32
-        self.bit_widths = [4, 32]  # Train 7-bit with 32-bit teacher
+        self.bit_widths = [16, 32]  # Train 7-bit with 32-bit teacher
 
         self.teacher_bits = 32
 

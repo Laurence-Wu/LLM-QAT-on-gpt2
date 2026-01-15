@@ -30,7 +30,7 @@ def save_squad_checkpoints(model, base_filename="squad_gpt2",
     saved_checkpoints = {}
 
     # Get available bit-widths from model config
-    bit_widths = model_config.bit_widths if model_config else [7, 32]
+    bit_widths = [32]
 
     print(f"\nSaving checkpoints to {output_dir}/")
 

@@ -1,0 +1,804 @@
+{
+  "fixed_precision_results": {
+    "4": {
+      "clean_performance": {
+        "precision": 4,
+        "perplexity": 62.20979530421287,
+        "avg_loss": 4.130512468121465,
+        "accuracy": 0.2821883998354587,
+        "total_tokens": 4862
+      },
+      "textfooler": {
+        "attack_success_rate": 0.7333333333333333,
+        "defense_rate": 0.2666666666666667,
+        "avg_accuracy_drop": 0.07223410131972564,
+        "avg_original_accuracy": 0.2871755237368176,
+        "avg_adversarial_accuracy": 0.2149414224170919,
+        "avg_perturbations": 0.12038899801474118,
+        "adversarial_examples": [
+          {
+            "original_text": "Robert Boulter is an English film , television and theatre actor . He had a guest @-@ starring role on the television series The Bill in 2000 . This was followed by a starring role in the play Herons written by Simon Stephens , which was performed in 2001 at the Royal Court Theatre . He had a guest role in the television series Judge John Deed in 2002 . In 2004 Boulter landed a role as \" Craig \" in the episode \" Teddy 's Story \" of the television series The Long Firm ; he starred alongside actor",
+            "adversarial_text": "Henry Martyn Robert Boulter is an side moving-picture show , idiot box and dramatics thespian . He had a Edgar Albert Guest @-@ starring use on the television receiver serial publication The eyeshade in 2000 . This was followed by a asterisk theatrical role in the play Herons written by Simon Stephens , which was performed in 2001 at the royal stag Court Theatre . He had a guest purpose in the television series Judge John Deed in 2002 . In 2004 Boulter landed a role as \" Craig \" in the episode \" Teddy 's Story \" of the television series The Long Firm ; he starred alongside actor",
+            "adversarial_accuracy": 0.25196850393700787,
+            "original_accuracy": 0.3425925925925926
+          },
+          {
+            "original_text": "He had a recurring role in 2003 on two episodes of The Bill , as character \" Connor Price \" . In 2004 Boulter landed a role as \" Craig \" in the episode \" Teddy 's Story \" of the television series The Long Firm ; he starred alongside actors Mark Strong and Derek Jacobi . Boulter starred as \" Darren \" , in the 2005 theatre productions of the Philip Ridley play Mercury Fur . It was performed at the Drum Theatre in Plymouth , and the Menier Chocolate Factory in London . He was directed by John Tiffa",
+            "adversarial_text": "He suffer a recur purpose in 2003 on ii sequence of The eyeshade , as quality \" Connor Mary Leontyne Price \" . In 2004 Boulter shore a role as \" Craig \" in the episode \" Teddy 's Story \" of the television series The Long Firm ; he starred alongside actors Mark Strong and Derek Jacobi . Boulter starred as \" Darren \" , in the 2005 theatre productions of the Philip Ridley play Mercury Fur . It was performed at the Drum Theatre in Plymouth , and the Menier Chocolate Factory in London . He was directed by John Tiffa",
+            "adversarial_accuracy": 0.24347826086956523,
+            "original_accuracy": 0.3425925925925926
+          },
+          {
+            "original_text": "In 2006 Boulter starred in the play Citizenship written by Mark Ravenhill . The play was part of a series which featured different playwrights , titled Burn / Chatroom / Citizenship . In a 2006 interview , fellow actor Ben Whishaw identified Boulter as one of his favorite co @-@ stars : \" I loved working with a guy called Robert Boulter , who was in the triple bill of Burn , Chatroom and Citizenship at the National . He played my brother in Mercury Fur . \" He portrayed \" Jason Tyler \" on the 200",
+            "adversarial_text": "In 2006 Boulter asterisk in the playing period Citizenship publish by soft touch Ravenhill . The bring embody split up of a series which sport unlike playwrights , title Burn / chat room / Citizenship . In a 2006 interview , fellow actor Ben Whishaw identified Boulter as one of his favorite co @-@ stars : \" I loved working with a guy called Robert Boulter , who was in the triple bill of Burn , Chatroom and Citizenship at the National . He played my brother in Mercury Fur . \" He portrayed \" Jason Tyler \" on the 200",
+            "adversarial_accuracy": 0.2,
+            "original_accuracy": 0.26126126126126126
+          },
+          {
+            "original_text": "Boulter starred in two films in 2008 , Daylight Robbery by filmmaker Paris Leonti , and Donkey Punch directed by Olly Blackburn . Boulter portrayed a character named \" Sean \" in Donkey Punch , who tags along with character \" Josh \" as the \" quiet brother ... who hits it off with Tammi \" . Boulter guest starred on a two @-@ part episode arc \" Wounds \" in May 2008 of the television series Waking the Dead as character \" Jimmy Dearden \" . He appeared on the television series Survivors as \" Neil \" in",
+            "adversarial_text": "Boulter asterisked in deuce picture show in 2008 , daytime looting by film maker genus Paris Leonti , and Donkey clout directed by Olly Blackburnian warbler . Boulter portrayed a lineament diagnose \" Sean \" in Donkey Punch , who tags along with character \" banter \" as the \" quiet brother ... who hits it turned with Tammi \" . Boulter guest starred on a two @-@ part episode electric discharge \" Wounds \" in May 2008 of the television series Waking the Dead as character \" Jimmy Dearden \" . He appeared on the television series Survivors as \" Neil \" in",
+            "adversarial_accuracy": 0.2,
+            "original_accuracy": 0.2608695652173913
+          },
+          {
+            "original_text": "Du Fu ( Wade \u2013 Giles : Tu Fu ; Chinese : \u675c\u752b ; 712 \u2013 770 ) was a prominent Chinese poet of the Tang dynasty . Along with Li Bai ( Li Po ) , he is frequently called the greatest of the Chinese poets . His greatest ambition was to serve his country as a successful civil servant , but he proved unable to make the necessary accommodations . His life , like the whole country , was devastated by the An Lushan Rebellion of 755 , and his last 15 years were a time of almost constant unrest .",
+            "adversarial_text": "Du Fu ( Virginia Wade \u2013 Giles : Tu Fu ; Formosan : \u675c\u752b ; 712 \u2013 770 ) Washington a prominent Formosan poet of the Fucus serratus dynasty . Along with Li Bai ( Li Po ) , he is frequently called the greatest of the Chinese poets . His greatest ambition was to serve his res publica as a successful civil servant , but he proved unable to make the requirement accommodations . His life , like the whole country , was devastated by the An Lushan Rebellion of 755 , and his last 15 years were a time of almost constant unrest .",
+            "adversarial_accuracy": 0.20491803278688525,
+            "original_accuracy": 0.34545454545454546
+          },
+          {
+            "original_text": "Although initially he was little @-@ known to other writers , his works came to be hugely influential in both Chinese and Japanese literary culture . Of his poetic writing , nearly fifteen hundred poems have been preserved over the ages . He has been called the \" Poet @-@ Historian \" and the \" Poet @-@ Sage \" by Chinese critics , while the range of his work has allowed him to be introduced to Western readers as \" the Chinese Virgil , Horace , Ovid , Shakespeare , Milton , Burns , Wordsworth , B\u00e9",
+            "adversarial_text": "Although ab initio he comprise piffling @-@ be intimate to early author , his mould descend to be tremendously influential in both Formosan and Japanese literary finish . Of his poetic publish , nearly xv hundred poems have make up preserved over the ages . He hour angle been called the \" Poet @-@ Historian \" and the \" Poet @-@ Sage \" by Chinese critics , while the range of his work has allowed him to be introduced to Western readers as \" the Chinese Virgil , Horace , Ovid , Shakespeare , Milton , Burns , Wordsworth , B\u00e9",
+            "adversarial_accuracy": 0.25,
+            "original_accuracy": 0.36363636363636365
+          },
+          {
+            "original_text": "Most of what is known of Du Fu 's life comes from his poems . His paternal grandfather was Du Shenyan , a noted politician and poet during the reign of Empress Wu . Du Fu was born in 712 ; the exact birthplace is unknown , except that it was near Luoyang , Henan province ( Gong county is a favourite candidate ) . In later life , he considered himself to belong to the capital city of Chang 'an , ancestral hometown of the Du family .",
+            "adversarial_text": "well-nigh of what is have it away of Du Fu 's animation occur from his verse form . His parental gramps embody Du Shenyan , a noted politician and poet during the reign of Empress Wu . Du Fu was born in 712 ; the exact birthplace is unknown , except that it was near Luoyang , Henan province ( Gong county is a favourite candidate ) . In later life , he considered himself to belong to the capital city of Chang 'an , ancestral hometown of the Du family .",
+            "adversarial_accuracy": 0.19607843137254902,
+            "original_accuracy": 0.2631578947368421
+          },
+          {
+            "original_text": "The son of a minor scholar @-@ official , his youth was spent on the standard education of a future civil servant : study and memorisation of the Confucian classics of philosophy , history and poetry . He later claimed to have produced creditable poems by his early teens , but these have been lost .",
+            "adversarial_text": "The Word of a venial scholarly person @-@ functionary , his spring chicken was spent on the standard education of a future civil handmaid : study and committal to memory of the Confucian classics of philosophy , history and poetry . He later claimed to have produced creditable poems by his early teens , but these have been lost .",
+            "adversarial_accuracy": 0.16176470588235295,
+            "original_accuracy": 0.26229508196721313
+          },
+          {
+            "original_text": "In the early 730s , he travelled in the Jiangsu / Zhejiang area ; his earliest surviving poem , describing a poetry contest , is thought to date from the end of this period , around 735 . In that year , he took the civil service exam , likely in Chang 'an . He failed , to his surprise and that of centuries of later critics . Hung concludes that he probably failed because his prose style at the time was too dense and obscure , while Chou suggests his failure to cultivate connections in the capita",
+            "adversarial_text": "In the ahead of time 730s , he locomote in the Jiangsu / Zhejiang area ; his former endure verse form , draw a poetry contest , is thought to appointment from the end of this period , around 735 . In that year , he take aim the civil service test , likely in Chang 'an . He failed , to his storm and that of centuries of posterior critics . Hung concludes that he probably failed because his prose style at the time was too dense and obscure , while Chou suggests his failure to cultivate connections in the capita",
+            "adversarial_accuracy": 0.1743119266055046,
+            "original_accuracy": 0.23076923076923078
+          },
+          {
+            "original_text": "His father died around 740 . Du Fu would have been allowed to enter the civil service because of his father 's rank , but he is thought to have given up the privilege in favour of one of his half brothers . He spent the next four years living in the Luoyang area , fulfilling his duties in domestic affairs .",
+            "adversarial_text": "His bring forth kick the bucket roughly 740 . Du Fu would deliver been allowed to enter the civil service because of his father 's right-down , merely he is thought to have given up the privilege in favour of one of his half brothers . He pass the next four years living in the Luoyang area , fulfilling his duties in domestic affairs .",
+            "adversarial_accuracy": 0.17142857142857143,
+            "original_accuracy": 0.3076923076923077
+          },
+          {
+            "original_text": "In the autumn of 744 , he met Li Bai ( Li Po ) for the first time , and the two poets formed a friendship . David Young describes this as \" the most significant formative element in Du Fu 's artistic development \" because it gave him a living example of the reclusive poet @-@ scholar life to which he was attracted after his failure in the civil service exam . The relationship was somewhat one @-@ sided , however . Du Fu was by some years the younger , while Li Bai was already a poetic star . We ",
+            "adversarial_text": "In the fall of 744 , he fulfil Li Baic ( Li Po ) for the initiative fourth dimension , and the deuce poet mould a friendship . Jacques Louis David Loretta Young describes this as \" the to the highest degree significant shaping element in Du Fu 's artistic development \" because it gave him a living deterrent example of the reclusive poet @-@ scholar life to which he was attracted after his failure in the civil service exam . The relationship was somewhat one @-@ sided , however . Du Fu was by some years the younger , while Li Bai was already a poetic star . We",
+            "adversarial_accuracy": 0.226890756302521,
+            "original_accuracy": 0.3181818181818182
+          },
+          {
+            "original_text": "In 746 , he moved to the capital in an attempt to resurrect his official career . He took the civil service exam a second time during the following year , but all the candidates were failed by the prime minister ( apparently in order to prevent the emergence of possible rivals ) . He never again attempted the examinations , instead petitioning the emperor directly in 751 , 754 and probably again in 755 . He married around 752 , and by 757 the couple had had five children \u2014 three sons and two dau",
+            "adversarial_text": "In 746 , he strike to the chapiter in an try to revive his prescribed life history . He need the polite service exam a second time during the following twelvemonth , but all the prospect were go wrong by the prime minister ( apparently in order to foreclose the emergence of potential touch ) . He never again attempted the examinations , instead petitioning the emperor directly in 751 , 754 and probably again in 755 . He married around 752 , and by 757 the couple had had five children \u2014 three sons and two dau",
+            "adversarial_accuracy": 0.23148148148148148,
+            "original_accuracy": 0.2912621359223301
+          },
+          {
+            "original_text": "In 755 , he received an appointment as Registrar of the Right Commandant 's office of the Crown Prince 's Palace . Although this was a minor post , in normal times it would have been at least the start of an official career . Even before he had begun work , however , the position was swept away by events .",
+            "adversarial_text": "In 755 , he incur an date as record-keeper of the right field commanding officer 's federal agency of the crownwork Prince 's castle . Although this was a minor post , in normal times it would have been at least the start of an official career . Even before he had begun work , however , the position was swept away by events .",
+            "adversarial_accuracy": 0.21428571428571427,
+            "original_accuracy": 0.27692307692307694
+          },
+          {
+            "original_text": "The An Lushan Rebellion began in December 755 , and was not completely suppressed for almost eight years . It caused enormous disruption to Chinese society : the census of 754 recorded 52 @.@ 9 million people , but ten years later , the census counted just 16 @.@ 9 million , the remainder having been displaced or killed . During this time , Du Fu led a largely itinerant life unsettled by wars , associated famines and imperial displeasure . This period of unhappiness was the making of Du Fu as a ",
+            "adversarial_text": "The An Lushan Rebellion get in December 755 , and personify not wholly repress for nearly ogdoad yr . It stimulate tremendous flutter to Chinese society : the nose count of 754 recorded 52 @.@ 9 million people , merely ten-spot years ulterior , the census counted just 16 @.@ 9 million , the remainder having been displaced or killed . During this time , Du Fu led a largely itinerant life unsettled by wars , associated famines and imperial displeasure . This period of unhappiness was the making of Du Fu as a",
+            "adversarial_accuracy": 0.23893805309734514,
+            "original_accuracy": 0.3047619047619048
+          },
+          {
+            "original_text": "In 756 , Emperor Xuanzong was forced to flee the capital and abdicate . Du Fu , who had been away from the city , took his family to a place of safety and attempted to join the court of the new emperor ( Suzong ) , but he was captured by the rebels and taken to Chang 'an . In the autumn , his youngest son , Du Zongwu ( Baby Bear ) , was born . Around this time Du Fu is thought to have contracted malaria .",
+            "adversarial_text": "In 756 , Saturnia pavonia Xuanzong constitute draw to take flight the chapiter and renounce . Du Fu , who throw comprise away from the city , took his category to a place of safety and attempted to join the Margaret Court of the novel emperor ( Suzong ) , but he was captured by the rebels and taken to Chang 'an . In the autumn , his youngest son , Du Zongwu ( Baby Bear ) , was born . Around this time Du Fu is thought to have contracted malaria .",
+            "adversarial_accuracy": 0.22330097087378642,
+            "original_accuracy": 0.30612244897959184
+          },
+          {
+            "original_text": "He escaped from Chang 'an the following year , and was appointed Reminder when he rejoined the court in May 757 . This post gave access to the emperor but was largely ceremonial . Du Fu 's conscientiousness compelled him to try to make use of it : he caused trouble for himself by protesting the removal of his friend and patron Fang Guan on a petty charge . He was arrested but was pardoned in June . He was granted leave to visit his family in September , but he soon rejoined the court and on Dece",
+            "adversarial_text": "He lam from Yangtze River 'an the abide by yr , and embody appoint admonisher when he riposte the solicit in Crataegus oxycantha 757 . This Wiley Post devote get at to the emperor moth but was largely observance . Du Fu 's painstakingness compelled him to try to make use of it : he caused trouble for himself by protesting the removal of his friend and patron Fang Guan on a petty charge . He was arrested but was pardoned in June . He was granted leave to visit his family in September , but he soon rejoined the court and on Dece",
+            "adversarial_accuracy": 0.18181818181818182,
+            "original_accuracy": 0.32075471698113206
+          },
+          {
+            "original_text": "I am about to scream madly in the office / Especially when they bring more papers to pile higher on my desk .",
+            "adversarial_text": "I am roughly to scream deucedly in the office / Especially when they bring more papers to pile higher on my desk .",
+            "adversarial_accuracy": 0.16666666666666666,
+            "original_accuracy": 0.21739130434782608
+          },
+          {
+            "original_text": "In December 759 , he briefly stayed in Tonggu ( modern Gansu ) . He departed on December 24 for Chengdu ( Sichuan province ) , where he was hosted by local Prefect and fellow poet Pei Di . Du subsequently based himself in Sichuan for most of the next five years . By the autumn of that year he was in financial trouble , and sent poems begging help to various acquaintances . He was relieved by Yan Wu , a friend and former colleague who was appointed governor general at Chengdu . Despite his financ",
+            "adversarial_text": "In Dec 759 , he in short persist in Tonggu ( modern font Gansu province ) . He bypast on Dec 24 for Chengdu ( Sichuan responsibility ) , where he was hosted by local Prefect and comrade poet Pei Di . Du subsequently based himself in Sichuan for most of the next quint years . By the autumn of that year he was in financial trouble , and sent poems begging help to various acquaintances . He was relieved by Yan Wu , a friend and former colleague who was appointed governor general at Chengdu . Despite his financ",
+            "adversarial_accuracy": 0.23008849557522124,
+            "original_accuracy": 0.3119266055045872
+          },
+          {
+            "original_text": "Luoyang , the region of his birthplace , was recovered by government forces in the winter of 762 , and in the spring of 765 Du Fu and his family sailed down the Yangtze , apparently with the intention of making their way there . They traveled slowly , held up by his ill @-@ health ( by this time he was suffering from poor eyesight , deafness and general old age in addition to his previous ailments ) . They stayed in Kuizhou ( in what is now Baidicheng , Chongqing ) at the entrance to the Three G",
+            "adversarial_text": "Loyang , the part of his provenience , personify reclaim by government activity wedge in the overwinter of 762 , and in the give of 765 Du Fu and his family sail down the Yangtze , plain with the design of shit their elbow room there . They traveled lento , held up by his ill @-@ health ( by this time he was suffering from poor eyesight , deafness and general old age in addition to his previous ailments ) . They stayed in Kuizhou ( in what is now Baidicheng , Chongqing ) at the entrance to the Three G",
+            "adversarial_accuracy": 0.21311475409836064,
+            "original_accuracy": 0.29310344827586204
+          },
+          {
+            "original_text": "In March 768 , he began his journey again and got as far as Hunan province , where he died in Tanzhou ( now Changsha ) in November or December 770 , in his 58th year . He was survived by his wife and two sons , who remained in the area for some years at least . His last known descendant is a grandson who requested a grave inscription for the poet from Yuan Zhen in 813 .",
+            "adversarial_text": "In butt against 768 , he get down his travel once again and fetch as Interahamwe as Hunan province state , where he croak in Tanzhou ( now Changsha ) in November or December 770 , in his 58th year . He was survived by his wife and two sons , who remained in the area for some geezerhood at least . His last known descendant is a grandson who requested a grave inscription for the poet from Yuan Zhen in 813 .",
+            "adversarial_accuracy": 0.2,
+            "original_accuracy": 0.2857142857142857
+          },
+          {
+            "original_text": "Hung summarises his life by concluding that , \" He appeared to be a filial son , an affectionate father , a generous brother , a faithful husband , a loyal friend , a dutiful official , and a patriotic subject . \"",
+            "adversarial_text": "pay heed sum his animation by reason out that , \" He look to be a filial Word , an affectionate father , a generous brother , a faithful husband , a loyal friend , a dutiful official , and a patriotic subject . \"",
+            "adversarial_accuracy": 0.22916666666666666,
+            "original_accuracy": 0.3191489361702128
+          },
+          {
+            "original_text": "Criticism of Du Fu 's works has focused on his strong sense of history , his moral engagement , and his technical excellence .",
+            "adversarial_text": "unfavorable judgment of Du Fu 's whole kit and boodle has concenter on his strong sense of history , his moral engagement , and his technical excellence .",
+            "adversarial_accuracy": 0.15625,
+            "original_accuracy": 0.32
+          }
+        ]
+      },
+      "bert_attack": {
+        "attack_success_rate": 0.9,
+        "defense_rate": 0.09999999999999998,
+        "avg_accuracy_drop": 0.10850338882810856,
+        "avg_original_accuracy": 0.2871755237368176,
+        "avg_adversarial_accuracy": 0.178672134908709,
+        "avg_perturbations": 0.1453940743614187,
+        "avg_perplexity_increase": 3.9356581015119425,
+        "adversarial_examples": [
+          {
+            "original_text": "Robert Boulter is an English film , television and theatre actor . He had a guest @-@ starring role on the television series The Bill in 2000 . This was followed by a starring role in the play Herons written by Simon Stephens , which was performed in 2001 at the Royal Court Theatre . He had a guest role in the television series Judge John Deed in 2002 . In 2004 Boulter landed a role as \" Craig \" in the episode \" Teddy 's Story \" of the television series The Long Firm ; he starred alongside actor",
+            "adversarial_text": "Robert hunter is an English film , television and theatre actor . He had a guest voice starring role on itv television series The Bill in 2000 . This subsequently followed by a starring role in the play Herons written by Simon Stephens , what was performed in 2001 at liverpool supreme Court Theatre . He landed a guest appearances in the television series Judge John Deed in 2002 . In 2004 Boulter landed a role as \" Craig \" in casualty pilot \" Teddy 's Story \" of the television soap The Long Firm ; he starred alongside actor",
+            "adversarial_accuracy": 0.20754716981132076,
+            "original_accuracy": 0.3425925925925926
+          },
+          {
+            "original_text": "In 2006 , Boulter starred alongside Whishaw in the play Citizenship written by Mark Ravenhill . He appeared on a 2006 episode of the television series , Doctors , followed by a role in the 2007 theatre production of How to Curse directed by Josie Rourke . How to Curse was performed at Bush Theatre in the London Borough of Hammersmith and Fulham . Boulter starred in two films in 2008 , Daylight Robbery by filmmaker Paris Leonti , and Donkey Punch directed by Olly Blackburn . In May 2008 , Boulter",
+            "adversarial_text": "In 2006 , tony starred alongside Whishaw in comedy play Citizenship written by Mark Ravenhill . He appeared on a 2006 episode of the television series , Doctors , followed by a role in the 2007 theatre play of way to Curse directed by Josie Rourke . How to Curse was performed at Bush Theatre in greater London neighbourhood of fulham and bow . rob starred in two films in 2008 , Daylight Robbery by filmmaker Paris Leonti , opposite Donkey Punch directed by Olly Blackburn . In May 2008 , Boulter",
+            "adversarial_accuracy": 0.19230769230769232,
+            "original_accuracy": 0.3577981651376147
+          },
+          {
+            "original_text": "In 2000 Boulter had a guest @-@ starring role on the television series The Bill ; he portrayed \" Scott Parry \" in the episode , \" In Safe Hands \" . Boulter starred as \" Scott \" in the play Herons written by Simon Stephens , which was performed in 2001 at the Royal Court Theatre . A review of Boulter 's performance in The Independent on Sunday described him as \" horribly menacing \" in the role , and he received critical reviews in The Herald , and Evening Standard . He appeared in the television ",
+            "adversarial_text": "In 2000 rob had a the cast starring role on the television series The Bill ; he play \" chris Parry \" in each episode , \" In Safe Hands \" . rob starred as \" Scott \" in the play Herons written by Simon Stephens , when was performed in 2001 at the salisbury Court Theatre . A reviewer of stephens 's scenes in The Independent on Sunday describes him as \" horribly menacing \" in the role , and he received critical reviews in The Herald , and Evening Standard . He appeared in the television",
+            "adversarial_accuracy": 0.1553398058252427,
+            "original_accuracy": 0.3211009174311927
+          },
+          {
+            "original_text": "He had a recurring role in 2003 on two episodes of The Bill , as character \" Connor Price \" . In 2004 Boulter landed a role as \" Craig \" in the episode \" Teddy 's Story \" of the television series The Long Firm ; he starred alongside actors Mark Strong and Derek Jacobi . Boulter starred as \" Darren \" , in the 2005 theatre productions of the Philip Ridley play Mercury Fur . It was performed at the Drum Theatre in Plymouth , and the Menier Chocolate Factory in London . He was directed by John Tiffa",
+            "adversarial_text": "He took a recurring role in 2003 on two shows of The Bill , as character \" Connor Price \" . In 2004 tony landed a role as \" Craig \" in this pilot \" Teddy 's Story \" of the itv serial The Long Firm ; he performed alongside actors Mark Strong against Derek Jacobi . rob starred as \" Darren \" , in all 2005 theatre productions of sir Philip Ridley play Mercury Fur . It was performed at the Drum Theatre in Plymouth , and the Menier Chocolate Factory in London . He was directed by John Tiffa",
+            "adversarial_accuracy": 0.16037735849056603,
+            "original_accuracy": 0.3425925925925926
+          },
+          {
+            "original_text": "In 2006 Boulter starred in the play Citizenship written by Mark Ravenhill . The play was part of a series which featured different playwrights , titled Burn / Chatroom / Citizenship . In a 2006 interview , fellow actor Ben Whishaw identified Boulter as one of his favorite co @-@ stars : \" I loved working with a guy called Robert Boulter , who was in the triple bill of Burn , Chatroom and Citizenship at the National . He played my brother in Mercury Fur . \" He portrayed \" Jason Tyler \" on the 200",
+            "adversarial_text": "In 2006 james stars in the play Citizenship written by Mark Ravenhill . which drama formed part of a series which stars different playwrights , titled Burn / Chatroom / Citizenship . In a 2006 interview , fellow actor mike Whishaw cites john as ono of his favorite co web members : \" I loved working with a guy called Robert Boulter , who was in our triple bill of Burn , talk slash Citizenship at the National . He played my brother in Mercury Fur . \" He portrayed \" Jason Tyler \" on the 200",
+            "adversarial_accuracy": 0.14953271028037382,
+            "original_accuracy": 0.26126126126126126
+          },
+          {
+            "original_text": "Boulter starred in two films in 2008 , Daylight Robbery by filmmaker Paris Leonti , and Donkey Punch directed by Olly Blackburn . Boulter portrayed a character named \" Sean \" in Donkey Punch , who tags along with character \" Josh \" as the \" quiet brother ... who hits it off with Tammi \" . Boulter guest starred on a two @-@ part episode arc \" Wounds \" in May 2008 of the television series Waking the Dead as character \" Jimmy Dearden \" . He appeared on the television series Survivors as \" Neil \" in",
+            "adversarial_text": "Boulter worked in three films in france , Daylight Robbery by filmmaker Paris Leonti , opposite Donkey Punch directed by Olly Blackburn . Boulter portrayed a brother named \" Sean \" in Donkey leap , who tags back his character \" Josh \" as some \" quiet brother ... who hits it off with Tammi \" . brian guest starred on a www hour part episode arc \" Wounds \" in march 2008 of the television movie Waking home Dead as character \" Jimmy Dearden \" . He appeared on the television series Survivors as \" Neil \" in",
+            "adversarial_accuracy": 0.1415929203539823,
+            "original_accuracy": 0.2608695652173913
+          },
+          {
+            "original_text": "Du Fu ( Wade \u2013 Giles : Tu Fu ; Chinese : \u675c\u752b ; 712 \u2013 770 ) was a prominent Chinese poet of the Tang dynasty . Along with Li Bai ( Li Po ) , he is frequently called the greatest of the Chinese poets . His greatest ambition was to serve his country as a successful civil servant , but he proved unable to make the necessary accommodations . His life , like the whole country , was devastated by the An Lushan Rebellion of 755 , and his last 15 years were a time of almost constant unrest .",
+            "adversarial_text": "Du Fu ( Wade \u2013 Giles : Tu Fu ; Chinese : \u675c\u752b ; flourished \u2013 770 ) was a prominent court poet of northern Tang reign . Along with Li Bai ( Li Po ) , he is frequently called sixth one of the Chinese poets . thy greatest ambition went to work each country as a successful civil servant , but he proved unable to offer the necessary accommodations . His life , like most whole country , felt devastated by the An Lushan Rebellion of 755 , however his last 15 poems began a time of almost constant unrest .",
+            "adversarial_accuracy": 0.1834862385321101,
+            "original_accuracy": 0.34545454545454546
+          },
+          {
+            "original_text": "Although initially he was little @-@ known to other writers , his works came to be hugely influential in both Chinese and Japanese literary culture . Of his poetic writing , nearly fifteen hundred poems have been preserved over the ages . He has been called the \" Poet @-@ Historian \" and the \" Poet @-@ Sage \" by Chinese critics , while the range of his work has allowed him to be introduced to Western readers as \" the Chinese Virgil , Horace , Ovid , Shakespeare , Milton , Burns , Wordsworth , B\u00e9",
+            "adversarial_text": "whilst initially he was little better known to other writers , his works came to be hugely influential in both Chinese alongside Japanese literary culture . Of his poetic writing , nearly six hundred poems haven been preserved since the ages . He has being described one \" Poet our Historian \" sometimes finally \" sage iron Sage \" by Chinese critics , while wider range of his work has prompted him to be translated to Western readers as \" the Chinese Virgil , Horace , Ovid , Shakespeare , Milton , Burns , Wordsworth , B\u00e9",
+            "adversarial_accuracy": 0.19230769230769232,
+            "original_accuracy": 0.36363636363636365
+          },
+          {
+            "original_text": "Traditional Chinese literary criticism emphasized the life of the author when interpreting a work , a practice which Burton Watson attributes to \" the close links that traditional Chinese thought posits between art and morality \" . Since many of Du Fu 's poems feature morality and history , this practice is particularly important . Another reason , identified by the Chinese historian William Hung , is that Chinese poems are typically concise , omitting context that might be relevant , but which ",
+            "adversarial_text": "Traditional Chinese literary criticism emphasized private life of the author without interpreting a work , a practice which Burton Watson connects to \" the close links that traditional Chinese thought posits between art und morality \" . that few of Du Fu 's poems stressed morality and history , this practice is particularly important . some criticism , identified by the Chinese historian William Hung , is some Chinese poems seem typically concise , omitting context this need be relevant , but which",
+            "adversarial_accuracy": 0.11764705882352941,
+            "original_accuracy": 0.22093023255813954
+          },
+          {
+            "original_text": "Most of what is known of Du Fu 's life comes from his poems . His paternal grandfather was Du Shenyan , a noted politician and poet during the reign of Empress Wu . Du Fu was born in 712 ; the exact birthplace is unknown , except that it was near Luoyang , Henan province ( Gong county is a favourite candidate ) . In later life , he considered himself to belong to the capital city of Chang 'an , ancestral hometown of the Du family .",
+            "adversarial_text": "Most of anything is known of Du Fu 's life comes under his poems . His imperial ancestry was Du Shenyan , a noted politician who poet during late reign of Empress Wu . Du Fu wasn assassinated in 712 ; another exact birthplace is unknown , except which it was near Luoyang , Henan province ( Gong county is a favourite candidate ) . In later life , he proved himself to belong to the capital city of Chang 'an , ancestral hometown of the Du family .",
+            "adversarial_accuracy": 0.2,
+            "original_accuracy": 0.2631578947368421
+          },
+          {
+            "original_text": "Du Fu 's mother died shortly after he was born , and he was partially raised by his aunt . He had an elder brother , who died young . He also had three half brothers and one half sister , to whom he frequently refers in his poems , although he never mentions his stepmother .",
+            "adversarial_text": "Du Fu 's mother vanished shortly thereafter he was born , and he was partially raised by his aunt . He had an elder brother , however died young . He also had three half brothers besides one half sister , to these he frequently refer in his poems , because he never mentions another stepmother .",
+            "adversarial_accuracy": 0.2413793103448276,
+            "original_accuracy": 0.3275862068965517
+          },
+          {
+            "original_text": "The son of a minor scholar @-@ official , his youth was spent on the standard education of a future civil servant : study and memorisation of the Confucian classics of philosophy , history and poetry . He later claimed to have produced creditable poems by his early teens , but these have been lost .",
+            "adversarial_text": "The son of a minor scholar @-@ official , his youth was spent on the standard education of a future civil servant : study upon memorisation of chinese Confucian classics of philosophy , history etc poetry . He later stated to have produced creditable poems by himself early teens , all these list presumed lost .",
+            "adversarial_accuracy": 0.1774193548387097,
+            "original_accuracy": 0.26229508196721313
+          },
+          {
+            "original_text": "In the early 730s , he travelled in the Jiangsu / Zhejiang area ; his earliest surviving poem , describing a poetry contest , is thought to date from the end of this period , around 735 . In that year , he took the civil service exam , likely in Chang 'an . He failed , to his surprise and that of centuries of later critics . Hung concludes that he probably failed because his prose style at the time was too dense and obscure , while Chou suggests his failure to cultivate connections in the capita",
+            "adversarial_text": "In the early 730s , he travelled in rural Jiangsu / hunan area ; their earliest surviving poem , including a poetry contest , is known to date until near end of tang period , around 735 . In which season , he completed the examination service exam , likely in Chang 'an . He failed , to his surprise and envy of centuries of later critics . Hung concludes that he probably failed considering his prose style at the end appeared too dense and obscure , while Chou suggests his failure to cultivate connections in the capita",
+            "adversarial_accuracy": 0.13592233009708737,
+            "original_accuracy": 0.23076923076923078
+          },
+          {
+            "original_text": "His father died around 740 . Du Fu would have been allowed to enter the civil service because of his father 's rank , but he is thought to have given up the privilege in favour of one of his half brothers . He spent the next four years living in the Luoyang area , fulfilling his duties in domestic affairs .",
+            "adversarial_text": "His father died around 740 . Du Fu would have gotten likely to enter the civil service because of his father 's rank , but he is thought to haven held up the privilege in default of one of his half brothers . He worked some succeeding fifteen cycles living in this Luoyang area , fulfilling his duties in domestic affairs .",
+            "adversarial_accuracy": 0.16923076923076924,
+            "original_accuracy": 0.3076923076923077
+          },
+          {
+            "original_text": "In the autumn of 744 , he met Li Bai ( Li Po ) for the first time , and the two poets formed a friendship . David Young describes this as \" the most significant formative element in Du Fu 's artistic development \" because it gave him a living example of the reclusive poet @-@ scholar life to which he was attracted after his failure in the civil service exam . The relationship was somewhat one @-@ sided , however . Du Fu was by some years the younger , while Li Bai was already a poetic star . We ",
+            "adversarial_text": "In the autumn of 744 , he meeting Li Bai ( Li Po ) about that sixth time , where these young poets initiated a friendship . David Young regarded this as \" the most significant formative element in Du Fu 's poetry development \" because it make him a living example of the reclusive poet who scholar life to which he was attracted after his failure in the civil service exam . such relationship remained certainly different year sided , however . Du Fu came by some years the younger , while Li Bai stood already a poetic star . We",
+            "adversarial_accuracy": 0.1619047619047619,
+            "original_accuracy": 0.3181818181818182
+          },
+          {
+            "original_text": "In 746 , he moved to the capital in an attempt to resurrect his official career . He took the civil service exam a second time during the following year , but all the candidates were failed by the prime minister ( apparently in order to prevent the emergence of possible rivals ) . He never again attempted the examinations , instead petitioning the emperor directly in 751 , 754 and probably again in 755 . He married around 752 , and by 757 the couple had had five children \u2014 three sons and two dau",
+            "adversarial_text": "In 746 , he moved to the capital in an efforts to resurrect that official career . He administered him imperial service exam a seventh try around which following season , until all the candidates were failed by either prime minister ( apparently in order to minimize the emergence of possible rivals ) . He never again attempted the examinations , instead petitioning chinese emperor directly in 751 , 754 yet probably again in 755 . He married around 752 , for by 757 any couple had had five children \u2014 three sons besides two dau",
+            "adversarial_accuracy": 0.16346153846153846,
+            "original_accuracy": 0.2912621359223301
+          },
+          {
+            "original_text": "In 755 , he received an appointment as Registrar of the Right Commandant 's office of the Crown Prince 's Palace . Although this was a minor post , in normal times it would have been at least the start of an official career . Even before he had begun work , however , the position was swept away by events .",
+            "adversarial_text": "In 755 , he got an position as Registrar of inner Right Commandant 's office of the Crown Prince 's Palace . however this appeared a minor post , in normal times it would almost signaled at least the start of an official career . Even before he had begun work , however , the position grew swept away by events .",
+            "adversarial_accuracy": 0.2,
+            "original_accuracy": 0.27692307692307694
+          },
+          {
+            "original_text": "The An Lushan Rebellion began in December 755 , and was not completely suppressed for almost eight years . It caused enormous disruption to Chinese society : the census of 754 recorded 52 @.@ 9 million people , but ten years later , the census counted just 16 @.@ 9 million , the remainder having been displaced or killed . During this time , Du Fu led a largely itinerant life unsettled by wars , associated famines and imperial displeasure . This period of unhappiness was the making of Du Fu as a ",
+            "adversarial_text": "The An Lushan Rebellion began in December 755 , and been not completely suppressed for almost eight years . It made enormous distress to Chinese society : the count of 754 recorded 52 and 9 million people , but ten century afterward , the census counted just 16 from 9 individuals , the remainder having been displaced or killed . following which span , Du Fu led a somewhat itinerant life unsettled by wars , associated famines und imperial displeasure . This period of unhappiness slowed very making of Du Fu as a",
+            "adversarial_accuracy": 0.18,
+            "original_accuracy": 0.3047619047619048
+          },
+          {
+            "original_text": "In 756 , Emperor Xuanzong was forced to flee the capital and abdicate . Du Fu , who had been away from the city , took his family to a place of safety and attempted to join the court of the new emperor ( Suzong ) , but he was captured by the rebels and taken to Chang 'an . In the autumn , his youngest son , Du Zongwu ( Baby Bear ) , was born . Around this time Du Fu is thought to have contracted malaria .",
+            "adversarial_text": "In 756 , Emperor Xuanzong had forced to flee the capital through abdicate . Du Fu , meanwhile had been away from the city , relocated his family to a place of safety and attempted to join with court of the new emperor ( Suzong ) , before he later killed by the rebels and taken to Chang 'an . In the autumn , they youngest children , Du Zongwu ( Baby Bear ) , wasn born . Around this generation Du Fu is thought to have contracted malaria .",
+            "adversarial_accuracy": 0.23469387755102042,
+            "original_accuracy": 0.30612244897959184
+          },
+          {
+            "original_text": "He escaped from Chang 'an the following year , and was appointed Reminder when he rejoined the court in May 757 . This post gave access to the emperor but was largely ceremonial . Du Fu 's conscientiousness compelled him to try to make use of it : he caused trouble for himself by protesting the removal of his friend and patron Fang Guan on a petty charge . He was arrested but was pardoned in June . He was granted leave to visit his family in September , but he soon rejoined the court and on Dece",
+            "adversarial_text": "He escaped from Chang 'an his same spring , however remained appointed Reminder then he received tang court in april 757 . another post permitted access to yang emperor but were largely ceremonial . Du Fu 's illness allowed him to try to make less of it : he caused trouble over himself by protesting the removal of his friend and patron Fang Guan on a petty charge . He subsequently arrested but was pardoned in June . He was granted leave to visit his family in September , but he soon rejoined her court and on Dece",
+            "adversarial_accuracy": 0.20754716981132076,
+            "original_accuracy": 0.32075471698113206
+          },
+          {
+            "original_text": "I am about to scream madly in the office / Especially when they bring more papers to pile higher on my desk .",
+            "adversarial_text": "I am sure to bolt madly in these office / Especially when they bring more papers to pile higher on my desk .",
+            "adversarial_accuracy": 0.13043478260869565,
+            "original_accuracy": 0.21739130434782608
+          },
+          {
+            "original_text": "He moved on in the summer of 759 ; this has traditionally been ascribed to famine , but Hung believes that frustration is a more likely reason . He next spent around six weeks in Qinzhou ( now Tianshui , Gansu province ) , where he wrote more than sixty poems .",
+            "adversarial_text": "He moved on in mid summer of 759 ; this could traditionally been attributed to famine , but Hung believes that frustration is a more likely reason . He next spent around six weeks in Qinzhou ( now Tianshui , Gansu province ) , wherein he produced more likely sixty poems .",
+            "adversarial_accuracy": 0.1724137931034483,
+            "original_accuracy": 0.2542372881355932
+          },
+          {
+            "original_text": "In December 759 , he briefly stayed in Tonggu ( modern Gansu ) . He departed on December 24 for Chengdu ( Sichuan province ) , where he was hosted by local Prefect and fellow poet Pei Di . Du subsequently based himself in Sichuan for most of the next five years . By the autumn of that year he was in financial trouble , and sent poems begging help to various acquaintances . He was relieved by Yan Wu , a friend and former colleague who was appointed governor general at Chengdu . Despite his financ",
+            "adversarial_text": "In December 759 , he briefly stayed in Tonggu ( later Gansu ) . He departure on march 24 with Chengdu ( yunnan province ) , and he stood hosted by local Prefect and fellow poet Pei Di . Du subsequently based himself in Sichuan spending most of the next five cycles . By some summer of every years he was in financial trouble , and sent poems begging help to various acquaintances . He being joined by Yan Wu , a chancellor slash former colleague who him appointed governor general at Chengdu . Despite his financ",
+            "adversarial_accuracy": 0.1926605504587156,
+            "original_accuracy": 0.3119266055045872
+          },
+          {
+            "original_text": "Luoyang , the region of his birthplace , was recovered by government forces in the winter of 762 , and in the spring of 765 Du Fu and his family sailed down the Yangtze , apparently with the intention of making their way there . They traveled slowly , held up by his ill @-@ health ( by this time he was suffering from poor eyesight , deafness and general old age in addition to his previous ailments ) . They stayed in Kuizhou ( in what is now Baidicheng , Chongqing ) at the entrance to the Three G",
+            "adversarial_text": "Luoyang , administrative region of his birthplace , then recovered by government forces in some winter of 762 , and in the spring of 765 Du Fu along his family sailed down the Yangtze , apparently against the intentions of finishing their way there . They traveled slowly , held up by his chronic @-@ symptoms ( by such era he was weakened both poor eyesight , deafness causing general old age in regard to some previous ailments ) . They stayed in Kuizhou ( in whose is now Baidicheng , Chongqing ) at the entrance to the Three G",
+            "adversarial_accuracy": 0.22413793103448276,
+            "original_accuracy": 0.29310344827586204
+          },
+          {
+            "original_text": "In March 768 , he began his journey again and got as far as Hunan province , where he died in Tanzhou ( now Changsha ) in November or December 770 , in his 58th year . He was survived by his wife and two sons , who remained in the area for some years at least . His last known descendant is a grandson who requested a grave inscription for the poet from Yuan Zhen in 813 .",
+            "adversarial_text": "In March 768 , he resumed his journey again and got as many as Hunan province , however he death in Tanzhou ( now Changsha ) in November or December 770 , in him 58th year . He was survives by his daughters besides two sons , who remained in the area another some years at least . His other known descendant is a grandson who requested a grave inscription for the poet from Yuan Zhen in 813 .",
+            "adversarial_accuracy": 0.14285714285714285,
+            "original_accuracy": 0.2857142857142857
+          },
+          {
+            "original_text": "Hung summarises his life by concluding that , \" He appeared to be a filial son , an affectionate father , a generous brother , a faithful husband , a loyal friend , a dutiful official , and a patriotic subject . \"",
+            "adversarial_text": "Hung finished his life by concluding that , \" He appeared to be a filial son , an generous father , a generous brother , a faithful husband , a loyal friend , a dutiful official , certainly a patriotic subject . \"",
+            "adversarial_accuracy": 0.26666666666666666,
+            "original_accuracy": 0.3191489361702128
+          },
+          {
+            "original_text": "Criticism of Du Fu 's works has focused on his strong sense of history , his moral engagement , and his technical excellence .",
+            "adversarial_text": "Criticism of Du Fu 's works has been on any strong sense of history , his moral engagement , for his technical excellence .",
+            "adversarial_accuracy": 0.2,
+            "original_accuracy": 0.32
+          }
+        ]
+      }
+    },
+    "32": {
+      "clean_performance": {
+        "precision": 32,
+        "perplexity": 44.93109428406846,
+        "avg_loss": 3.8051300780952637,
+        "accuracy": 0.31427396133278485,
+        "total_tokens": 4862
+      },
+      "textfooler": {
+        "attack_success_rate": 0.9,
+        "defense_rate": 0.09999999999999998,
+        "avg_accuracy_drop": 0.08650715895115524,
+        "avg_original_accuracy": 0.31992819825084146,
+        "avg_adversarial_accuracy": 0.2334210392996863,
+        "avg_perturbations": 0.11590179823407852,
+        "adversarial_examples": [
+          {
+            "original_text": "Robert Boulter is an English film , television and theatre actor . He had a guest @-@ starring role on the television series The Bill in 2000 . This was followed by a starring role in the play Herons written by Simon Stephens , which was performed in 2001 at the Royal Court Theatre . He had a guest role in the television series Judge John Deed in 2002 . In 2004 Boulter landed a role as \" Craig \" in the episode \" Teddy 's Story \" of the television series The Long Firm ; he starred alongside actor",
+            "adversarial_text": "Henry Martyn Robert Boulter is an English photographic film , boob tube and theater of operations histrion . He had a guest @-@ asterisk office on the idiot box serial publication The notice in 2000 . This Washington trace by a starring role in the play Hero written by Simon Stephens , which was performed in 2001 at the Royal Court Theatre . He had a guest role in the television series Judge John Deed in 2002 . In 2004 Boulter landed a role as \" Craig \" in the episode \" Teddy 's Story \" of the television series The Long Firm ; he starred alongside actor",
+            "adversarial_accuracy": 0.25,
+            "original_accuracy": 0.3425925925925926
+          },
+          {
+            "original_text": "In 2000 Boulter had a guest @-@ starring role on the television series The Bill ; he portrayed \" Scott Parry \" in the episode , \" In Safe Hands \" . Boulter starred as \" Scott \" in the play Herons written by Simon Stephens , which was performed in 2001 at the Royal Court Theatre . A review of Boulter 's performance in The Independent on Sunday described him as \" horribly menacing \" in the role , and he received critical reviews in The Herald , and Evening Standard . He appeared in the television ",
+            "adversarial_text": "In 2000 Boulter throw a Edgar Albert Guest @-@ asterisk purpose on the idiot box serial publication The notice ; he portray \" Scott circumvent \" in the sequence , \" In Safe Hands \" . Boulter starred as \" Scott \" in the play Hero written by Simon Zelotes Stephens , which was performed in 2001 at the Royal Court Theatre . A review of Boulter 's performance in The Independent on Sunday described him as \" horribly menacing \" in the role , and he received critical reviews in The Herald , and Evening Standard . He appeared in the television",
+            "adversarial_accuracy": 0.30973451327433627,
+            "original_accuracy": 0.3669724770642202
+          },
+          {
+            "original_text": "He had a recurring role in 2003 on two episodes of The Bill , as character \" Connor Price \" . In 2004 Boulter landed a role as \" Craig \" in the episode \" Teddy 's Story \" of the television series The Long Firm ; he starred alongside actors Mark Strong and Derek Jacobi . Boulter starred as \" Darren \" , in the 2005 theatre productions of the Philip Ridley play Mercury Fur . It was performed at the Drum Theatre in Plymouth , and the Menier Chocolate Factory in London . He was directed by John Tiffa",
+            "adversarial_text": "He suffer a recur office in 2003 on ii sequence of The notice , as character \" Connor monetary value \" . In 2004 Boulter landed a office as \" Craig \" in the installment \" slip 's Story \" of the television serial publication The Long truehearted ; he starred alongside actors Mark Strong and Derek Jacobi . Boulter starred as \" Darren \" , in the 2005 theatre productions of the Philip Ridley play Mercury Fur . It was performed at the Drum Theatre in Plymouth , and the Menier Chocolate Factory in London . He was directed by John Tiffa",
+            "adversarial_accuracy": 0.21428571428571427,
+            "original_accuracy": 0.2777777777777778
+          },
+          {
+            "original_text": "In 2006 Boulter starred in the play Citizenship written by Mark Ravenhill . The play was part of a series which featured different playwrights , titled Burn / Chatroom / Citizenship . In a 2006 interview , fellow actor Ben Whishaw identified Boulter as one of his favorite co @-@ stars : \" I loved working with a guy called Robert Boulter , who was in the triple bill of Burn , Chatroom and Citizenship at the National . He played my brother in Mercury Fur . \" He portrayed \" Jason Tyler \" on the 200",
+            "adversarial_text": "In 2006 Boulter asterisk in the bring Citizenship publish by soft touch Ravenhill . The bet personify partially of a series which featured unlike playwrights , titled Burn / chat room / Citizenship . In a 2006 interview , fellow histrion Ben Whishaw identified Boulter as unmatched of his favorite co @-@ stars : \" I loved working with a guy called Robert Boulter , who was in the triple bill of Burn , Chatroom and Citizenship at the National . He played my brother in Mercury Fur . \" He portrayed \" Jason Tyler \" on the 200",
+            "adversarial_accuracy": 0.1896551724137931,
+            "original_accuracy": 0.3153153153153153
+          },
+          {
+            "original_text": "Boulter starred in two films in 2008 , Daylight Robbery by filmmaker Paris Leonti , and Donkey Punch directed by Olly Blackburn . Boulter portrayed a character named \" Sean \" in Donkey Punch , who tags along with character \" Josh \" as the \" quiet brother ... who hits it off with Tammi \" . Boulter guest starred on a two @-@ part episode arc \" Wounds \" in May 2008 of the television series Waking the Dead as character \" Jimmy Dearden \" . He appeared on the television series Survivors as \" Neil \" in",
+            "adversarial_text": "Boulter asterisk in ii moving-picture show in 2008 , daytime looting by movie maker genus Paris Leonti , and Equus asinus biff directed by Olly Blackburnian warbler . Boulter pictured a lineament diagnose \" Sean \" in domestic ass Punch , who tags along with character \" kid \" as the \" quiet brother ... who hits it off with Tammi \" . Boulter guest starred on a two @-@ part episode arc \" Wounds \" in May 2008 of the television series Waking the Dead as character \" Jimmy Dearden \" . He appeared on the television series Survivors as \" Neil \" in",
+            "adversarial_accuracy": 0.2248062015503876,
+            "original_accuracy": 0.2956521739130435
+          },
+          {
+            "original_text": "Du Fu ( Wade \u2013 Giles : Tu Fu ; Chinese : \u675c\u752b ; 712 \u2013 770 ) was a prominent Chinese poet of the Tang dynasty . Along with Li Bai ( Li Po ) , he is frequently called the greatest of the Chinese poets . His greatest ambition was to serve his country as a successful civil servant , but he proved unable to make the necessary accommodations . His life , like the whole country , was devastated by the An Lushan Rebellion of 755 , and his last 15 years were a time of almost constant unrest .",
+            "adversarial_text": "Du Fu ( Virginia Wade \u2013 Giles : Tu Fu ; Chinese : \u675c\u752b ; 712 \u2013 770 ) Washington a salient Taiwanese poet of the savour dynasty . Along with Li Bai ( Li Po ) , he is ofttimes yell the greatest of the Chinese poets . His with child ambition was to dish his country as a successful civil servant , but he proved unable to make the necessary accommodations . His life , like the whole country , was devastated by the An Lushan Rebellion of 755 , and his last 15 years were a time of almost constant unrest .",
+            "adversarial_accuracy": 0.2782608695652174,
+            "original_accuracy": 0.33636363636363636
+          },
+          {
+            "original_text": "Although initially he was little @-@ known to other writers , his works came to be hugely influential in both Chinese and Japanese literary culture . Of his poetic writing , nearly fifteen hundred poems have been preserved over the ages . He has been called the \" Poet @-@ Historian \" and the \" Poet @-@ Sage \" by Chinese critics , while the range of his work has allowed him to be introduced to Western readers as \" the Chinese Virgil , Horace , Ovid , Shakespeare , Milton , Burns , Wordsworth , B\u00e9",
+            "adversarial_text": "Although ab initio he Washington trivial @-@ hump to former writer , his whole kit and boodle came to be staggeringly influential in both Formosan and Japanese literary finish . Of his poetic indite , intimately fifteen one C poems have embody preserved over the ages . He has been called the \" Poet @-@ Historian \" and the \" Poet @-@ Sage \" by Chinese critics , while the range of his work has allowed him to be introduced to Western readers as \" the Chinese Virgil , Horace , Ovid , Shakespeare , Milton , Burns , Wordsworth , B\u00e9",
+            "adversarial_accuracy": 0.30578512396694213,
+            "original_accuracy": 0.4090909090909091
+          },
+          {
+            "original_text": "Traditional Chinese literary criticism emphasized the life of the author when interpreting a work , a practice which Burton Watson attributes to \" the close links that traditional Chinese thought posits between art and morality \" . Since many of Du Fu 's poems feature morality and history , this practice is particularly important . Another reason , identified by the Chinese historian William Hung , is that Chinese poems are typically concise , omitting context that might be relevant , but which ",
+            "adversarial_text": "Traditional Taiwanese literary unfavorable judgment accent the animation of the generator when rede a bring , a apply which Sir Richard Francis Burton John Broadus Watson property to \" the close links that traditional Chinese thought posits between art and morality \" . Since many of Du Fu 's poems feature morality and history , this practice session is particularly important . Another reason , identified by the Chinese historian William Hung , is that Chinese poems are typically concise , omitting context that might be relevant , but which",
+            "adversarial_accuracy": 0.1935483870967742,
+            "original_accuracy": 0.2441860465116279
+          },
+          {
+            "original_text": "Most of what is known of Du Fu 's life comes from his poems . His paternal grandfather was Du Shenyan , a noted politician and poet during the reign of Empress Wu . Du Fu was born in 712 ; the exact birthplace is unknown , except that it was near Luoyang , Henan province ( Gong county is a favourite candidate ) . In later life , he considered himself to belong to the capital city of Chang 'an , ancestral hometown of the Du family .",
+            "adversarial_text": "near of what is have it away of Du Fu 's sprightliness issue forth from his verse form . His paternal gramps was Du Shenyan , a noted politician and poet during the prevail of Empress Wu . Du Fu was born in 712 ; the exact birthplace is unknown , except that it was near Luoyang , Henan province ( Gong county is a favourite candidate ) . In later life , he considered himself to belong to the capital city of Chang 'an , ancestral hometown of the Du family .",
+            "adversarial_accuracy": 0.23529411764705882,
+            "original_accuracy": 0.35789473684210527
+          },
+          {
+            "original_text": "The son of a minor scholar @-@ official , his youth was spent on the standard education of a future civil servant : study and memorisation of the Confucian classics of philosophy , history and poetry . He later claimed to have produced creditable poems by his early teens , but these have been lost .",
+            "adversarial_text": "The Logos of a nipper scholarly person @-@ prescribed , his spring chicken embody spent on the standard education of a future civil servant : study and memorisation of the Confucian classics of philosophy , history and poetry . He later claimed to have produced creditable poems by his early teens , but these have been lost .",
+            "adversarial_accuracy": 0.2,
+            "original_accuracy": 0.29508196721311475
+          },
+          {
+            "original_text": "In the early 730s , he travelled in the Jiangsu / Zhejiang area ; his earliest surviving poem , describing a poetry contest , is thought to date from the end of this period , around 735 . In that year , he took the civil service exam , likely in Chang 'an . He failed , to his surprise and that of centuries of later critics . Hung concludes that he probably failed because his prose style at the time was too dense and obscure , while Chou suggests his failure to cultivate connections in the capita",
+            "adversarial_text": "In the betimes 730s , he journey in the Jiangsu / Zhejiang orbit ; his soonest hold out verse form , identify a poesy contend , is thought to appointment from the end of this period , around 735 . In that year , he take aim the civil service exam , likely in Changjiang 'an . He failed , to his surprise and that of centuries of later critics . Hung concludes that he probably failed because his prose style at the time was too dense and obscure , while Chou suggests his failure to cultivate connections in the capita",
+            "adversarial_accuracy": 0.1891891891891892,
+            "original_accuracy": 0.27884615384615385
+          },
+          {
+            "original_text": "His father died around 740 . Du Fu would have been allowed to enter the civil service because of his father 's rank , but he is thought to have given up the privilege in favour of one of his half brothers . He spent the next four years living in the Luoyang area , fulfilling his duties in domestic affairs .",
+            "adversarial_text": "His bring forth kick the bucket roughly 740 . Du Fu would have been allowed to enter the civil service because of his father 's rank , simply he is thought process to sustain given up the privilege in favour of one of his half brothers . He spent the next four years living in the Luoyang area , fulfilling his duties in domestic affairs .",
+            "adversarial_accuracy": 0.2318840579710145,
+            "original_accuracy": 0.3230769230769231
+          },
+          {
+            "original_text": "In the autumn of 744 , he met Li Bai ( Li Po ) for the first time , and the two poets formed a friendship . David Young describes this as \" the most significant formative element in Du Fu 's artistic development \" because it gave him a living example of the reclusive poet @-@ scholar life to which he was attracted after his failure in the civil service exam . The relationship was somewhat one @-@ sided , however . Du Fu was by some years the younger , while Li Bai was already a poetic star . We ",
+            "adversarial_text": "In the autumn of 744 , he suffer Li Baic ( Li Po ) for the start fourth dimension , and the II poet mould a friendly relationship . Jacques Louis David Whitney Moore Young Jr. describes this as \" the about significant formative element in Du Fu 's artistic development \" because it gave him a living example of the reclusive poet @-@ scholar life to which he was attracted after his failure in the civil service exam . The relationship was somewhat one @-@ sided , however . Du Fu was by some years the younger , while Li Bai was already a poetic star . We",
+            "adversarial_accuracy": 0.2457627118644068,
+            "original_accuracy": 0.3181818181818182
+          },
+          {
+            "original_text": "In 746 , he moved to the capital in an attempt to resurrect his official career . He took the civil service exam a second time during the following year , but all the candidates were failed by the prime minister ( apparently in order to prevent the emergence of possible rivals ) . He never again attempted the examinations , instead petitioning the emperor directly in 751 , 754 and probably again in 755 . He married around 752 , and by 757 the couple had had five children \u2014 three sons and two dau",
+            "adversarial_text": "In 746 , he act to the chapiter in an set about to upraise his prescribed life history . He take aim the polite service test a instant fourth dimension during the abide by twelvemonth , but all the candidates were failed by the prime minister ( apparently in order to prevent the emergence of possible rivals ) . He never again attempted the examinations , instead petitioning the emperor directly in 751 , 754 and probably again in 755 . He married around 752 , and by 757 the couple had had five children \u2014 three sons and two dau",
+            "adversarial_accuracy": 0.24324324324324326,
+            "original_accuracy": 0.3300970873786408
+          },
+          {
+            "original_text": "In 755 , he received an appointment as Registrar of the Right Commandant 's office of the Crown Prince 's Palace . Although this was a minor post , in normal times it would have been at least the start of an official career . Even before he had begun work , however , the position was swept away by events .",
+            "adversarial_text": "In 755 , he standard an fitting as recorder of the Right commanding officer 's spot of the jacket crown Prince 's castle . Although this was a kid post , in normal times it would have been at least the start of an official career . Even before he had begun work , however , the position was swept away by events .",
+            "adversarial_accuracy": 0.25757575757575757,
+            "original_accuracy": 0.3076923076923077
+          },
+          {
+            "original_text": "The An Lushan Rebellion began in December 755 , and was not completely suppressed for almost eight years . It caused enormous disruption to Chinese society : the census of 754 recorded 52 @.@ 9 million people , but ten years later , the census counted just 16 @.@ 9 million , the remainder having been displaced or killed . During this time , Du Fu led a largely itinerant life unsettled by wars , associated famines and imperial displeasure . This period of unhappiness was the making of Du Fu as a ",
+            "adversarial_text": "The An Lushan insurrection get down in December 755 , and equal non all stamp down for near Ashcan School geezerhood . It induce tremendous break to Chinese society : the census of 754 tape 52 @.@ 9 million people , but ten years later , the census counted equitable 16 @.@ 9 million , the remainder having been displaced or killed . During this time , Du Fu led a largely itinerant life unsettled by wars , associated famines and imperial displeasure . This period of unhappiness was the making of Du Fu as a",
+            "adversarial_accuracy": 0.24324324324324326,
+            "original_accuracy": 0.3238095238095238
+          },
+          {
+            "original_text": "Brooding on what I have lived through , if even I know such suffering , the common man must surely be rattled by the winds .",
+            "adversarial_text": "ruminative on what I throw lived done , if even I know such suffering , the common man must surely be rattled by the winds .",
+            "adversarial_accuracy": 0.037037037037037035,
+            "original_accuracy": 0.19230769230769232
+          },
+          {
+            "original_text": "In 756 , Emperor Xuanzong was forced to flee the capital and abdicate . Du Fu , who had been away from the city , took his family to a place of safety and attempted to join the court of the new emperor ( Suzong ) , but he was captured by the rebels and taken to Chang 'an . In the autumn , his youngest son , Du Zongwu ( Baby Bear ) , was born . Around this time Du Fu is thought to have contracted malaria .",
+            "adversarial_text": "In 756 , Saturnia pavonia Xuanzong comprise squeeze to take flight the chapiter and renounce . Du Fu , who had embody away from the city , took his family to a place of safety and attempted to join the motor inn of the new emperor ( Suzong ) , but he was becharm by the rebels and taken to Chang 'an . In the autumn , his youngest son , Du Zongwu ( Baby Bear ) , was born . Around this time Du Fu is thought to have contracted malaria .",
+            "adversarial_accuracy": 0.2571428571428571,
+            "original_accuracy": 0.3673469387755102
+          },
+          {
+            "original_text": "He escaped from Chang 'an the following year , and was appointed Reminder when he rejoined the court in May 757 . This post gave access to the emperor but was largely ceremonial . Du Fu 's conscientiousness compelled him to try to make use of it : he caused trouble for himself by protesting the removal of his friend and patron Fang Guan on a petty charge . He was arrested but was pardoned in June . He was granted leave to visit his family in September , but he soon rejoined the court and on Dece",
+            "adversarial_text": "He scat from Yangtze River 'an the abide by twelvemonth , and was constitute admonisher when he riposte the romance in Crataegus oxycantha 757 . This Wiley Post ease up get at to the emperor moth merely was largely ceremonial . Du Fu 's conscientiousness compel him to try to make use of it : he caused trouble for himself by protesting the removal of his friend and patron Fang Guan on a petty charge . He was arrested but was pardoned in June . He was granted leave to visit his family in September , but he soon rejoined the court and on Dece",
+            "adversarial_accuracy": 0.1951219512195122,
+            "original_accuracy": 0.33962264150943394
+          },
+          {
+            "original_text": "I am about to scream madly in the office / Especially when they bring more papers to pile higher on my desk .",
+            "adversarial_text": "I am roughly to scream deucedly in the office / Especially when they bring more papers to pile higher on my desk .",
+            "adversarial_accuracy": 0.20833333333333334,
+            "original_accuracy": 0.34782608695652173
+          },
+          {
+            "original_text": "He moved on in the summer of 759 ; this has traditionally been ascribed to famine , but Hung believes that frustration is a more likely reason . He next spent around six weeks in Qinzhou ( now Tianshui , Gansu province ) , where he wrote more than sixty poems .",
+            "adversarial_text": "He impress on in the summertime of 759 ; this deliver traditionally been assign to famine , simply Hung believes that frustration is a more likely reason . He next spent around six weeks in Qinzhou ( now Tianshui , Gansu province ) , where he wrote more than sixty poems .",
+            "adversarial_accuracy": 0.22033898305084745,
+            "original_accuracy": 0.288135593220339
+          },
+          {
+            "original_text": "In December 759 , he briefly stayed in Tonggu ( modern Gansu ) . He departed on December 24 for Chengdu ( Sichuan province ) , where he was hosted by local Prefect and fellow poet Pei Di . Du subsequently based himself in Sichuan for most of the next five years . By the autumn of that year he was in financial trouble , and sent poems begging help to various acquaintances . He was relieved by Yan Wu , a friend and former colleague who was appointed governor general at Chengdu . Despite his financ",
+            "adversarial_text": "In December 759 , he in brief persist in Tonggu ( modern Kansu ) . He dead person on December 24 for Chengdu ( Szechwan province responsibility ) , where he embody host by local Prefect and lad poet Pei Di . Du subsequently free-base himself in Szechuan for nigh of the next five years . By the autumn of that year he was in financial trouble , and sent poems begging help to various acquaintances . He was relieved by Yan Wu , a friend and former colleague who was appointed governor general at Chengdu . Despite his financ",
+            "adversarial_accuracy": 0.23478260869565218,
+            "original_accuracy": 0.30275229357798167
+          },
+          {
+            "original_text": "Luoyang , the region of his birthplace , was recovered by government forces in the winter of 762 , and in the spring of 765 Du Fu and his family sailed down the Yangtze , apparently with the intention of making their way there . They traveled slowly , held up by his ill @-@ health ( by this time he was suffering from poor eyesight , deafness and general old age in addition to his previous ailments ) . They stayed in Kuizhou ( in what is now Baidicheng , Chongqing ) at the entrance to the Three G",
+            "adversarial_text": "Loyang , the neighborhood of his provenience , embody recover by government activity wedge in the winter of 762 , and in the take a hop of 765 Du Fu and his family navigate down the Yangtze , plain with the intention of cook their way in that respect . They traveled lento , accommodate up by his ill @-@ health ( by this time he comprise suffering from poor eyesight , deafness and general old age in addition to his previous ailments ) . They stayed in Kuizhou ( in what is now Baidicheng , Chongqing ) at the entrance to the Three G",
+            "adversarial_accuracy": 0.24390243902439024,
+            "original_accuracy": 0.35344827586206895
+          },
+          {
+            "original_text": "In March 768 , he began his journey again and got as far as Hunan province , where he died in Tanzhou ( now Changsha ) in November or December 770 , in his 58th year . He was survived by his wife and two sons , who remained in the area for some years at least . His last known descendant is a grandson who requested a grave inscription for the poet from Yuan Zhen in 813 .",
+            "adversarial_text": "In butt against 768 , he get down his travel over again and fix as Army for the Liberation of Rwanda as Hunan province province , where he pall in Tanzhou ( now Changsha ) in November or December 770 , in his 58th year . He was survived by his wife and two sons , who remained in the area for some years at least . His last known descendant is a grandson who requested a grave inscription for the poet from Yuan Zhen in 813 .",
+            "adversarial_accuracy": 0.1935483870967742,
+            "original_accuracy": 0.27380952380952384
+          },
+          {
+            "original_text": "Hung summarises his life by concluding that , \" He appeared to be a filial son , an affectionate father , a generous brother , a faithful husband , a loyal friend , a dutiful official , and a patriotic subject . \"",
+            "adversarial_text": "pay heed resume his animation by reason out that , \" He look to be a filial son , an affectionate father , a generous brother , a faithful husband , a loyal friend , a dutiful official , and a patriotic subject . \"",
+            "adversarial_accuracy": 0.3125,
+            "original_accuracy": 0.3829787234042553
+          },
+          {
+            "original_text": "Criticism of Du Fu 's works has focused on his strong sense of history , his moral engagement , and his technical excellence .",
+            "adversarial_text": "unfavorable judgment of Du Fu 's mould has concenter on his strong sense of history , his moral engagement , and his technical excellence .",
+            "adversarial_accuracy": 0.21428571428571427,
+            "original_accuracy": 0.36
+          },
+          {
+            "original_text": "Since the Song dynasty , critics have called Du Fu the \" poet historian \" ( \u8a69\u53f2 sh\u012b sh\u01d0 ) . The most directly historical of his poems are those commenting on military tactics or the successes and failures of the government , or the poems of advice which he wrote to the emperor . Indirectly , he wrote about the effect of the times in which he lived on himself , and on the ordinary people of China . As Watson notes , this is information \" of a kind seldom found in the officially compiled histories ",
+            "adversarial_text": "Since the birdcall dynasty , critic deliver foretell Du Fu the \" poet historiographer \" ( \u8a69\u53f2 sh\u012b sh\u01d0 ) . The most like a shot historic of his poems are those commenting on military tactics or the winner and failures of the government , or the poems of advice which he wrote to the Saturnia pavonia . Indirectly , he wrote about the effect of the times in which he lived on himself , and on the ordinary people of China . As Watson notes , this is information \" of a kind seldom found in the officially compiled histories",
+            "adversarial_accuracy": 0.2608695652173913,
+            "original_accuracy": 0.3177570093457944
+          }
+        ]
+      },
+      "bert_attack": {
+        "attack_success_rate": 0.9,
+        "defense_rate": 0.09999999999999998,
+        "avg_accuracy_drop": 0.1076701800237001,
+        "avg_original_accuracy": 0.31992819825084146,
+        "avg_adversarial_accuracy": 0.21225801822714138,
+        "avg_perturbations": 0.14055497274614268,
+        "avg_perplexity_increase": 4.908592723940852,
+        "adversarial_examples": [
+          {
+            "original_text": "Robert Boulter is an English film , television and theatre actor . He had a guest @-@ starring role on the television series The Bill in 2000 . This was followed by a starring role in the play Herons written by Simon Stephens , which was performed in 2001 at the Royal Court Theatre . He had a guest role in the television series Judge John Deed in 2002 . In 2004 Boulter landed a role as \" Craig \" in the episode \" Teddy 's Story \" of the television series The Long Firm ; he starred alongside actor",
+            "adversarial_text": "michael hunter is an british film , television and theatre actor . He had a guest voice starring credit on the television serial The Bill in 2000 . This then interrupted by a starring place in shakespeare play Herons written by Simon Stephens , which was performed in 2001 at the Royal Court Theatre . He had a guest job in the television series Judge John Deed in 2002 . In 2004 Boulter landed a role as \" Craig \" in the episodes \" Teddy 's Story \" of the television soap The Long Firm ; he starred alongside actor",
+            "adversarial_accuracy": 0.25925925925925924,
+            "original_accuracy": 0.3425925925925926
+          },
+          {
+            "original_text": "In 2006 , Boulter starred alongside Whishaw in the play Citizenship written by Mark Ravenhill . He appeared on a 2006 episode of the television series , Doctors , followed by a role in the 2007 theatre production of How to Curse directed by Josie Rourke . How to Curse was performed at Bush Theatre in the London Borough of Hammersmith and Fulham . Boulter starred in two films in 2008 , Daylight Robbery by filmmaker Paris Leonti , and Donkey Punch directed by Olly Blackburn . In May 2008 , Boulter",
+            "adversarial_text": "In 2006 , john toured alongside Whishaw in the play Citizenship written by Mark Ravenhill . He appeared on a 2006 episode of the television series , Doctors , follows by a role in the 2007 theatre production of about to Curse directed by Josie Rourke . learning to Curse was performed at Bush Theatre in the London Borough of barnes and lyric . rob starred in two films in 2008 , Daylight Robbery by filmmaker Paris Leonti , and Donkey Punch directed by Olly Blackburn . In May 2008 , Boulter",
+            "adversarial_accuracy": 0.23300970873786409,
+            "original_accuracy": 0.3577981651376147
+          },
+          {
+            "original_text": "In 2000 Boulter had a guest @-@ starring role on the television series The Bill ; he portrayed \" Scott Parry \" in the episode , \" In Safe Hands \" . Boulter starred as \" Scott \" in the play Herons written by Simon Stephens , which was performed in 2001 at the Royal Court Theatre . A review of Boulter 's performance in The Independent on Sunday described him as \" horribly menacing \" in the role , and he received critical reviews in The Herald , and Evening Standard . He appeared in the television ",
+            "adversarial_text": "In 2000 mark had a guest comic starring time on the television serial The Bill ; he portrayed \" Scott Parry \" in the episode , \" In Safe Hands \" . rob starred as \" Scott \" in broadway play Herons written by Simon Stephens , where was performed in 2001 at the Royal Court Theatre . A notice of graham 's performance in The Independent on Sunday saw him as \" horribly menacing \" in the role , however he received critical reviews in The Herald , and Evening Standard . He appeared in the television",
+            "adversarial_accuracy": 0.24509803921568626,
+            "original_accuracy": 0.3669724770642202
+          },
+          {
+            "original_text": "He had a recurring role in 2003 on two episodes of The Bill , as character \" Connor Price \" . In 2004 Boulter landed a role as \" Craig \" in the episode \" Teddy 's Story \" of the television series The Long Firm ; he starred alongside actors Mark Strong and Derek Jacobi . Boulter starred as \" Darren \" , in the 2005 theatre productions of the Philip Ridley play Mercury Fur . It was performed at the Drum Theatre in Plymouth , and the Menier Chocolate Factory in London . He was directed by John Tiffa",
+            "adversarial_text": "He has a recurring roles in 2003 on two editions of The Bill , as character \" Connor Price \" . In october ben landed a lead as \" Craig \" in third episodes \" Teddy 's Story \" of the television soap The Long Firm ; he starred over actors Mark Strong over Derek Jacobi . mark starred as \" Darren \" , in the 2005 theatre productions of the Philip Ridley play Mercury Fur . It was performed at the Drum Theatre in Plymouth , opposite royal Menier Chocolate Factory in London . He was directed by John Tiffa",
+            "adversarial_accuracy": 0.19047619047619047,
+            "original_accuracy": 0.2777777777777778
+          },
+          {
+            "original_text": "In 2006 Boulter starred in the play Citizenship written by Mark Ravenhill . The play was part of a series which featured different playwrights , titled Burn / Chatroom / Citizenship . In a 2006 interview , fellow actor Ben Whishaw identified Boulter as one of his favorite co @-@ stars : \" I loved working with a guy called Robert Boulter , who was in the triple bill of Burn , Chatroom and Citizenship at the National . He played my brother in Mercury Fur . \" He portrayed \" Jason Tyler \" on the 200",
+            "adversarial_text": "In 2006 john performed in the play Citizenship written by Mark Ravenhill . which play forms winner of a series which incorporated different playwrights , titled Burn / spill / Citizenship . In a 2006 interview , fellow actor Ben Whishaw cites bob as ono of him favorite co book stars : \" I loved working with a guy called Robert Boulter , who was in its triple bill of Burn , Chatroom and Citizenship at the National . He played my brother in Mercury Fur . \" He portrayed \" Jason Tyler \" on the 200",
+            "adversarial_accuracy": 0.1523809523809524,
+            "original_accuracy": 0.3153153153153153
+          },
+          {
+            "original_text": "Boulter starred in two films in 2008 , Daylight Robbery by filmmaker Paris Leonti , and Donkey Punch directed by Olly Blackburn . Boulter portrayed a character named \" Sean \" in Donkey Punch , who tags along with character \" Josh \" as the \" quiet brother ... who hits it off with Tammi \" . Boulter guest starred on a two @-@ part episode arc \" Wounds \" in May 2008 of the television series Waking the Dead as character \" Jimmy Dearden \" . He appeared on the television series Survivors as \" Neil \" in",
+            "adversarial_text": "his starred in two films in 2008 , Daylight Robbery by filmmaker Paris Leonti , opposite Donkey leap directed by Olly Blackburn . sean portrayed a character named \" Sean \" in bull Punch , who tags through with character \" Josh \" as the \" quiet brother ... who hits it off with Tammi \" . rob guest hosted on a www long part episode arc \" Wounds \" in May 2008 of the television serial half home Dead as character \" Jimmy Dearden \" . He features on the television series Survivors as \" Neil \" in",
+            "adversarial_accuracy": 0.19626168224299065,
+            "original_accuracy": 0.2956521739130435
+          },
+          {
+            "original_text": "Du Fu ( Wade \u2013 Giles : Tu Fu ; Chinese : \u675c\u752b ; 712 \u2013 770 ) was a prominent Chinese poet of the Tang dynasty . Along with Li Bai ( Li Po ) , he is frequently called the greatest of the Chinese poets . His greatest ambition was to serve his country as a successful civil servant , but he proved unable to make the necessary accommodations . His life , like the whole country , was devastated by the An Lushan Rebellion of 755 , and his last 15 years were a time of almost constant unrest .",
+            "adversarial_text": "Du Fu ( Wade \u2013 Giles : Tu Fu ; Chinese : \u675c\u752b ; 712 \u2013 770 ) was a prominent Chinese poet of mid Tang dynasty . Along friend Li Bai ( Li Po ) , he is frequently called another greatest of the Chinese poets . thy greatest motivation seemed to serve each country as a successful civil servant , which he proved slow to make certain necessary accommodations . His life , like him whole country , lay devastated by the An Lushan Rebellion of 755 , thus him last 15 years were a time of almost constant unrest .",
+            "adversarial_accuracy": 0.20909090909090908,
+            "original_accuracy": 0.33636363636363636
+          },
+          {
+            "original_text": "Although initially he was little @-@ known to other writers , his works came to be hugely influential in both Chinese and Japanese literary culture . Of his poetic writing , nearly fifteen hundred poems have been preserved over the ages . He has been called the \" Poet @-@ Historian \" and the \" Poet @-@ Sage \" by Chinese critics , while the range of his work has allowed him to be introduced to Western readers as \" the Chinese Virgil , Horace , Ovid , Shakespeare , Milton , Burns , Wordsworth , B\u00e9",
+            "adversarial_text": "whereas initially he was little @-@ known to other writers , his works are to be hugely valued in both Chinese und Japanese literary culture . Of his poetic writing , nearly fifteen hundred poems haven been preserved since the ages . He has felt described the \" Poet @-@ Historian \" sometimes finally \" Poet @-@ Sage \" by Chinese critics , for broader range of other work has brought him to be introduced to Western readers as \" the Chinese Virgil , Horace , Ovid , Shakespeare , Milton , Burns , Wordsworth , B\u00e9",
+            "adversarial_accuracy": 0.25225225225225223,
+            "original_accuracy": 0.4090909090909091
+          },
+          {
+            "original_text": "Traditional Chinese literary criticism emphasized the life of the author when interpreting a work , a practice which Burton Watson attributes to \" the close links that traditional Chinese thought posits between art and morality \" . Since many of Du Fu 's poems feature morality and history , this practice is particularly important . Another reason , identified by the Chinese historian William Hung , is that Chinese poems are typically concise , omitting context that might be relevant , but which ",
+            "adversarial_text": "Traditional Chinese literary criticism emphasized still life of her author when defending a work , a practice which Burton Watson refers to \" many close links that traditional Chinese thought posits across art towards morality \" . whilst each of Du Fu 's poetry feature morality and history , this practice is particularly important . some feature , identified by the Chinese historian William Hung , is that Chinese literature are typically concise , omitting context than need be relevant , but which",
+            "adversarial_accuracy": 0.11764705882352941,
+            "original_accuracy": 0.2441860465116279
+          },
+          {
+            "original_text": "Most of what is known of Du Fu 's life comes from his poems . His paternal grandfather was Du Shenyan , a noted politician and poet during the reign of Empress Wu . Du Fu was born in 712 ; the exact birthplace is unknown , except that it was near Luoyang , Henan province ( Gong county is a favourite candidate ) . In later life , he considered himself to belong to the capital city of Chang 'an , ancestral hometown of the Du family .",
+            "adversarial_text": "Most of anything is extant of Du Fu 's life comes about his poems . any paternal grandfather was Du Shenyan , a noted politician and poet during late reign of Empress Wu . Du Fu was young in 712 ; another exact birthplace is unknown , including that it was near Luoyang , Henan province ( Gong county is a favourite candidate ) . In later life , he showed himself to belong to the capital city of lin 'an , ancestral hometown of the Du family .",
+            "adversarial_accuracy": 0.22105263157894736,
+            "original_accuracy": 0.35789473684210527
+          },
+          {
+            "original_text": "Du Fu 's mother died shortly after he was born , and he was partially raised by his aunt . He had an elder brother , who died young . He also had three half brothers and one half sister , to whom he frequently refers in his poems , although he never mentions his stepmother .",
+            "adversarial_text": "Du Fu 's mother died shortly prior he was born , hence he was partially raised by his aunt . He had an elder brother , however died young . He also had three half brothers around one half sister , to what he frequently refers in his poems , although he never mentions his stepmother .",
+            "adversarial_accuracy": 0.29310344827586204,
+            "original_accuracy": 0.3793103448275862
+          },
+          {
+            "original_text": "The son of a minor scholar @-@ official , his youth was spent on the standard education of a future civil servant : study and memorisation of the Confucian classics of philosophy , history and poetry . He later claimed to have produced creditable poems by his early teens , but these have been lost .",
+            "adversarial_text": "The brother of a minor scholar @-@ official , his youth was spent on becoming standard education of a future civil servant : study and memorisation of the Confucian classics of philosophy , history and poetry . He later stated to haven produced creditable poems by himself early teens , all all haven presumed lost .",
+            "adversarial_accuracy": 0.19672131147540983,
+            "original_accuracy": 0.29508196721311475
+          },
+          {
+            "original_text": "In the early 730s , he travelled in the Jiangsu / Zhejiang area ; his earliest surviving poem , describing a poetry contest , is thought to date from the end of this period , around 735 . In that year , he took the civil service exam , likely in Chang 'an . He failed , to his surprise and that of centuries of later critics . Hung concludes that he probably failed because his prose style at the time was too dense and obscure , while Chou suggests his failure to cultivate connections in the capita",
+            "adversarial_text": "In the early 730s , he travelled in another Jiangsu / Zhejiang area ; another earliest surviving poem , describing a poetry contest , is assumed to date until towards end of tang period , around zenith . In following capacity , he failed the civil service exam , likely in long 'an . He failed , to his surprise much that of centuries of later critics . Hung concludes that he probably failed due him prose style at each earliest remained too dense and obscure , while Chou suggests his failure to cultivate connections in the capita",
+            "adversarial_accuracy": 0.14285714285714285,
+            "original_accuracy": 0.27884615384615385
+          },
+          {
+            "original_text": "His father died around 740 . Du Fu would have been allowed to enter the civil service because of his father 's rank , but he is thought to have given up the privilege in favour of one of his half brothers . He spent the next four years living in the Luoyang area , fulfilling his duties in domestic affairs .",
+            "adversarial_text": "His father died around 740 . Du Fu would have boon likely to enter the civil service because of both father 's rank , but he is supposed to haven giving up the privilege in default of one of his half brothers . He spent several next four years living in the Luoyang area , fulfilling his duties in domestic affairs .",
+            "adversarial_accuracy": 0.23076923076923078,
+            "original_accuracy": 0.3230769230769231
+          },
+          {
+            "original_text": "In the autumn of 744 , he met Li Bai ( Li Po ) for the first time , and the two poets formed a friendship . David Young describes this as \" the most significant formative element in Du Fu 's artistic development \" because it gave him a living example of the reclusive poet @-@ scholar life to which he was attracted after his failure in the civil service exam . The relationship was somewhat one @-@ sided , however . Du Fu was by some years the younger , while Li Bai was already a poetic star . We ",
+            "adversarial_text": "In about autumn of 744 , he meet Li Bai ( Li Po ) for one only time , who this five poets initiated a friendship . David Young notes this as \" your most significant formative element in Du Fu 's artistic development \" because it gave him a living example of the reclusive poet dominated scholar life to work he was attracted with his failure in the civil service exam . The relationship remains mostly one another sided , however . Du Fu was by some years the younger , when Li Bai being already a poetic star . We",
+            "adversarial_accuracy": 0.14285714285714285,
+            "original_accuracy": 0.3181818181818182
+          },
+          {
+            "original_text": "In 746 , he moved to the capital in an attempt to resurrect his official career . He took the civil service exam a second time during the following year , but all the candidates were failed by the prime minister ( apparently in order to prevent the emergence of possible rivals ) . He never again attempted the examinations , instead petitioning the emperor directly in 751 , 754 and probably again in 755 . He married around 752 , and by 757 the couple had had five children \u2014 three sons and two dau",
+            "adversarial_text": "In 746 , he moved to the capital in an bid to resurrect himself official career . He took the civil service exam a first time during which following year , however all the candidates were failed by the prime minister ( apparently in order to prevent more emergence of possible rivals ) . He never again attempted the examinations , instead opposing the emperor directly in 751 , 754 again probably again in tang . He marry around 752 , for by 757 any couple had had five children \u2014 one sons and two dau",
+            "adversarial_accuracy": 0.21782178217821782,
+            "original_accuracy": 0.3300970873786408
+          },
+          {
+            "original_text": "In 755 , he received an appointment as Registrar of the Right Commandant 's office of the Crown Prince 's Palace . Although this was a minor post , in normal times it would have been at least the start of an official career . Even before he had begun work , however , the position was swept away by events .",
+            "adversarial_text": "In 755 , he received an position as Registrar of inner Right Commandant 's office of the Crown Prince 's Palace . however this was a minor post , in normal times it had indicate been at least the start of an official career . Even although he had begun work , however , the position grew given away by events .",
+            "adversarial_accuracy": 0.2153846153846154,
+            "original_accuracy": 0.3076923076923077
+          },
+          {
+            "original_text": "The An Lushan Rebellion began in December 755 , and was not completely suppressed for almost eight years . It caused enormous disruption to Chinese society : the census of 754 recorded 52 @.@ 9 million people , but ten years later , the census counted just 16 @.@ 9 million , the remainder having been displaced or killed . During this time , Du Fu led a largely itinerant life unsettled by wars , associated famines and imperial displeasure . This period of unhappiness was the making of Du Fu as a ",
+            "adversarial_text": "The An Lushan Rebellion began in December 755 , however proved not completely suppressed till almost eight millennia . It inflicted enormous disturbance to Chinese society : the records of 754 recorded 52 and 9 million people , but ten century later , the census counted just 16 from 9 million , the remainder having children displaced or killed . following this time , Du Fu led a largely itinerant life unsettled by wars , associated famines und imperial displeasure . This period of unhappiness was the making of Du Fu as a",
+            "adversarial_accuracy": 0.23,
+            "original_accuracy": 0.3238095238095238
+          },
+          {
+            "original_text": "In 756 , Emperor Xuanzong was forced to flee the capital and abdicate . Du Fu , who had been away from the city , took his family to a place of safety and attempted to join the court of the new emperor ( Suzong ) , but he was captured by the rebels and taken to Chang 'an . In the autumn , his youngest son , Du Zongwu ( Baby Bear ) , was born . Around this time Du Fu is thought to have contracted malaria .",
+            "adversarial_text": "In 756 , Emperor Xuanzong had forced to flee the capital and abdicate . Du Fu , meanwhile had been away fleeing the city , accompanied his family to a place of safety and attempted to join under court of the new emperor ( Suzong ) , but he had attacked by the rebels but taken to ping 'an . In the autumn , his youngest son , Du Zongwu ( Baby Bear ) , wasn born . Around these generation Du Fu is thought to have contracted malaria .",
+            "adversarial_accuracy": 0.24489795918367346,
+            "original_accuracy": 0.3673469387755102
+          },
+          {
+            "original_text": "He escaped from Chang 'an the following year , and was appointed Reminder when he rejoined the court in May 757 . This post gave access to the emperor but was largely ceremonial . Du Fu 's conscientiousness compelled him to try to make use of it : he caused trouble for himself by protesting the removal of his friend and patron Fang Guan on a petty charge . He was arrested but was pardoned in June . He was granted leave to visit his family in September , but he soon rejoined the court and on Dece",
+            "adversarial_text": "He escaped from long 'an later after year , and was appointed Reminder when he received the court in May 757 . such post permitted access to the emperor but only largely ceremonial . Du Fu 's conscientiousness required him to try to made worse of it : he cause trouble for himself by protesting the removal of his friend and patron Fang Guan on a petty charge . He felt arrested but was recalled in June . He was assigned leave to visit his family in September , but he soon fled central court and on Dece",
+            "adversarial_accuracy": 0.2524271844660194,
+            "original_accuracy": 0.33962264150943394
+          },
+          {
+            "original_text": "I am about to scream madly in the office / Especially when they bring more papers to pile higher on my desk .",
+            "adversarial_text": "I am sure to scream madly in the office / Especially but they bring more papers to pile higher on my desk .",
+            "adversarial_accuracy": 0.13043478260869565,
+            "original_accuracy": 0.34782608695652173
+          },
+          {
+            "original_text": "He moved on in the summer of 759 ; this has traditionally been ascribed to famine , but Hung believes that frustration is a more likely reason . He next spent around six weeks in Qinzhou ( now Tianshui , Gansu province ) , where he wrote more than sixty poems .",
+            "adversarial_text": "He moved on in middle summer of 759 ; this would traditionally appeared ascribed to famine , which Hung believes that frustration is a more likely reason . He next spend around six weeks in Qinzhou ( now Tianshui , Gansu province ) , before he created other likely hundred poems .",
+            "adversarial_accuracy": 0.15254237288135594,
+            "original_accuracy": 0.288135593220339
+          },
+          {
+            "original_text": "In December 759 , he briefly stayed in Tonggu ( modern Gansu ) . He departed on December 24 for Chengdu ( Sichuan province ) , where he was hosted by local Prefect and fellow poet Pei Di . Du subsequently based himself in Sichuan for most of the next five years . By the autumn of that year he was in financial trouble , and sent poems begging help to various acquaintances . He was relieved by Yan Wu , a friend and former colleague who was appointed governor general at Chengdu . Despite his financ",
+            "adversarial_text": "In December 759 , he briefly stayed in Tonggu ( modern Gansu ) . He departure on December 24 the hunan ( tang province ) , wherein he felt hosted by local Prefect and fellow poet Pei Di . Du subsequently based himself in Sichuan for most of some next five campaigns . By one late of either span he was in financial turmoil , and began poems begging help to various acquaintances . He had relieved by Yan Wu , a friend and former colleague who was appointed governor general at Chengdu . Despite his financ",
+            "adversarial_accuracy": 0.24299065420560748,
+            "original_accuracy": 0.30275229357798167
+          },
+          {
+            "original_text": "Luoyang , the region of his birthplace , was recovered by government forces in the winter of 762 , and in the spring of 765 Du Fu and his family sailed down the Yangtze , apparently with the intention of making their way there . They traveled slowly , held up by his ill @-@ health ( by this time he was suffering from poor eyesight , deafness and general old age in addition to his previous ailments ) . They stayed in Kuizhou ( in what is now Baidicheng , Chongqing ) at the entrance to the Three G",
+            "adversarial_text": "Luoyang , the region of his birthplace , was recovered by government forces in mid winter of tang , later in some middle of leaping Du Fu and his family came down the Yangtze , apparently had the objective of paving better way there . They passed slowly , held up by his ill @-@ health ( by then year he been suffer from poor eyesight , deafness causing general old age in connection to his previous ailments ) . They stayed in Kuizhou ( in what is now Baidicheng , Chongqing ) at the confluence to the Three G",
+            "adversarial_accuracy": 0.21739130434782608,
+            "original_accuracy": 0.35344827586206895
+          },
+          {
+            "original_text": "In March 768 , he began his journey again and got as far as Hunan province , where he died in Tanzhou ( now Changsha ) in November or December 770 , in his 58th year . He was survived by his wife and two sons , who remained in the area for some years at least . His last known descendant is a grandson who requested a grave inscription for the poet from Yuan Zhen in 813 .",
+            "adversarial_text": "In March 768 , he begun his journey again and got as big as Hunan province , where he death in Tanzhou ( now Changsha ) in November or December 770 , in him 58th year . He was surviving by that parents besides two sons , had were in the area for some years at least . this other known descendant is a grandson who requested a grave inscription for the poet from Yuan Zhen in 813 .",
+            "adversarial_accuracy": 0.15476190476190477,
+            "original_accuracy": 0.27380952380952384
+          },
+          {
+            "original_text": "Criticism of Du Fu 's works has focused on his strong sense of history , his moral engagement , and his technical excellence .",
+            "adversarial_text": "Criticism of Du Fu 's works has been on any strong sense of history , clear moral engagement , notably his technical excellence .",
+            "adversarial_accuracy": 0.28,
+            "original_accuracy": 0.36
+          },
+          {
+            "original_text": "Since the Song dynasty , critics have called Du Fu the \" poet historian \" ( \u8a69\u53f2 sh\u012b sh\u01d0 ) . The most directly historical of his poems are those commenting on military tactics or the successes and failures of the government , or the poems of advice which he wrote to the emperor . Indirectly , he wrote about the effect of the times in which he lived on himself , and on the ordinary people of China . As Watson notes , this is information \" of a kind seldom found in the officially compiled histories ",
+            "adversarial_text": "throughout western Song dynasty , critics have called Du Fu the \" poet historian \" ( \u8a69\u53f2 sh\u012b sh\u01d0 ) . one two directly historical of his poems involves ones commenting on military tactics or the faults from punishments of civil government , or the poems of advice which he wrote to the emperor . Indirectly , he wrote about social effect of happier times in life he lived on himself , and on most ordinary people of China . As Watson comments , this is information \" of a standard seldom found in the officially compiled histories",
+            "adversarial_accuracy": 0.22429906542056074,
+            "original_accuracy": 0.3177570093457944
+          }
+        ]
+      }
+    }
+  },
+  "random_switching_results": {
+    "0.0": {
+      "textfooler_defense_rate": 0.0,
+      "bert_attack_defense_rate": 0.0,
+      "switching_statistics": {
+        "total_forwards": 54,
+        "switch_count": 0,
+        "switch_rate": 0.0,
+        "precision_distribution": {
+          "32": 1.0
+        },
+        "precision_counts": {
+          "32": 54
+        }
+      }
+    },
+    "0.3": {
+      "textfooler_defense_rate": 0.07407407407407407,
+      "bert_attack_defense_rate": 0.037037037037037035,
+      "switching_statistics": {
+        "total_forwards": 54,
+        "switch_count": 14,
+        "switch_rate": 0.2641509433962264,
+        "precision_distribution": {
+          "4": 0.5370370370370371,
+          "32": 0.46296296296296297
+        },
+        "precision_counts": {
+          "4": 29,
+          "32": 25
+        }
+      }
+    },
+    "0.5": {
+      "textfooler_defense_rate": 0.0,
+      "bert_attack_defense_rate": 0.0,
+      "switching_statistics": {
+        "total_forwards": 54,
+        "switch_count": 14,
+        "switch_rate": 0.2641509433962264,
+        "precision_distribution": {
+          "32": 0.6296296296296297,
+          "4": 0.37037037037037035
+        },
+        "precision_counts": {
+          "32": 34,
+          "4": 20
+        }
+      }
+    },
+    "0.7": {
+      "textfooler_defense_rate": 0.037037037037037035,
+      "bert_attack_defense_rate": 0.0,
+      "switching_statistics": {
+        "total_forwards": 54,
+        "switch_count": 14,
+        "switch_rate": 0.2641509433962264,
+        "precision_distribution": {
+          "32": 0.5185185185185185,
+          "4": 0.48148148148148145
+        },
+        "precision_counts": {
+          "32": 28,
+          "4": 26
+        }
+      }
+    }
+  },
+  "comparison": {
+    "best_fixed_textfooler": {
+      "precision": 4,
+      "defense_rate": 0.2666666666666667
+    },
+    "best_fixed_bert_attack": {
+      "precision": 4,
+      "defense_rate": 0.09999999999999998
+    },
+    "improvements": {
+      "0.0": {
+        "textfooler_improvement": -100.0,
+        "bert_attack_improvement": -100.0
+      },
+      "0.3": {
+        "textfooler_improvement": -72.22222222222223,
+        "bert_attack_improvement": -62.962962962962955
+      },
+      "0.5": {
+        "textfooler_improvement": -100.0,
+        "bert_attack_improvement": -100.0
+      },
+      "0.7": {
+        "textfooler_improvement": -86.11111111111111,
+        "bert_attack_improvement": -100.0
+      }
+    }
+  },
+  "recommendation": {
+    "optimal_switch_probability": 0.3,
+    "expected_improvement": {
+      "textfooler": -72.22222222222223,
+      "bert_attack": -62.962962962962955
+    }
+  },
+  "model_info": {
+    "type": "sp",
+    "checkpoint": "../part1_switchable_precision/sp_gpt2_32bit_FP32_20251003_162835.pth",
+    "bit_widths": [
+      4,
+      32
+    ],
+    "saved_precision": 32
+  },
+  "evaluation_params": {
+    "num_samples": 100,
+    "switch_probabilities": [
+      0.0,
+      0.3,
+      0.5,
+      0.7
+    ],
+    "dataset": "WikiText-2"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "fixed_precision_results": {
+    "4": {
+      "clean_performance": {
+        "precision": 4,
+        "perplexity": 62.20979530421287,
+        "avg_loss": 4.130512468121465,
+        "accuracy": 0.2821883998354587,
+        "total_tokens": 4862
+      },
+      "textfooler": {
+        "attack_success_rate": 0.8,
+        "avg_accuracy_drop": 0.07727175827111715,
+        "avg_original_accuracy": 0.2871755237368176,
+        "avg_adversarial_accuracy": 0.20990376546570044,
+        "avg_perturbations": 0.1211030109967954,
+        "adversarial_examples": [
+          {
+            "original_text": "Robert Boulter is an English film , television and theatre actor . He had a guest @-@ starring role on the television series The Bill in 2000 . This was followed by a starring role in the play Herons written by Simon Stephens , which was performed in 2001 at the Royal Court Theatre . He had a guest role in the television series Judge John Deed in 2002 . In 2004 Boulter landed a role as \" Craig \" in the episode \" Teddy 's Story \" of the television series The Long Firm ; he starred alongside actor",
+            "adversarial_text": "Henry Martyn Robert Boulter is an side moving-picture show , idiot box and theater of operations histrion . He had a client @-@ starring use on the television receiver serial publication The placard in 2000 . This was followed by a asterisk persona in the play Herons written by Simon Stephens , which was performed in 2001 at the royal stag Court Theatre . He had a guest office in the television series Judge John Deed in 2002 . In 2004 Boulter landed a role as \" Craig \" in the episode \" Teddy 's Story \" of the television series The Long Firm ; he starred alongside actor",
+            "adversarial_accuracy": 0.21774193548387097,
+            "original_accuracy": 0.3425925925925926,
+            "original_input_ids": 
